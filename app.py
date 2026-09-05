@@ -1,6 +1,8 @@
 
 """
-Omega Ice - Cloud Website Version (Render.com) - WITH EDIT MODE
+Omega Ice - Cloud Website Version (Render.com)
+Free hosting - no Pydroid3 needed
+Firebase: https://moises-92842-default-rtdb.asia-southeast1.firebasedatabase.app
 """
 
 import os, requests
@@ -15,6 +17,7 @@ FIREBASE_URL = "https://moises-92842-default-rtdb.asia-southeast1.firebasedataba
 KG_OPTIONS = ["1Kg", "5Kg", "10Kg", "25Kg"]
 FALLBACK_PRICES = {"1Kg": 10, "5Kg": 50, "10Kg": 100, "25Kg": 250}
 
+# --- Firebase helpers ---
 def fb_get(path):
     try:
         r = requests.get(f"{FIREBASE_URL}/{path}.json", timeout=10)
@@ -126,10 +129,10 @@ CASHIER_HTML = """<!DOCTYPE html>
   .kg-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:4px} .kg-row button{padding:10px 0;border-radius:8px;border:1px solid #ccd;background:#f5f5f5;font-size:13px} .kg-row button.active{background:#0096D6;color:#fff;border-color:#0096D6}
   .total-row{display:flex;justify-content:space-between;align-items:baseline;margin:16px 0 4px;font-size:14px;color:#444} .total-row .amount{font-size:24px;font-weight:600;color:#00609C}
   .save-btn{width:100%;padding:14px;margin-top:12px;background:#00609C;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600}
-  #resellerResults{border:1px solid #ddd;border-radius:8px;margin-top:4px;max-height:160px;overflow-y:auto;display:none;background:#fff}
-  #resellerResults div{padding:8px 10px;font-size:13px;border-bottom:1px solid #eee}
+  #resellerResults{border:1px solid #ddd;border-radius:8px;margin-top:4px;max-height:160px;overflow-y:auto;display:none;background:#fff;position:relative;z-index:10}
+  #resellerResults div{padding:10px;font-size:14px;border-bottom:1px solid #eee;cursor:pointer} #resellerResults div:hover{background:#f0f8ff}
   .status{font-size:13px;text-align:center;margin-top:8px;min-height:18px} .status.ok{color:#1a8a4a} .status.err{color:#c73333}
-  table{width:100%;border-collapse:collapse;font-size:12px} th,td{text-align:left;padding:6px 4px;border-bottom:1px solid #eee} th{color:#888;font-weight:500} .del-btn{background:none;border:none;color:#c0392b;font-size:12px} .edit-btn{background:none;border:none;color:#0096D6;font-size:12px;margin-right:4px}
+  table{width:100%;border-collapse:collapse;font-size:12px} th,td{text-align:left;padding:6px 4px;border-bottom:1px solid #eee} th{color:#888;font-weight:500} .del-btn{background:none;border:none;color:#c0392b;font-size:12px}
   .cloud-badge{position:fixed;top:10px;right:10px;z-index:9999;padding:6px 10px;border-radius:20px;font-size:11px;background:#00aa44;color:white}
 </style>
 </head>
@@ -143,13 +146,11 @@ CASHIER_HTML = """<!DOCTYPE html>
   <label>Size</label><div class="kg-row">{% for kg in kg_options %}<button data-kg="{{ kg }}" onclick="setKg('{{ kg }}')" class="{{ 'active' if loop.first else '' }}">{{ kg }}</button>{% endfor %}</div>
   <label>Quantity</label><input type="number" id="qtyInput" value="1" min="1" oninput="updateTotal()">
   <div class="total-row"><span>Total</span><span class="amount" id="totalAmount">₱0</span></div>
-  <button class="save-btn" id="saveBtn" onclick="saveSale()">Save sale</button>
-  <button class="save-btn" id="cancelEditBtn" style="display:none; background:#999; margin-top:6px;" onclick="cancelEdit()">Cancel edit</button>
-  <p class="status" id="statusMsg"></p>
+  <button class="save-btn" id="saveBtn" onclick="saveSale()">Save sale</button><p class="status" id="statusMsg"></p>
 </div>
 <div class="card"><label style="margin-top:0;">Recent sales (Live from Cloud)</label><table><thead><tr><th>Date</th><th>Reseller</th><th>Qty</th><th>Size</th><th>Total</th><th></th></tr></thead><tbody id="recentBody"></tbody></table></div>
 <script>
-let mode='DELIVER'; let payment='Cash'; let kg='{{ kg_options[0] }}'; let selectedReseller=null; let unitPrice=0; let editingSaleId=null;
+let mode='DELIVER'; let payment='Cash'; let kg='{{ kg_options[0] }}'; let selectedReseller=null; let unitPrice=0;
 function setMode(m){mode=m; document.getElementById('modeDeliver').classList.toggle('active',m==='DELIVER'); document.getElementById('modePickup').classList.toggle('active',m==='PICKUP'); updateTotal();}
 function setPayment(p){payment=p; document.getElementById('payCash').classList.toggle('active',p==='Cash'); document.getElementById('payCredit').classList.toggle('active',p==='Credit');}
 function setKg(k){kg=k; document.querySelectorAll('.kg-row button').forEach(b=>b.classList.toggle('active',b.dataset.kg===k)); updateTotal();}
@@ -157,35 +158,27 @@ async function updateTotal(){const res=await fetch(`/api/price?kg=${kg}&mode=${m
 const resellerInput=document.getElementById('resellerInput'); const resultsBox=document.getElementById('resellerResults');
 resellerInput.addEventListener('input', async ()=>{
   selectedReseller=null; const q=resellerInput.value.trim(); if(!q){resultsBox.style.display='none';return;}
-  const res=await fetch(`/api/resellers?q=${encodeURIComponent(q)}`); const rows=await res.json(); if(!rows.length){resultsBox.style.display='none';return;}
+  try{const res=await fetch(`/api/resellers?q=${encodeURIComponent(q)}`); const rows=await res.json(); if(!rows.length){resultsBox.style.display='none';return;}
   resultsBox.innerHTML=rows.map(r=>`<div class="res-item" data-id="${r.id}" data-name="${r.store_name.replace(/"/g,'&quot;')}">${r.store_name}</div>`).join(''); resultsBox.style.display='block';
-  resultsBox.querySelectorAll('.res-item').forEach(el=>{el.addEventListener('click',()=>{pickReseller(el.getAttribute('data-id'),el.getAttribute('data-name'));});});
+  resultsBox.querySelectorAll('.res-item').forEach(el=>{el.addEventListener('click',()=>{pickReseller(el.getAttribute('data-id'),el.getAttribute('data-name'));});});}catch(e){resultsBox.style.display='none';}
 });
+document.addEventListener('click',(e)=>{if(!resellerInput.contains(e.target)&&!resultsBox.contains(e.target)){resultsBox.style.display='none';}});
 function pickReseller(id,name){selectedReseller={id,name}; resellerInput.value=name; resultsBox.style.display='none';}
 async function saveSale(){
   const qty=parseInt(document.getElementById('qtyInput').value)||0; const name=resellerInput.value.trim(); const statusEl=document.getElementById('statusMsg');
   if(!name||qty<=0){statusEl.textContent='Enter reseller name and quantity'; statusEl.className='status err'; return;}
   const payload={reseller_id:selectedReseller?selectedReseller.id:null,reseller_name:name,quantity:qty,kg_size:kg,mode:mode,payment:payment};
-  const url = editingSaleId ? `/api/sale/${editingSaleId}` : '/api/sale';
-  const method = editingSaleId ? 'PUT' : 'POST';
-  statusEl.textContent= editingSaleId ? 'Updating...' : 'Saving...';
-  const res=await fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  statusEl.textContent='Saving...'; statusEl.className='status';
+  const res=await fetch('/api/sale',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const data=await res.json();
-  if(data.ok){statusEl.textContent= editingSaleId ? `Updated — total ₱${data.total} ☁️` : `Saved — total ₱${data.total} ☁️`; statusEl.className='status ok'; cancelEdit(); loadRecent();}
-  else{statusEl.textContent=data.error||'Error'; statusEl.className='status err';}
+  if(data.ok){statusEl.textContent=`Saved — total ₱${data.total} ☁️`; statusEl.className='status ok'; resellerInput.value=''; selectedReseller=null; document.getElementById('qtyInput').value=1; updateTotal(); loadRecent();}
+  else{statusEl.textContent=data.error||'Error saving'; statusEl.className='status err';}
 }
-async function editSale(id){
-  const res=await fetch(`/api/sale/${id}`); const data=await res.json(); if(!data.ok) return alert('Cannot edit');
-  const s=data.sale; editingSaleId=id; resellerInput.value=s.reseller_name; selectedReseller=s.reseller_id?{id:s.reseller_id,name:s.reseller_name}:null;
-  document.getElementById('qtyInput').value=s.quantity; setMode(s.mode); setPayment(s.payment); setKg(s.kg_size);
-  document.getElementById('saveBtn').textContent='Update sale'; document.getElementById('cancelEditBtn').style.display='block'; window.scrollTo({top:0,behavior:'smooth'});
-}
-function cancelEdit(){editingSaleId=null; resellerInput.value=''; selectedReseller=null; document.getElementById('qtyInput').value=1; document.getElementById('saveBtn').textContent='Save sale'; document.getElementById('cancelEditBtn').style.display='none'; updateTotal();}
 async function loadRecent(){
   const res=await fetch('/api/sales/recent'); const rows=await res.json();
   document.getElementById('recentBody').innerHTML=rows.map(r=>{
     let dateStr=r.sales_date||''; if(dateStr.includes('-')){let parts=dateStr.split(' ')[0].split('-'); if(parts.length>=3) dateStr=parts[1]+'/'+parts[2];}
-    return `<tr><td style="font-size:11px;color:#666;white-space:nowrap;">${dateStr}</td><td>${r.reseller_name}</td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td><button class="edit-btn" onclick="editSale('${r.id}')">Edit</button><button class="del-btn" onclick="deleteSale('${r.id}')">Del</button></td></tr>`;
+    return `<tr><td style="font-size:11px;color:#666;white-space:nowrap;">${dateStr}</td><td>${r.reseller_name}</td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td><button class="del-btn" onclick="deleteSale('${r.id}')">Del</button></td></tr>`;
   }).join('');
 }
 async function deleteSale(id){if(!confirm('Delete this sale?'))return; await fetch(`/api/sale/${id}`,{method:'DELETE'}); loadRecent();}
@@ -292,34 +285,6 @@ def api_create_sale():
             fb_patch(f"resellers/{reseller_id}", {"credit_balance": cur + total})
     fb_post("staff_logs", {"log_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "staff_name": session.get("staff_name"), "action": "SALE", "reseller_name": reseller_name, "qty": qty, "total": total})
     return jsonify({"ok": True, "total": total, "unit_price": unit_price, "firebase_key": result.get("name") if result else None})
-
-@app.route("/api/sale/<sale_id>", methods=["GET"])
-@login_required
-def api_get_sale(sale_id):
-    data = fb_get(f"daily_sales/{sale_id}")
-    if data:
-        return jsonify({"ok": True, "sale": {"id": sale_id, "reseller_id": data.get("reseller_id"), "reseller_name": data.get("reseller_name"), "quantity": data.get("quantity"), "kg_size": data.get("kg_size"), "mode": data.get("mode", "DELIVER"), "payment": data.get("payment", "Cash")}})
-    return jsonify({"ok": False, "error": "Not found"}), 404
-
-@app.route("/api/sale/<sale_id>", methods=["PUT"])
-@login_required
-def api_update_sale(sale_id):
-    d = request.json or {}
-    qty = int(d.get("quantity",1))
-    kg_size = d.get("kg_size","1Kg")
-    mode = d.get("mode","DELIVER")
-    payment = d.get("payment","Cash")
-    reseller_name = d.get("reseller_name","").strip()
-    reseller_id = d.get("reseller_id")
-    if not reseller_name or qty<=0:
-        return jsonify({"ok":False,"error":"Missing"}),400
-    unit_price = get_price(kg_size, mode)
-    total = round(unit_price*qty,2)
-    existing = fb_get(f"daily_sales/{sale_id}")
-    if not existing:
-        return jsonify({"ok":False,"error":"Not found"}),404
-    fb_patch(f"daily_sales/{sale_id}", {"reseller_name": reseller_name, "reseller_id": reseller_id, "quantity": qty, "kg_size": kg_size, "mode": mode, "payment": payment, "payment_mode": payment, "delivery_mode": mode, "total_sales": total, "unit_price": unit_price})
-    return jsonify({"ok": True, "total": total, "unit_price": unit_price})
 
 @app.route("/api/sales/recent")
 @login_required
