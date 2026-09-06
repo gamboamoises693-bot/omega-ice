@@ -119,16 +119,15 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 <div class="topbar"><h1>OMEGA PURIFIED ICE</h1><div style="display:flex;align-items:center;gap:10px"><span class="staff">{{ staff_name }}</span><button class="logout" onclick="logout()">Logout</button></div></div>
 <div class="one-row">
   <span class="cloud-badge online" id="onlineBadge">● Online</span>
-  <a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444;position:relative">🔴 Live Orders <span id="liveOrdersCount" style="background:#fff;color:#ff4444;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;display:none">0</span></a>
   <span class="cloud-badge pending" id="pendingBadge" style="display:none" onclick="syncOffline()">0 Pending</span>
   <a href="/cashier" class="nav-pill active">Sales</a>
   <a href="/machines" class="nav-pill">Machines</a>
-  <a href="/dashboard" class="nav-pill">Dashboard</a><button onclick="resetTodayDashboard()" style="margin-left:6px;padding:4px 10px;border-radius:12px;border:none;background:#ef4444;color:#fff;font-size:11px">🗑️ Reset Today</button>
+  <a href="/dashboard" class="nav-pill">Dashboard</a>
 </div>
 <div class="today-card">
   <div style="display:flex;justify-content:space-between;align-items:center;">
     <div><div style="font-size:11px;opacity:.8;" id="todayLabel">TODAY'S SALES</div><div style="font-size:10px;opacity:.7;" id="todayDate">Loading...</div></div>
-    <button onclick="loadToday()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;">Refresh</button><button onclick="resetTodayData()" style="background:#ef4444;border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;margin-left:6px">🗑️ Reset Today</button>
+    <button onclick="loadToday()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;">Refresh</button>
   </div>
   <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
     <button class="period-btn active" data-period="daily" onclick="setCashierPeriod('daily')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.3);color:#fff;font-size:10px">Daily</button>
@@ -156,7 +155,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 <button class="save-btn" id="cancelEditBtn" style="display:none;background:#999;margin-top:6px" onclick="cancelEdit()">Cancel edit</button>
 <p class="status" id="statusMsg"></p>
 </div>
-<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><label style="font-weight:600;display:block">Recent sales - Status included</label><button onclick="loadRecent();loadToday();" style="padding:6px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px">🔄 Refresh (30s auto)</button></div>
+<div class="card"><label style="font-weight:600;margin-bottom:8px;display:block">Recent sales - Status included</label>
 <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
 <span style="font-size:10px;background:#dcfce7;color:#166534;padding:3px 8px;border-radius:10px">Delivered = Real Sales</span>
 <span style="font-size:10px;background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:10px">Pending = Not yet counted</span>
@@ -175,26 +174,6 @@ async function saveSale(){const qty=parseInt(document.getElementById('qtyInput')
 async function editSale(id){const res=await fetch(`/api/sale/${id}`);const data=await res.json();if(!data.ok)return alert('Cannot edit');const s=data.sale;editingSaleId=id;resellerInput.value=s.reseller_name;selectedReseller=s.reseller_id?{id:s.reseller_id,name:s.reseller_name}:null;document.getElementById('qtyInput').value=s.quantity;setMode(s.mode);setPayment(s.payment);setKg(s.kg_size);document.getElementById('saveBtn').textContent='Update';document.getElementById('cancelEditBtn').style.display='block';window.scrollTo({top:0,behavior:'smooth'})}
 function cancelEdit(){editingSaleId=null;resellerInput.value='';selectedReseller=null;document.getElementById('qtyInput').value=1;document.getElementById('saveBtn').textContent='Save sale';document.getElementById('cancelEditBtn').style.display='none';updateTotal()}
 function setCashierPeriod(p){cashierPeriod=p;document.querySelectorAll('.today-card .period-btn').forEach(b=>{const is=b.dataset.period===p;b.style.background=is?'rgba(255,255,255,.3)':'transparent';});loadToday();}
-async function fetchLiveOrdersCount(){
-  try{
-    const res = await fetch('/api/staff/customer_orders');
-    const data = await res.json();
-    const orders = data.orders||[];
-    // Count New Orders + Pending + Preparing + Out for Delivery (not Delivered/Cancelled)
-    const active = orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
-    const badge = document.getElementById('liveOrdersCount');
-    if(badge){
-      if(active>0){
-        badge.textContent = active;
-        badge.style.display = 'inline';
-      } else {
-        badge.style.display = 'none';
-      }
-    }
-  }catch(e){}
-}
-setInterval(fetchLiveOrdersCount, 30000);
-fetchLiveOrdersCount();
 async function loadToday(){
   try{
     const res=await fetch('/api/sales/dashboard?period='+cashierPeriod);
@@ -230,42 +209,8 @@ async function loadRecent(){
   }catch(e){document.getElementById('recentBody').innerHTML=`<tr><td colspan=7 style="color:#c0392b">Error: ${e.message} <a href="/login">Login</a></td></tr>`;}
 }
 async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sale/${id}`,{method:'DELETE'});loadRecent();loadToday();}
-async function resetTodayData(){
-  if(!confirm('🗑️ RESET TODAY?\n\nThis will DELETE ALL sales with date TODAY (2026-09-06) including your simulated delivered data!\n\nOnly ISESMO can do this.\n\nAre you sure? This cannot be undone!')) return;
-  if(!confirm('FINAL CONFIRM: Delete today\\'s data? Type OK')) return;
-  try{
-    const res = await fetch('/api/staff/reset_today', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
-    const data = await res.json();
-    if(data.ok){
-      alert(`✅ Deleted ${data.deleted} records from today (${data.date})! Dashboard reset!`);
-      loadToday(); loadRecent();
-    } else {
-      alert('Failed: '+(data.error||'Not allowed - Only ISESMO'));
-    }
-  }catch(e){alert('Error: '+e.message);}
-}
 async function logout(){await fetch('/api/logout',{method:'POST'});window.location.href='/login'}
-updateTotal();loadRecent();loadToday();setInterval(loadRecent,30000);setInterval(loadToday,30000);
-window.addEventListener('storage', (e)=>{
-  if(e.key==='omega_last_delivered'){
-    console.log('Detected delivery from orders page, refreshing sales...');
-    setTimeout(()=>{loadRecent();loadToday();}, 500);
-  }
-});
-// Also check every 5 sec for last delivered signal (for same-tab)
-setInterval(()=>{
-  const last = localStorage.getItem('omega_last_delivered');
-  if(last){
-    try{
-      const d = JSON.parse(last);
-      if(Date.now() - d.time < 35000){ // If delivered within last 35 sec
-        loadRecent();loadToday();
-        localStorage.removeItem('omega_last_delivered');
-      }
-    }catch{}
-  }
-}, 5000);
-
+updateTotal();loadRecent();loadToday();setInterval(loadRecent,5000);setInterval(loadToday,15000);
 </script>
 </body></html>
 """
@@ -377,15 +322,6 @@ def fb_put(path, data):
     except Exception as e:
         print(f"PUT {path} error: {e}")
     return None
-
-def fb_delete(path):
-    try:
-        r = requests.delete(f"{FIREBASE_URL}/{path}.json", timeout=10)
-        if r.status_code == 200:
-            return True
-    except Exception as e:
-        print(f"DELETE {path} error: {e}")
-    return False
 
 def fb_patch(path, data):
     try:
@@ -1720,15 +1656,7 @@ const resellerId="{{ reseller_id }}";
 async function loadOrders(){
   const res=await fetch(`/api/customer/${resellerId}/orders?show_archived=${showArchived?1:0}`);
   const data=await res.json();
-  const ordersRaw=data.orders||[];
-  // Sort: New Order on top, Delivered at bottom
-  const priority = {"New Order":0, "Pending":1, "Preparing":2, "Out for Delivery":3, "Delivered":4, "Cancelled":5};
-  const orders = ordersRaw.sort((a,b)=>{
-    const pa = priority[a.order_status] ?? 1;
-    const pb = priority[b.order_status] ?? 1;
-    if(pa!==pb) return pa-pb;
-    return (b.created_at||'').localeCompare(a.created_at||'');
-  });
+  const orders=data.orders||[];
   const stats=data.stats||{};
   document.getElementById('totalKg').textContent=(stats.total_kg||0).toLocaleString()+'kg';
   document.getElementById('totalPeso').textContent='₱'+(stats.total_peso||0).toLocaleString();
@@ -1762,7 +1690,7 @@ async function bulkUpdateAllToPreparing(){
   const data=await res.json();
   if(data.ok){alert(`Updated ${data.updated}`);loadOrders();}else{alert(data.error||'Failed');}
 }
-loadOrders();setInterval(loadOrders,30000);
+loadOrders();setInterval(loadOrders,3000);
 
 </script>
 </body></html>
@@ -1972,20 +1900,7 @@ def api_customer_orders(reseller_id):
             total_peso += peso
             status_counts[status] = status_counts.get(status,0)+1
             orders.append({"id": key, "sales_date": val.get("sales_date"), "quantity": qty, "kg_size": kg_size, "total_sales": peso, "mode": val.get("mode"), "payment": val.get("payment"), "order_status": status, "created_at": val.get("created_at")})
-        def status_priority_c(s):
-            order = (s.get("order_status") or "Pending")
-            priorities = {"New Order": 0, "Pending": 1, "Preparing": 2, "Out for Delivery": 3, "Delivered": 4, "Cancelled": 5}
-            return priorities.get(order, 1)
-        orders.sort(key=lambda x: (status_priority_c(x), x.get("created_at") or ""), reverse=False)
-        from collections import defaultdict as dd2
-        grouped2 = dd2(list)
-        for o in orders:
-            grouped2[status_priority_c(o)].append(o)
-        sorted_orders_c = []
-        for p in sorted(grouped2.keys()):
-            grouped2[p].sort(key=lambda x: x.get("created_at") or "", reverse=True)
-            sorted_orders_c.extend(grouped2[p])
-        orders = sorted_orders_c
+        orders.sort(key=lambda x: x.get("created_at") or x.get("sales_date") or "", reverse=True)
         stats = {"total_kg": total_kg, "total_peso": total_peso, "count": len(orders), "status_counts": status_counts, "credit_balance": reseller.get("credit_balance",0)}
         return jsonify({"orders": orders[:50], "stats": stats, "reseller_name": reseller.get("store_name")})
     except Exception as e:
@@ -2042,17 +1957,13 @@ def api_update_order_status(order_id):
         return jsonify({"ok": False, "error": "Invalid status"}), 400
     existing = fb_get(f"daily_sales/{order_id}") or {}
     update_data = {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")}
-    # When marked as Delivered, update sales record so it counts as TODAY'S real sale
+    # When marked as Delivered, also update sales record to count as real sale
     if new_status == "Delivered":
-        today = datetime.now().strftime("%Y-%m-%d")
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        update_data["delivered_at"] = now_str
-        update_data["delivered_date"] = today
-        # Keep original order date for history, but update sales_date to today so Recent Sales + Dashboard counts it
-        if existing.get("sales_date"):
-            update_data["original_sales_date"] = existing.get("sales_date")
-        update_data["sales_date"] = today  # <-- This fixes "1 delivered today but recent sales not updated"
-        update_data["created_at"] = now_str  # Make it appear on top of Recent sales
+        update_data["delivered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        update_data["delivered_date"] = datetime.now().strftime("%Y-%m-%d")
+        # If sales_date is old pending, keep original but mark delivered
+        if not existing.get("sales_date"):
+            update_data["sales_date"] = datetime.now().strftime("%Y-%m-%d")
     fb_patch(f"daily_sales/{order_id}", update_data)
     return jsonify({"ok": True, "status": new_status, "sales_updated": new_status == "Delivered"})
 
@@ -2333,7 +2244,7 @@ def dashboard_page():
     html = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard</title>
 <style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.topbar h1{font-size:16px;color:#00609C;margin:0}.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}.nav-pill.active{background:#00609C;color:#fff}.period-btn{padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px;color:#00609C}.period-btn.active{background:#00609C;color:#fff}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px}.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center}.stat-val{font-size:20px;font-weight:700;color:#00609C}</style></head>
 <body>
-<div class="topbar"><h1>OMEGA ICE</h1><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444">🔴 Live Orders</a><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a> <a href="/dashboard" class="nav-pill active">Dashboard</a><button onclick="resetTodayDashboard()" style="padding:6px 12px;border-radius:20px;border:none;background:#ef4444;color:#fff;font-size:11px">🗑️ Reset Today</button></div></div>
+<div class="topbar"><h1>OMEGA ICE</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a> <a href="/dashboard" class="nav-pill active">Dashboard</a></div></div>
 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
 <button class="period-btn active" data-p="daily" onclick="setPeriod('daily')">Daily</button>
 <button class="period-btn" data-p="weekly" onclick="setPeriod('weekly')">Weekly</button>
@@ -2374,15 +2285,7 @@ def staff_orders_page():
 async function loadOrders(){
   const res=await fetch('/api/staff/customer_orders');
   const data=await res.json();
-  const ordersRaw=data.orders||[];
-  // Sort: New Order on top, Delivered at bottom
-  const priority = {"New Order":0, "Pending":1, "Preparing":2, "Out for Delivery":3, "Delivered":4, "Cancelled":5};
-  const orders = ordersRaw.sort((a,b)=>{
-    const pa = priority[a.order_status] ?? 1;
-    const pb = priority[b.order_status] ?? 1;
-    if(pa!==pb) return pa-pb;
-    return (b.created_at||'').localeCompare(a.created_at||'');
-  });
+  const orders=data.orders||[];
   let showArchived=false;
 function toggleArchived(){showArchived=!showArchived;document.getElementById('toggleArchBtn').textContent=showArchived?'Hide Archived':'Show Archived';loadOrders();}
 const list=document.getElementById('ordersList');
@@ -2405,35 +2308,7 @@ const list=document.getElementById('ordersList');
     return `<div class="order-card"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Pending')">Accept</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Preparing')">Preparing</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Out for Delivery')">Out</button><button class="btn" ${btnDisabled} style="background:#22c55e;color:#fff;${btnStyle()}" onclick="updateStatus('${o.id}','Delivered')">Done</button></div></div>`;
   }).join('');
 }
-async function updateStatus(id,status){
-  const btn = event.target;
-  const origText = btn.textContent;
-  btn.textContent = '...';
-  btn.disabled = true;
-  try{
-    const res = await fetch(`/api/order/${id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
-    const data = await res.json();
-    if(data.ok){
-      // Instant update: reload orders + recent sales + today sales if on same domain
-      loadOrders();
-      // Try to refresh cashier data if available via localStorage signal
-      localStorage.setItem('omega_last_delivered', JSON.stringify({id: id, status: status, time: Date.now()}));
-      if(status==='Delivered'){
-        // Show success
-        btn.textContent = '✅ Done';
-        setTimeout(()=>loadOrders(), 1000);
-      }
-    } else {
-      alert(data.error||'Failed');
-      btn.textContent = origText;
-      btn.disabled = false;
-    }
-  } catch(e){
-    alert('Network error: '+e.message);
-    btn.textContent = origText;
-    btn.disabled = false;
-  }
-}
+async function updateStatus(id,status){await fetch(`/api/order/${id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});loadOrders();}
 async function archiveAllOldStaff(){
   if(!confirm('ISESMO ONLY: Archive ALL orders older than 7 days? This will hide 307 old orders.')) return;
   const res=await fetch('/api/staff/archive_all_old',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days_old:7})});
@@ -2466,7 +2341,7 @@ async function bulkUpdateAllToPreparing(){
   const data=await res.json();
   if(data.ok){alert(`Updated ${data.updated}`);loadOrders();}else{alert(data.error||'Failed');}
 }
-loadOrders();setInterval(loadOrders,30000);
+loadOrders();setInterval(loadOrders,3000);
 
 </script>
 </body></html>"""
@@ -2482,23 +2357,8 @@ def api_staff_customer_orders():
             if not val: continue
             if val.get("order_source") != "customer": continue
             orders.append({"id":key,"reseller_name":val.get("reseller_name"),"quantity":val.get("quantity"),"kg_size":val.get("kg_size"),"total_sales":val.get("total_sales"),"mode":val.get("mode"),"sales_date":val.get("sales_date"),"order_status":val.get("order_status","New Order"),"created_at":val.get("created_at")})
-        # Sort: New Orders first, Delivered at bottom
-        def status_priority(s):
-            order = (s.get("order_status") or "Pending")
-            priorities = {"New Order": 0, "Pending": 1, "Preparing": 2, "Out for Delivery": 3, "Delivered": 4, "Cancelled": 5}
-            return priorities.get(order, 1)
-        orders.sort(key=lambda x: (status_priority(x), -(len(x.get("created_at") or "")), x.get("created_at") or ""), reverse=False)
-        # Actually sort by priority then newest first within same priority
-        from collections import defaultdict
-        grouped = defaultdict(list)
-        for o in orders:
-            grouped[status_priority(o)].append(o)
-        sorted_orders = []
-        for p in sorted(grouped.keys()):
-            # Within same priority, newest first
-            grouped[p].sort(key=lambda x: x.get("created_at") or "", reverse=True)
-            sorted_orders.extend(grouped[p])
-        return jsonify({"orders": sorted_orders[:100]})
+        orders.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        return jsonify({"orders": orders[:50]})
     except Exception as e:
         return jsonify({"orders":[]}), 500
 
@@ -2542,14 +2402,10 @@ def api_customer_bulk_update(reseller_id):
             current_status = val.get("order_status") or "Pending"
             if from_status != "ALL" and current_status != from_status:
                 continue
-            today = datetime.now().strftime("%Y-%m-%d")
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            upd = {"order_status": new_status, "status_updated_at": now_str, "status_updated_by": session.get("customer_name") or session.get("staff_name") or "Bulk Update"}
+            upd = {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("customer_name") or session.get("staff_name") or "Bulk Update"}
             if new_status == "Delivered":
-                upd["delivered_at"] = now_str
-                upd["delivered_date"] = today
-                upd["sales_date"] = today
-                upd["created_at"] = now_str
+                upd["delivered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                upd["delivered_date"] = datetime.now().strftime("%Y-%m-%d")
             fb_patch(f"daily_sales/{key}", upd)
             updated += 1
         return jsonify({"ok": True, "updated": updated, "from": from_status, "to": new_status})
@@ -2574,14 +2430,10 @@ def api_staff_bulk_update_all():
             current = val.get("order_status") or "Pending"
             if from_status != "ALL" and current != from_status:
                 continue
-            today2 = datetime.now().strftime("%Y-%m-%d")
-            now_str2 = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            upd2 = {"order_status": new_status, "status_updated_at": now_str2, "status_updated_by": session.get("staff_name")}
+            upd2 = {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")}
             if new_status == "Delivered":
-                upd2["delivered_at"] = now_str2
-                upd2["delivered_date"] = today2
-                upd2["sales_date"] = today2
-                upd2["created_at"] = now_str2
+                upd2["delivered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                upd2["delivered_date"] = datetime.now().strftime("%Y-%m-%d")
             fb_patch(f"daily_sales/{key}", upd2)
             updated += 1
         return jsonify({"ok": True, "updated": updated})
@@ -2654,61 +2506,6 @@ def api_staff_archive_all_old():
             fb_patch(f"daily_sales/{key}", {"archived": True, "archived_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
             archived += 1
         return jsonify({"ok": True, "archived": archived})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-
-@app.route("/api/staff/reset_today", methods=["POST"])
-@login_required
-def api_staff_reset_today():
-    try:
-        staff = (session.get("staff_name") or "").lower()
-        if staff not in ["isesmo", "isesmo gamboa"]:
-            return jsonify({"ok": False, "error": "Only ISESMO can reset today"}), 403
-        data = request.json or {}
-        date_str = data.get("date")  # optional, defaults to today
-        if not date_str:
-            try:
-                import pytz
-                manila = pytz.timezone('Asia/Manila')
-                now = datetime.now(manila)
-            except:
-                now = datetime.now()
-            date_str = now.strftime("%Y-%m-%d")
-        sales = fb_get("daily_sales") or {}
-        deleted = 0
-        for key,val in sales.items():
-            if not val: continue
-            sd = val.get("sales_date") or (val.get("created_at")[:10] if val.get("created_at") else "")
-            dd = val.get("delivered_date") or ""
-            # Delete if sales_date or delivered_date matches today
-            if sd and sd[:10] == date_str:
-                fb_delete(f"daily_sales/{key}")
-                deleted += 1
-            elif dd and dd[:10] == date_str and val.get("order_status") == "Delivered":
-                # Also delete delivered today that were originally old but updated to today
-                fb_delete(f"daily_sales/{key}")
-                deleted += 1
-        return jsonify({"ok": True, "deleted": deleted, "date": date_str})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-@app.route("/api/staff/reset_all_simulated", methods=["POST"])
-@login_required
-def api_staff_reset_all_simulated():
-    try:
-        staff = (session.get("staff_name") or "").lower()
-        if staff not in ["isesmo", "isesmo gamboa"]:
-            return jsonify({"ok": False, "error": "Only ISESMO can reset all"}), 403
-        # This deletes ALL daily_sales - DANGER - but useful for testing
-        # Instead, archive all instead of delete for safety
-        sales = fb_get("daily_sales") or {}
-        deleted = 0
-        for key in list(sales.keys()):
-            fb_delete(f"daily_sales/{key}")
-            deleted += 1
-        return jsonify({"ok": True, "deleted": deleted, "warning": "ALL sales deleted"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
