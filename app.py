@@ -2031,17 +2031,28 @@ def api_update_order_status(order_id):
         return jsonify({"ok": False, "error": "Invalid status"}), 400
     existing = fb_get(f"daily_sales/{order_id}") or {}
     update_data = {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")}
-    # When marked as Delivered, update sales record so it counts as TODAY'S real sale
+    # When marked as Delivered, update sales record so it counts as TODAY'S real sale + Recent Sales
     if new_status == "Delivered":
-        today = datetime.now().strftime("%Y-%m-%d")
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now_manila = datetime.now(manila)
+            today = now_manila.strftime("%Y-%m-%d")
+            now_str = now_manila.strftime("%Y-%m-%d %H:%M:%S")
+        except:
+            today = datetime.now().strftime("%Y-%m-%d")
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         update_data["delivered_at"] = now_str
         update_data["delivered_date"] = today
-        # Keep original order date for history, but update sales_date to today so Recent Sales + Dashboard counts it
+        # Keep original order date for history
         if existing.get("sales_date"):
             update_data["original_sales_date"] = existing.get("sales_date")
-        update_data["sales_date"] = today  # <-- This fixes "1 delivered today but recent sales not updated"
-        update_data["created_at"] = now_str  # Make it appear on top of Recent sales
+        update_data["sales_date"] = today  # Makes it count in TODAY sales + Recent
+        update_data["sales_updated_at"] = now_str
+        update_data["is_customer_order"] = True
+        # Ensure it is NOT archived so it shows in sales
+        update_data["archived"] = False
+        update_data["archived_for_daily_only"] = False
     fb_patch(f"daily_sales/{order_id}", update_data)
     # Clear cache after delivered so dashboard updates instantly
     for k in list(globals().keys()):
