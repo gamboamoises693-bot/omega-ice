@@ -1714,65 +1714,48 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 <div class="topbar"><div><h1 id="storeName">My Orders</h1><div style="font-size:11px;color:#666" id="storeMeta"></div></div><div style="display:flex;gap:6px"><span class="live">● LIVE</span><a href="/customer/logout" class="btn">Logout</a></div></div>
 <div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;font-weight:600">Summary</span><a href="/customer/{{ reseller_id }}/order" class="btn btn-primary">+ New Order</a></div><div class="stat-grid"><div><div class="stat-val" id="totalKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div><div><div class="stat-val" id="totalPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div><div><div class="stat-val" id="totalOrders">0</div><div class="stat-lbl">ORDERS</div></div></div><div id="statusCounts" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;font-size:10px"></div>
 <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
-<button onclick="bulkUpdateAll()" style="padding:8px 12px;border-radius:20px;border:none;background:#16a34a;color:#fff;font-size:11px;font-weight:600">✅ Mark all Pending as Delivered</button>
-<button onclick="archiveOldOrders()" style="padding:8px 12px;border-radius:20px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-size:11px">📦 Archive Old (Hide 307)</button>
-<button onclick="toggleArchived()" id="toggleArchBtn" style="padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#666;font-size:11px">Show Archived</button>
-<button onclick="bulkUpdateAllToPreparing()" style="padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">Mark as Preparing</button>
+<button onclick="loadOrders()" style="padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">🔄 Refresh</button>
+<span style="font-size:10px;color:#888;padding:8px">Staff will update to Preparing → Delivered</span>
 </div>
 </div>
-<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">Real-time Orders</div><div id="ordersList">2026-09-06 - Tap Refresh</div></div>
+<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px;display:flex;justify-content:space-between"><span>Real-time Orders</span><span style="font-size:10px;color:#888" id="lastUpdate"></span></div><div id="ordersList">Loading orders...</div></div>
 <script>
 const resellerId="{{ reseller_id }}";
+let showArchived=false;
 async function loadOrders(){
-  const res=await fetch(`/api/customer/${resellerId}/orders?show_archived=${showArchived?1:0}`);
-  const data=await res.json();
-  const ordersRaw=data.orders||[];
-  // Sort: New Order on top, Delivered at bottom
-  const priority = {"New Order":0, "Pending":1, "Preparing":2, "Out for Delivery":3, "Delivered":4, "Cancelled":5};
-  const orders = ordersRaw.sort((a,b)=>{
-    const pa = priority[a.order_status] ?? 1;
-    const pb = priority[b.order_status] ?? 1;
-    if(pa!==pb) return pa-pb;
-    return (b.created_at||'').localeCompare(a.created_at||'');
-  });
-  const stats=data.stats||{};
-  document.getElementById('totalKg').textContent=(stats.total_kg||0).toLocaleString()+'kg';
-  document.getElementById('totalPeso').textContent='₱'+(stats.total_peso||0).toLocaleString();
-  document.getElementById('totalOrders').textContent=stats.count||0;
-  document.getElementById('storeName').textContent=data.reseller_name||'My Orders';
-  document.getElementById('storeMeta').textContent=`Balance: ₱${stats.credit_balance||0} | ${new Date().toLocaleTimeString()}`;
-  const counts=stats.status_counts||{};
-  document.getElementById('statusCounts').innerHTML=Object.entries(counts).map(([k,v])=>`<span class="status-pill status-${k.toLowerCase().replace(/ /g,'-')}">${k}: ${v}</span>`).join('');
-  let showArchived=false;
-function toggleArchived(){showArchived=!showArchived;document.getElementById('toggleArchBtn').textContent=showArchived?'Hide Archived':'Show Archived';loadOrders();}
-const list=document.getElementById('ordersList');
-  if(!orders.length){list.innerHTML='<div style="text-align:center;color:#888;padding:20px">No orders yet. Tap + New Order</div>';return;}
-  list.innerHTML=orders.map(o=>`<div class="order-card"><div style="display:flex;justify-content:space-between"><span style="font-size:11px;color:#888">${o.sales_date||''}</span><span class="status-pill status-${(o.order_status||'pending').toLowerCase().replace(/ /g,'-')}">${o.order_status||'Pending'}</span></div><div style="font-size:13px;margin-top:4px">${o.quantity}x ${o.kg_size} • ${o.mode} • ₱${o.total_sales}</div></div>`).join('');
+  try{
+    const res=await fetch(`/api/customer/${resellerId}/orders?show_archived=${showArchived?1:0}`);
+    const data=await res.json();
+    const ordersRaw=data.orders||[];
+    const priority = {"New Order":0, "Pending":1, "Preparing":2, "Out for Delivery":3, "Delivered":4, "Cancelled":5};
+    const orders = ordersRaw.sort((a,b)=>{
+      const pa = priority[a.order_status] ?? 1;
+      const pb = priority[b.order_status] ?? 1;
+      if(pa!==pb) return pa-pb;
+      return (b.created_at||'').localeCompare(a.created_at||'');
+    });
+    const stats=data.stats||{};
+    document.getElementById('totalKg').textContent=(stats.total_kg||0).toLocaleString()+'kg';
+    document.getElementById('totalPeso').textContent='₱'+(stats.total_peso||0).toLocaleString();
+    document.getElementById('totalOrders').textContent=stats.count||0;
+    document.getElementById('storeName').textContent=data.reseller_name||'My Orders';
+    document.getElementById('storeMeta').textContent=`Balance: ₱${stats.credit_balance||0} | ${new Date().toLocaleTimeString()}`;
+    document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString();
+    const counts=stats.status_counts||{};
+    document.getElementById('statusCounts').innerHTML=Object.entries(counts).map(([k,v])=>`<span class="status-pill status-${k.toLowerCase().replace(/ /g,'-')}">${k}: ${v}</span>`).join('');
+    const list=document.getElementById('ordersList');
+    if(!orders.length){list.innerHTML='<div style="text-align:center;color:#888;padding:20px">No orders yet. Tap + New Order<br><br><button onclick="loadOrders()" style="padding:8px 14px;border-radius:20px;background:#00609C;color:#fff;border:none">🔄 Refresh Now</button></div>';return;}
+    list.innerHTML=orders.map(o=>`<div class="order-card" data-order-id="${o.id}"><div style="display:flex;justify-content:space-between"><span style="font-size:11px;color:#888">${o.sales_date||''} • ${o.created_at||''}</span><span class="status-pill status-${(o.order_status||'pending').toLowerCase().replace(/ /g,'-')}">${o.order_status||'Pending'}</span></div><div style="font-size:13px;margin-top:4px">${o.quantity}x ${o.kg_size} • ${o.mode} • ₱${o.total_sales}</div><div style="font-size:10px;color:#888;margin-top:2px">Order ID: ${o.id.slice(0,8)}</div></div>`).join('');
+  }catch(e){
+    document.getElementById('ordersList').innerHTML=`<div style="color:red;padding:10px">Error loading: ${e.message}<br><button onclick="loadOrders()" style="padding:8px 14px;border-radius:20px;background:#00609C;color:#fff;border:none">Retry</button></div>`;
+  }
 }
-
-async function bulkUpdateAll(){
-  if(!confirm('Mark ALL 307 Pending orders as Delivered? This will update all pending orders for this customer.')) return;
-  const res=await fetch(`/api/customer/${resellerId}/bulk_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Delivered'})});
-  const data=await res.json();
-  if(data.ok){alert(`Updated ${data.updated} orders to Delivered!`);loadOrders();}else{alert(data.error||'Failed');}
-}
-async function archiveOldOrders(){
-  if(!confirm('Archive (hide) all orders older than 7 days? Your 307 old pending will be hidden. You can still show them via Show Archived.')) return;
-  const res=await fetch(`/api/customer/${resellerId}/archive_old`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days_old:7})});
-  const data=await res.json();
-  if(data.ok){alert(`📦 Archived ${data.archived} old orders! Now showing only recent.`);loadOrders();}else{alert(data.error||'Failed');}
-}
-async function bulkUpdateAllToPreparing(){
-  if(!confirm('Mark all Pending as Preparing?')) return;
-  const res=await fetch(`/api/customer/${resellerId}/bulk_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Preparing'})});
-  const data=await res.json();
-  if(data.ok){alert(`Updated ${data.updated}`);loadOrders();}else{alert(data.error||'Failed');}
-}
-loadOrders();setInterval(loadOrders,30000);
-
+function toggleArchived(){showArchived=!showArchived;loadOrders();}
+loadOrders();setInterval(loadOrders,10000);
 </script>
 </body></html>
 """
+
 
 CUSTOMER_ORDER_HTML = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Place Order - Omega Ice</title>
@@ -2456,9 +2439,9 @@ const list=document.getElementById('ordersList');
     const btnStyle = (active)=> disabled ? 'opacity:0.4;cursor:not-allowed;background:#f3f4f6' : '';
     const btnDisabled = disabled ? 'disabled' : '';
     if(disabled){
-      return `<div class="order-card" style="border-left-color:${isDelivered?'#22c55e':'#ef4444'};opacity:0.8"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}${deliveredBadge}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><span style="font-size:11px;color:${isDelivered?'#16a34a':'#ef4444'};font-weight:600">${isDelivered?'✅ Delivered - buttons disabled': '❌ Cancelled'}</span></div></div>`;
+      return `<div class="order-card" data-order-id="${o.id}" style="border-left-color:${isDelivered?'#22c55e':'#ef4444'};opacity:0.8"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}${deliveredBadge}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><span style="font-size:11px;color:${isDelivered?'#16a34a':'#ef4444'};font-weight:600">${isDelivered?'✅ Delivered - buttons disabled': '❌ Cancelled'}</span> <button class="btn" style="background:#fff;color:#ef4444;border-color:#fca5a5;font-size:10px;padding:4px 8px;margin-left:8px" onclick="deleteOrder('${o.id}')">🗑️ Delete</button></div></div>`;
     }
-    return `<div class="order-card"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Pending')">Accept</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Preparing')">Preparing</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Out for Delivery')">Out</button><button class="btn" ${btnDisabled} style="background:#22c55e;color:#fff;${btnStyle()}" onclick="updateStatus('${o.id}','Delivered')">Done</button></div></div>`;
+    return `<div class="order-card" data-order-id="${o.id}"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Pending')">Accept</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Preparing')">Preparing</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Out for Delivery')">Out</button><button class="btn" ${btnDisabled} style="background:#22c55e;color:#fff;${btnStyle()}" onclick="updateStatus('${o.id}','Delivered')">Done</button><button class="btn" style="background:#fff;color:#ef4444;border-color:#fca5a5" onclick="deleteOrder('${o.id}')">🗑️ Delete</button></div></div>`;
   }).join('');
 }
 async function updateStatus(id,status){
@@ -3403,6 +3386,38 @@ loadMonthly(); loadMay();
 </script>
 </body></html>"""
     return render_template_string(html)
+
+
+
+@app.route("/api/sales/clear_cache", methods=["POST", "GET"])
+def api_clear_sales_cache():
+    try:
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+        return jsonify({"ok": True, "cleared": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/orders/<order_id>", methods=["DELETE"])
+@login_required
+def api_delete_order(order_id):
+    """Delete order - staff only, updates recent sales"""
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"] and not session.get("staff_name"):
+            return jsonify({"ok": False, "error": "Only staff"}), 403
+        # Archive instead of delete for safety, but mark deleted
+        fb_patch(f"daily_sales/{order_id}", {"archived": True, "deleted": True, "deleted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "deleted_by": staff})
+        # Clear cache so recent sales updates instantly
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+        return jsonify({"ok": True, "deleted": order_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 if __name__ == "__main__":
