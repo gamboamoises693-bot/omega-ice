@@ -155,7 +155,12 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 <button class="save-btn" id="cancelEditBtn" style="display:none;background:#999;margin-top:6px" onclick="cancelEdit()">Cancel edit</button>
 <p class="status" id="statusMsg"></p>
 </div>
-<div class="card"><label style="font-weight:600;margin-bottom:8px;display:block">Recent sales</label><table><thead><tr><th>Date</th><th>Reseller</th><th>Qty</th><th>Size</th><th>Total</th><th></th></tr></thead><tbody id="recentBody"></tbody></table></div>
+<div class="card"><label style="font-weight:600;margin-bottom:8px;display:block">Recent sales - Status included</label>
+<div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+<span style="font-size:10px;background:#dcfce7;color:#166534;padding:3px 8px;border-radius:10px">Delivered = Real Sales</span>
+<span style="font-size:10px;background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:10px">Pending = Not yet counted</span>
+</div>
+<table><thead><tr><th>Date</th><th>Reseller</th><th>Qty</th><th>Size</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody id="recentBody"></tbody></table></div>
 <script>
 let mode='DELIVER';let payment='Cash';let kg='{{ kg_options[0] }}';let selectedReseller=null;let unitPrice=0;let editingSaleId=null;let cashierPeriod='daily';
 function setMode(m){mode=m;document.getElementById('modeDeliver').classList.toggle('active',m==='DELIVER');document.getElementById('modePickup').classList.toggle('active',m==='PICKUP');updateTotal()}
@@ -188,10 +193,20 @@ async function loadRecent(){
     if(res.status===401){window.location.href='/login';return;}
     let rows=await res.json();
     if(rows.sales)rows=rows.sales;
-    if(!Array.isArray(rows)){document.getElementById('recentBody').innerHTML=`<tr><td colspan=6>No data</td></tr>`;return;}
-    if(!rows.length){document.getElementById('recentBody').innerHTML=`<tr><td colspan=6 style="color:#888">No recent sales yet</td></tr>`;return;}
-    document.getElementById('recentBody').innerHTML=rows.slice(0,20).map(r=>`<tr><td style="font-size:11px">${r.sales_date||''}</td><td>${r.reseller_name}</td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td><button class="edit-btn" onclick="editSale('${r.id}')">Edit</button><button class="del-btn" onclick="deleteSale('${r.id}')">Del</button></td></tr>`).join('');
-  }catch(e){document.getElementById('recentBody').innerHTML=`<tr><td colspan=6 style="color:#c0392b">Error: ${e.message} <a href="/login">Login</a></td></tr>`;}
+    if(!Array.isArray(rows)){document.getElementById('recentBody').innerHTML=`<tr><td colspan=7>No data</td></tr>`;return;}
+    if(!rows.length){document.getElementById('recentBody').innerHTML=`<tr><td colspan=7 style="color:#888">No recent sales yet</td></tr>`;return;}
+    document.getElementById('recentBody').innerHTML=rows.slice(0,20).map(r=>{
+      const status = r.order_status || 'Delivered';
+      let color = '#dcfce7'; let txtColor = '#166534';
+      if(status==='Pending' || status==='New Order'){color='#fef3c7'; txtColor='#92400e';}
+      else if(status==='Preparing'){color='#dbeafe'; txtColor='#1e40af';}
+      else if(status==='Out for Delivery'){color='#e0e7ff'; txtColor='#3730a3';}
+      else if(status==='Delivered'){color='#dcfce7'; txtColor='#166534';}
+      const badge = `<span style="font-size:9px;background:${color};color:${txtColor};padding:3px 6px;border-radius:10px;white-space:nowrap">${status}</span>`;
+      const deliveredInfo = r.delivered_date ? `<div style="font-size:9px;color:#666">${r.delivered_date}</div>` : '';
+      return `<tr><td style="font-size:11px">${r.sales_date||''}${deliveredInfo}</td><td>${r.reseller_name}</td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td>${badge}</td><td><button class="edit-btn" onclick="editSale('${r.id}')">Edit</button><button class="del-btn" onclick="deleteSale('${r.id}')">Del</button></td></tr>`;
+    }).join('');
+  }catch(e){document.getElementById('recentBody').innerHTML=`<tr><td colspan=7 style="color:#c0392b">Error: ${e.message} <a href="/login">Login</a></td></tr>`;}
 }
 async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sale/${id}`,{method:'DELETE'});loadRecent();loadToday();}
 async function logout(){await fetch('/api/logout',{method:'POST'});window.location.href='/login'}
@@ -567,6 +582,8 @@ def api_recent_sales():
     if data:
         for key, val in data.items():
             if val:
+                if val.get("archived"):
+                    continue
                 sales.append({
                     "id": key,
                     "sales_date": val.get("sales_date"),
@@ -576,6 +593,9 @@ def api_recent_sales():
                     "total_sales": val.get("total_sales"),
                     "mode": val.get("mode"),
                     "payment": val.get("payment"),
+                    "order_status": val.get("order_status") or "Delivered",
+                    "delivered_at": val.get("delivered_at") or "",
+                    "delivered_date": val.get("delivered_date") or "",
                     "created_at": val.get("created_at","")
                 })
         # sort by created_at desc for newest first
@@ -1935,8 +1955,17 @@ def api_update_order_status(order_id):
     new_status = data.get("status","").strip()
     if new_status not in ["New Order","Pending","Preparing","Out for Delivery","Delivered","Cancelled"]:
         return jsonify({"ok": False, "error": "Invalid status"}), 400
-    fb_patch(f"daily_sales/{order_id}", {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")})
-    return jsonify({"ok": True, "status": new_status})
+    existing = fb_get(f"daily_sales/{order_id}") or {}
+    update_data = {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")}
+    # When marked as Delivered, also update sales record to count as real sale
+    if new_status == "Delivered":
+        update_data["delivered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        update_data["delivered_date"] = datetime.now().strftime("%Y-%m-%d")
+        # If sales_date is old pending, keep original but mark delivered
+        if not existing.get("sales_date"):
+            update_data["sales_date"] = datetime.now().strftime("%Y-%m-%d")
+    fb_patch(f"daily_sales/{order_id}", update_data)
+    return jsonify({"ok": True, "status": new_status, "sales_updated": new_status == "Delivered"})
 
 @app.route("/customers")
 @login_required
@@ -2132,11 +2161,16 @@ def api_sales_dashboard():
         start_date = None
         label = "All Time"
     total_peso = 0; total_kg = 0; count = 0
+    pending_peso = 0; pending_kg = 0; pending_count = 0
     breakdown = {"1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0}
+    pending_breakdown = {"1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0}
     try:
         data = fb_get("daily_sales") or {}
         for v in data.values():
             if not v: continue
+            if v.get("archived"): continue
+            # Only count Delivered as real sales, Pending/New Order as pending
+            status = v.get("order_status") or "Delivered"  # Old sales without status = Delivered
             sd = v.get("sales_date") or (v.get("created_at")[:10] if v.get("created_at") else "")
             if not sd: continue
             dt = parse_date(sd)
@@ -2144,13 +2178,20 @@ def api_sales_dashboard():
             if start_date and dt < start_date.replace(tzinfo=None): continue
             qty = int(v.get("quantity",0) or 0)
             kg_size = v.get("kg_size","1Kg")
-            total_peso += float(v.get("total_sales",0) or 0)
-            total_kg += qty * kg_value(kg_size)
-            count += 1
-            if kg_size in breakdown: breakdown[kg_size] += qty
+            peso = float(v.get("total_sales",0) or 0)
+            if status in ["Delivered", "Out for Delivery"]:
+                total_peso += peso
+                total_kg += qty * kg_value(kg_size)
+                count += 1
+                if kg_size in breakdown: breakdown[kg_size] += qty
+            else:  # Pending, New Order, Preparing
+                pending_peso += peso
+                pending_kg += qty * kg_value(kg_size)
+                pending_count += 1
+                if kg_size in pending_breakdown: pending_breakdown[kg_size] += qty
     except Exception as e:
         print(f"dashboard error {e}")
-    return jsonify({"period": period, "label": label, "total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "date": now.strftime("%Y-%m-%d"), "start": start_date.strftime("%Y-%m-%d") if start_date else "All"})
+    return jsonify({"period": period, "label": label, "total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "pending_total": pending_peso, "pending_kg": pending_kg, "pending_count": pending_count, "pending_breakdown": pending_breakdown, "date": now.strftime("%Y-%m-%d"), "start": start_date.strftime("%Y-%m-%d") if start_date else "All"})
 
 @app.route("/api/sales/today")
 @login_required
@@ -2169,11 +2210,14 @@ def api_today_sales():
         try: return datetime.strptime(d[:10], "%Y-%m-%d")
         except: return None
     total_peso = 0; total_kg = 0; count = 0
+    pending_peso = 0; pending_kg = 0; pending_count = 0
     breakdown = {"1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0}
     try:
         data = fb_get("daily_sales") or {}
         for v in data.values():
             if not v: continue
+            if v.get("archived"): continue
+            status = v.get("order_status") or "Delivered"
             sd = v.get("sales_date") or (v.get("created_at")[:10] if v.get("created_at") else "")
             if not sd: continue
             dt = parse_date(sd)
@@ -2181,12 +2225,18 @@ def api_today_sales():
             if dt.date() != now.date(): continue
             qty = int(v.get("quantity",0) or 0)
             kg_size = v.get("kg_size","1Kg")
-            total_peso += float(v.get("total_sales",0) or 0)
-            total_kg += qty * kg_value(kg_size)
-            count += 1
-            if kg_size in breakdown: breakdown[kg_size] += qty
+            peso = float(v.get("total_sales",0) or 0)
+            if status in ["Delivered", "Out for Delivery"]:
+                total_peso += peso
+                total_kg += qty * kg_value(kg_size)
+                count += 1
+                if kg_size in breakdown: breakdown[kg_size] += qty
+            else:
+                pending_peso += peso
+                pending_kg += qty * kg_value(kg_size)
+                pending_count += 1
     except: pass
-    return jsonify({"total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "date": today_str, "start": today_str})
+    return jsonify({"total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "pending_total": pending_peso, "pending_kg": pending_kg, "pending_count": pending_count, "date": today_str, "start": today_str})
 
 @app.route("/dashboard")
 @login_required
@@ -2203,11 +2253,11 @@ def dashboard_page():
 <button class="period-btn" data-p="yearly" onclick="setPeriod('yearly')">Yearly</button>
 <button class="period-btn" data-p="all" onclick="setPeriod('all')">All Time</button>
 </div>
-<div class="card"><div class="stat-grid"><div><div class="stat-val" id="totalKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div><div><div class="stat-val" id="totalPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div><div><div class="stat-val" id="totalCount">0</div><div class="stat-lbl">TRANS</div></div></div><div id="breakdown" style="font-size:11px;margin-top:10px;text-align:center"></div></div>
+<div class="card"><div style="font-size:11px;color:#666;margin-bottom:8px">✅ DELIVERED SALES (Real Sales)</div><div class="stat-grid"><div><div class="stat-val" id="totalKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div><div><div class="stat-val" id="totalPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div><div><div class="stat-val" id="totalCount">0</div><div class="stat-lbl">DELIVERED</div></div></div><div style="margin-top:12px;padding-top:12px;border-top:1px dashed #ccd"><div style="font-size:11px;color:#92400e;margin-bottom:6px">⏳ PENDING FOR DELIVERY (1600 pending)</div><div class="stat-grid"><div><div class="stat-val" id="pendingKg" style="color:#f59e0b">0kg</div><div class="stat-lbl">PENDING KG</div></div><div><div class="stat-val" id="pendingPeso" style="color:#f59e0b">₱0</div><div class="stat-lbl">PENDING PESO</div></div><div><div class="stat-val" id="pendingCount" style="color:#f59e0b">0</div><div class="stat-lbl">PENDING</div></div></div></div><div id="breakdown" style="font-size:11px;margin-top:10px;text-align:center"></div></div>
 <script>
 let currentPeriod='daily';
 async function setPeriod(p){currentPeriod=p;document.querySelectorAll('.period-btn').forEach(b=>b.classList.toggle('active',b.dataset.p===p));loadDashboard();}
-async function loadDashboard(){const res=await fetch('/api/sales/dashboard?period='+currentPeriod);const data=await res.json();document.getElementById('totalKg').textContent=(data.total_kg||0).toLocaleString()+'kg';document.getElementById('totalPeso').textContent='₱'+(data.total||0).toLocaleString();document.getElementById('totalCount').textContent=data.count||0;const b=data.breakdown||{};document.getElementById('breakdown').textContent=`1Kg:${b['1Kg']||0} 5Kg:${b['5Kg']||0} 10Kg:${b['10Kg']||0} 25Kg:${b['25Kg']||0}`;}loadDashboard();
+async function loadDashboard(){const res=await fetch('/api/sales/dashboard?period='+currentPeriod);const data=await res.json();document.getElementById('totalKg').textContent=(data.total_kg||0).toLocaleString()+'kg';document.getElementById('totalPeso').textContent='₱'+(data.total||0).toLocaleString();document.getElementById('totalCount').textContent=data.count||0;document.getElementById('pendingKg').textContent=(data.pending_kg||0).toLocaleString()+'kg';document.getElementById('pendingPeso').textContent='₱'+(data.pending_total||0).toLocaleString();document.getElementById('pendingCount').textContent=data.pending_count||0;const b=data.breakdown||{};document.getElementById('breakdown').textContent=`Delivered: 1Kg:${b['1Kg']||0} 5Kg:${b['5Kg']||0} 10Kg:${b['10Kg']||0} 25Kg:${b['25Kg']||0} | Pending: ${data.pending_count||0} orders`;}loadDashboard();
 </script>
 </body></html>"""
     return render_template_string(html)
@@ -2224,7 +2274,7 @@ def staff_orders_page():
 .nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}
 .live{display:inline-flex;align-items:center;gap:6px;background:#ef4444;color:#fff;padding:6px 12px;border-radius:20px;font-size:11px}
 .order-card{border-left:4px solid #f59e0b;padding:12px;margin:8px 0;background:#fff;border-radius:8px}
-.btn{padding:6px 10px;border-radius:8px;border:1px solid #ccd;font-size:11px;margin:2px}
+.btn{padding:6px 10px;border-radius:8px;border:1px solid #ccd;font-size:11px;margin:2px}.btn:disabled{opacity:0.4;cursor:not-allowed;background:#f3f4f6;color:#999}
 </style></head>
 <body>
 <div class="topbar"><h1>Live Customer Orders</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a></div></div>
@@ -2240,7 +2290,23 @@ async function loadOrders(){
 function toggleArchived(){showArchived=!showArchived;document.getElementById('toggleArchBtn').textContent=showArchived?'Hide Archived':'Show Archived';loadOrders();}
 const list=document.getElementById('ordersList');
   if(!orders.length){list.innerHTML='<div class="card" style="text-align:center;color:#888">No customer orders yet.</div>';return;}
-  list.innerHTML=orders.map(o=>`<div class="order-card"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}</span><span style="font-size:10px;background:#fef3c7;padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><button class="btn" onclick="updateStatus('${o.id}','Pending')">Accept</button><button class="btn" onclick="updateStatus('${o.id}','Preparing')">Preparing</button><button class="btn" onclick="updateStatus('${o.id}','Out for Delivery')">Out</button><button class="btn" onclick="updateStatus('${o.id}','Delivered')">Done</button></div></div>`).join('');
+  list.innerHTML=orders.map(o=>{
+    const isDelivered = o.order_status==='Delivered';
+    const isCancelled = o.order_status==='Cancelled';
+    const disabled = isDelivered || isCancelled;
+    let statusColor='#fef3c7';
+    if(o.order_status==='Delivered'){statusColor='#dcfce7';}
+    else if(o.order_status==='Cancelled'){statusColor='#fee2e2';}
+    else if(o.order_status==='Preparing'){statusColor='#dbeafe';}
+    else if(o.order_status==='Out for Delivery'){statusColor='#e0e7ff';}
+    const deliveredBadge = isDelivered ? ' ✅' : '';
+    const btnStyle = (active)=> disabled ? 'opacity:0.4;cursor:not-allowed;background:#f3f4f6' : '';
+    const btnDisabled = disabled ? 'disabled' : '';
+    if(disabled){
+      return `<div class="order-card" style="border-left-color:${isDelivered?'#22c55e':'#ef4444'};opacity:0.8"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}${deliveredBadge}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><span style="font-size:11px;color:${isDelivered?'#16a34a':'#ef4444'};font-weight:600">${isDelivered?'✅ Delivered - buttons disabled': '❌ Cancelled'}</span></div></div>`;
+    }
+    return `<div class="order-card"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Pending')">Accept</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Preparing')">Preparing</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Out for Delivery')">Out</button><button class="btn" ${btnDisabled} style="background:#22c55e;color:#fff;${btnStyle()}" onclick="updateStatus('${o.id}','Delivered')">Done</button></div></div>`;
+  }).join('');
 }
 async function updateStatus(id,status){await fetch(`/api/order/${id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});loadOrders();}
 async function archiveAllOldStaff(){
@@ -2336,7 +2402,11 @@ def api_customer_bulk_update(reseller_id):
             current_status = val.get("order_status") or "Pending"
             if from_status != "ALL" and current_status != from_status:
                 continue
-            fb_patch(f"daily_sales/{key}", {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("customer_name") or session.get("staff_name") or "Bulk Update"})
+            upd = {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("customer_name") or session.get("staff_name") or "Bulk Update"}
+            if new_status == "Delivered":
+                upd["delivered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                upd["delivered_date"] = datetime.now().strftime("%Y-%m-%d")
+            fb_patch(f"daily_sales/{key}", upd)
             updated += 1
         return jsonify({"ok": True, "updated": updated, "from": from_status, "to": new_status})
     except Exception as e:
@@ -2360,7 +2430,11 @@ def api_staff_bulk_update_all():
             current = val.get("order_status") or "Pending"
             if from_status != "ALL" and current != from_status:
                 continue
-            fb_patch(f"daily_sales/{key}", {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")})
+            upd2 = {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")}
+            if new_status == "Delivered":
+                upd2["delivered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                upd2["delivered_date"] = datetime.now().strftime("%Y-%m-%d")
+            fb_patch(f"daily_sales/{key}", upd2)
             updated += 1
         return jsonify({"ok": True, "updated": updated})
     except Exception as e:
