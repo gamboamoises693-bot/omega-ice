@@ -645,32 +645,68 @@ def api_create_sale():
 @app.route("/api/sales/recent")
 @login_required
 def api_recent_sales():
-    # Try online first
+    # FIXED: Dashboard vs Recent Sales - both show customer Delivered today
+    try:
+        import pytz
+        manila = pytz.timezone('Asia/Manila')
+        now = datetime.now(manila)
+    except:
+        now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    
     data = fb_get("daily_sales")
     sales = []
     recent = []
     if data:
         for key, val in data.items():
-            if val:
-                if val.get("archived"):
+            if not val: continue
+            # Allow customer Delivered even if archived_for_daily_only? No - Done sets archived=False
+            # But skip truly deleted
+            if val.get("deleted"): continue
+            # For Recent Sales, include BOTH cashier and customer Delivered today
+            # Make #2: Sept 06 archived 3721kg should NOT show in Recent (Daily=0), but new customer Done SHOULD
+            if val.get("archived"):
+                # If archived for Make #2 (Sept 06 fix), skip for Recent to keep Daily=0
+                # But if is_customer_order and delivered today, include (Done sets archived=False so this won't happen)
+                if not val.get("is_customer_order"):
                     continue
-                sales.append({
-                    "id": key,
-                    "sales_date": val.get("sales_date"),
-                    "reseller_name": val.get("reseller_name"),
-                    "quantity": val.get("quantity"),
-                    "kg_size": val.get("kg_size"),
-                    "total_sales": val.get("total_sales"),
-                    "mode": val.get("mode"),
-                    "payment": val.get("payment"),
-                    "order_status": val.get("order_status") or "Delivered",
-                    "delivered_at": val.get("delivered_at") or "",
-                    "delivered_date": val.get("delivered_date") or "",
-                    "created_at": val.get("created_at","")
-                })
-        # sort by created_at desc for newest first
-        sales.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-        recent = sales[:20]
+                # Even customer if hidden_24h, skip
+                if val.get("hidden_24h"):
+                    continue
+            
+            sd = (val.get("sales_date") or "")[:10]
+            dd = (val.get("delivered_date") or "")[:10]
+            # Recent Sales = TODAY only (same as Dashboard daily) - shows customer Done today
+            # Include if sales_date OR delivered_date is today and status Delivered/Out
+            status = val.get("order_status") or "Delivered"
+            is_today = (sd == today_str or dd == today_str)
+            # Also include if is_customer_order and status Delivered even if sales_date is today
+            if status in ["Delivered", "Out for Delivery"] or val.get("is_customer_order"):
+                if not is_today and status in ["Delivered", "Out for Delivery"]:
+                    # For old Delivered, only show if within last 24h? For Recent, show today only to match Dashboard
+                    # But allow if delivered today
+                    pass
+                # Only add if today
+                if is_today:
+                    sales.append({
+                        "id": key,
+                        "sales_date": val.get("sales_date"),
+                        "reseller_name": val.get("reseller_name"),
+                        "quantity": val.get("quantity"),
+                        "kg_size": val.get("kg_size"),
+                        "total_sales": val.get("total_sales"),
+                        "mode": val.get("mode"),
+                        "payment": val.get("payment"),
+                        "order_status": status,
+                        "delivered_at": val.get("delivered_at") or "",
+                        "delivered_date": val.get("delivered_date") or "",
+                        "created_at": val.get("created_at",""),
+                        "is_customer": val.get("is_customer_order", False),
+                        "is_online": val.get("order_source") == "customer"
+                    })
+        # Sort by delivered_at desc, then created_at desc - newest Done on top
+        sales.sort(key=lambda x: (x.get("delivered_at") or x.get("created_at") or ""), reverse=True)
+        recent = sales[:30]  # Show 30 to ensure customer orders visible
     
     # Also include cached local sales (for instant display + offline)
     try:
@@ -2553,11 +2589,10 @@ async function deleteOrder(id){
       loadOrders();
       await fetch('/api/sales/clear_cache', {method:'POST'}).catch(()=>{});
     }else{
-      alert(data.error||'Failed: '+(data.message||''));
+      alert(data.error||'Failed');
     }
   }catch(e){alert('Network error: '+e.message);}
 }
-
 loadOrders();setInterval(loadOrders,10000);
 
 
@@ -3503,7 +3538,7 @@ def api_clear_sales_cache():
 @app.route("/api/orders/<order_id>", methods=["DELETE"])
 @login_required
 def api_delete_order(order_id):
-    """Delete order - HARD DELETE - fixed"""
+    """Delete order - HARD DELETE - fixed + Recent Sales update"""
     try:
         if not session.get("staff_name"):
             return jsonify({"ok": False, "error": "Only staff"}), 403
@@ -3514,14 +3549,10 @@ def api_delete_order(order_id):
             url = f"{FIREBASE_URL}/daily_sales/{order_id}.json"
             r = requests.delete(url, timeout=10)
             hard_deleted = r.status_code in [200, 204]
-        except Exception as e:
+        except:
             hard_deleted = False
-        
         if not hard_deleted:
-            # Fallback: archive + delete flags
             fb_patch(f"daily_sales/{order_id}", {"archived": True, "deleted": True, "hidden_24h": True, "deleted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "deleted_by": staff})
-        
-        # Clear cache
         for kk in list(globals().keys()):
             if kk.startswith("_dashboard_cache_"):
                 try: del globals()[kk]
@@ -3530,25 +3561,6 @@ def api_delete_order(order_id):
     except Exception as e:
         import traceback
         return jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()}), 500
-
-@app.route("/api/orders/<order_id>/force_delete", methods=["POST", "DELETE"])
-@login_required
-def api_force_delete_order(order_id):
-    """Force delete - for when Delete not working"""
-    try:
-        if not session.get("staff_name"):
-            return jsonify({"ok": False, "error": "Only staff"}), 403
-        import requests
-        url = f"{FIREBASE_URL}/daily_sales/{order_id}.json"
-        r = requests.delete(url, timeout=10)
-        for kk in list(globals().keys()):
-            if kk.startswith("_dashboard_cache_"):
-                try: del globals()[kk]
-                except: pass
-        return jsonify({"ok": True, "status": r.status_code, "deleted": order_id})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
 
 
 if __name__ == "__main__":
