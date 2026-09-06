@@ -1920,8 +1920,8 @@ def staff_customers_page():
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Customers - Only ISESMO</title>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
-.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:16px;color:#00609C;margin:0}
-.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap}.topbar h1{font-size:15px;color:#00609C;margin:0;flex:1;min-width:180px}.topbar .nav-group{display:flex;gap:6px;flex-wrap:nowrap;align-items:center}
+.nav-pill{padding:6px 12px;border-radius:20px;font-size:11px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C;white-space:nowrap;display:inline-block}
 .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
 label{font-size:11px;color:#666;display:block;margin:8px 0 4px}input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:13px}
 .btn{padding:8px 14px;border-radius:8px;border:none;font-size:12px;font-weight:600;margin:4px 2px}
@@ -1929,7 +1929,7 @@ label{font-size:11px;color:#666;display:block;margin:8px 0 4px}input{width:100%;
 table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px 4px;border-bottom:1px solid #eee;text-align:left}
 </style></head>
 <body>
-<div class="topbar"><h1>👥 Customers (ISESMO Only)</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/orders" class="nav-pill">Live Orders</a></div></div>
+<div class="topbar"><h1>👥 Customers (ISESMO Only)</h1><div class="nav-group"><a href="/cashier" class="nav-pill">Sales</a><a href="/orders" class="nav-pill">Live Orders</a></div></div>
 <div class="card">
 <h3 style="margin:0 0 8px;font-size:14px">Add New Customer - Only ISESMO</h3>
 <label>Store Name *</label><input id="newStore" placeholder="AMO Store">
