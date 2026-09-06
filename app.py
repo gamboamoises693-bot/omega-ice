@@ -1226,7 +1226,16 @@ def fix_reseller_duplicates():
     it does nothing.
     """
     resellers = fb_get("resellers") or {}
-    sales = fb_get("daily_sales") or {}
+    sales = fb_get("daily_sales") 
+        from datetime import timedelta
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now = datetime.now(manila)
+        except:
+            now = datetime.now()
+        cutoff_24h = now - timedelta(hours=24)
+or {}
 
     by_name = {}
     for key, val in resellers.items():
@@ -1946,13 +1955,44 @@ def api_customer_orders(reseller_id):
         def kg_val(s):
             try: return float(str(s).lower().replace("kg","").strip())
             except: return 0
+        from datetime import timedelta
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now = datetime.now(manila)
+        except:
+            now = datetime.now()
+        cutoff_24h = now - timedelta(hours=24)
+        
         for key,val in sales.items():
             if not val: continue
+            # Hide pending >24hrs - only 24hrs data
+            if val.get("hidden_24h") or val.get("archived"): 
+                # Skip archived/hidden, but show if ?show_archived=1 and is within 24h?
+                show_arch = request.args.get("show_archived") == "1"
+                if not show_arch:
+                    continue
             rid = val.get("reseller_id")
             rname = (val.get("reseller_name") or "").strip()
             target_name = (reseller.get("store_name") or "").strip()
             if rid != reseller_id and rname.lower() != target_name.lower():
                 continue
+            # 24h filter: only show orders from last 24hrs
+            ca = val.get("created_at") or ""
+            try:
+                ca_dt = None
+                for fmt in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"]:
+                    try:
+                        ca_dt = datetime.strptime(ca[:19], fmt)
+                        break
+                    except:
+                        continue
+                if ca_dt and ca_dt < cutoff_24h.replace(tzinfo=None):
+                    # Hide if older than 24h AND status is Pending
+                    if (val.get("order_status") or "Pending") in ["Pending", "New Order"]:
+                        continue
+            except:
+                pass
             qty = int(val.get("quantity",0) or 0)
             kg_size = val.get("kg_size","1Kg")
             peso = float(val.get("total_sales",0) or 0)
@@ -2520,12 +2560,53 @@ loadOrders();setInterval(loadOrders,30000);
 @app.route("/api/staff/customer_orders")
 @login_required
 def api_staff_customer_orders():
+    # 24hrs only - hide pending >24hrs
     try:
+        from datetime import timedelta
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now = datetime.now(manila)
+        except:
+            now = datetime.now()
+        cutoff_24h = now - timedelta(hours=24)
+        
         sales = fb_get("daily_sales") or {}
         orders=[]
         for key,val in sales.items():
             if not val: continue
             if val.get("order_source") != "customer": continue
+            if val.get("archived") and not val.get("hidden_24h"): 
+                # Skip archived unless it's 24h hidden (we want to hide those anyway)
+                continue
+            if val.get("deleted"): continue
+            if val.get("hidden_24h"): continue
+            
+            # 24h filter - hide orders older than 24h
+            ca = val.get("created_at") or ""
+            is_old = False
+            try:
+                ca_dt = None
+                for fmt in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"]:
+                    try:
+                        ca_dt = datetime.strptime(ca[:19], fmt)
+                        break
+                    except:
+                        continue
+                if ca_dt and ca_dt < cutoff_24h.replace(tzinfo=None):
+                    # If old and Pending/New Order, hide (only 24hrs data)
+                    if (val.get("order_status") or "Pending") in ["Pending", "New Order"]:
+                        is_old = True
+                # Also check sales_date for old 2025 orders
+                sd = val.get("sales_date") or ""
+                if "2025" in sd or "2026-08" in sd or "2026-09-01" in sd or "2026-09-04" in sd:
+                    is_old = True
+            except:
+                pass
+            
+            if is_old:
+                continue
+                
             orders.append({"id":key,"reseller_name":val.get("reseller_name"),"quantity":val.get("quantity"),"kg_size":val.get("kg_size"),"total_sales":val.get("total_sales"),"mode":val.get("mode"),"sales_date":val.get("sales_date"),"order_status":val.get("order_status","New Order"),"created_at":val.get("created_at")})
         # Sort: New Orders first, Delivered at bottom
         def status_priority(s):
