@@ -127,7 +127,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 </div>
 <div class="today-card">
   <div style="display:flex;justify-content:space-between;align-items:center;">
-    <div><div style="font-size:11px;opacity:.8;" id="todayLabel">TODAY'S SALES</div><div style="font-size:10px;opacity:.7;" id="todayDate">2026-09-06 - Tap Refresh</div></div>
+    <div><div style="font-size:11px;opacity:.8;" id="todayLabel">TODAY'S SALES</div><div style="font-size:10px;opacity:.7;" id="todayDate">Loading...</div></div>
     <button onclick="loadToday()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;">Refresh</button><button onclick="resetTodayData()" style="background:#ef4444;border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;margin-left:6px">🗑️ Reset Today</button>
   </div>
   <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
@@ -196,33 +196,17 @@ async function fetchLiveOrdersCount(){
 setInterval(fetchLiveOrdersCount, 30000);
 fetchLiveOrdersCount();
 async function loadToday(){
-  // Show date immediately so not stuck on 2026-09-06 - Tap Refresh
-  const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
-  document.getElementById('todayDate').textContent = todayStr + ' to ' + todayStr;
-  document.getElementById('todayLabel').textContent = (cashierPeriod||'daily').toUpperCase() + ' SALES';
   try{
-    const controller = new AbortController();
-    const timeout = setTimeout(()=>controller.abort(), 8000); // 8 sec timeout
-    const res=await fetch('/api/sales/dashboard?period='+cashierPeriod, {signal: controller.signal});
-    clearTimeout(timeout);
+    const res=await fetch('/api/sales/dashboard?period='+cashierPeriod);
     if(res.status===401){window.location.href='/login';return;}
     const data=await res.json();
     document.getElementById('todayKg').textContent=(data.total_kg||0).toLocaleString()+'kg';
     document.getElementById('todayPeso').textContent='₱'+(data.total||0).toLocaleString();
     document.getElementById('todayCount').textContent=data.count||0;
-    document.getElementById('todayDate').textContent=(data.start||todayStr)+' to '+(data.date||todayStr);
-    document.getElementById('todayLabel').textContent=(data.label||cashierPeriod||'TODAY').toUpperCase()+' SALES';
+    document.getElementById('todayDate').textContent=(data.start||'')+' to '+(data.date||'');
+    document.getElementById('todayLabel').textContent=(data.label||'').toUpperCase()+' SALES';
     const b=data.breakdown||{};document.getElementById('todayBreakdown').textContent=`1Kg:${b['1Kg']||0} 5Kg:${b['5Kg']||0} 10Kg:${b['10Kg']||0} 25Kg:${b['25Kg']||0}`;
-    if(data.pending_count!==undefined){
-      document.getElementById('todayBreakdown').textContent += ` | Pending:${data.pending_count||0}`;
-    }
-  }catch(e){
-    console.error('Dashboard load error', e);
-    document.getElementById('todayDate').textContent = todayStr + ' (offline/cached)';
-    // Keep 0kg 0 peso if failed, but not stuck on 2026-09-06 - Tap Refresh
-    document.getElementById('todayBreakdown').textContent = 'Failed to load - tap Refresh. Error: ' + (e.message||'timeout');
-  }
+  }catch(e){console.error(e);}
 }
 async function loadRecent(){
   try{
@@ -247,22 +231,14 @@ async function loadRecent(){
 }
 async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sale/${id}`,{method:'DELETE'});loadRecent();loadToday();}
 async function resetTodayData(){
-  if(!confirm('🗑️ RESET TODAY?\n\nThis will DELETE ALL sales with date TODAY including your simulated delivered data!\n\nOnly ISESMO can do this.\n\nAre you sure?')) return;
-  const typed = prompt('Type DELETE to confirm reset today:');
-  if(typed !== 'DELETE'){ alert('Cancelled - you must type DELETE'); return; }
+  if(!confirm('🗑️ RESET TODAY?\n\nThis will DELETE ALL sales with date TODAY (2026-09-06) including your simulated delivered data!\n\nOnly ISESMO can do this.\n\nAre you sure? This cannot be undone!')) return;
+  if(!confirm('FINAL CONFIRM: Delete today\\'s data? Type OK')) return;
   try{
     const res = await fetch('/api/staff/reset_today', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
     const data = await res.json();
     if(data.ok){
-      alert(`✅ Deleted ${data.deleted}/${data.found||data.deleted} records from today (${data.date})! Total was ${data.total||'?'}! Dashboard reset!`);
-      // Force clear and reload instantly
-      document.getElementById('todayKg').textContent='0kg';
-      document.getElementById('todayPeso').textContent='₱0';
-      document.getElementById('todayCount').textContent='0';
-      document.getElementById('todayBreakdown').textContent='1Kg:0 5Kg:0 10Kg:0 25Kg:0';
-      localStorage.removeItem('omega_last_delivered');
-      setTimeout(()=>{loadToday(); loadRecent();}, 500);
-      setTimeout(()=>{loadToday(); loadRecent();}, 2000);
+      alert(`✅ Deleted ${data.deleted} records from today (${data.date})! Dashboard reset!`);
+      loadToday(); loadRecent();
     } else {
       alert('Failed: '+(data.error||'Not allowed - Only ISESMO'));
     }
@@ -1564,7 +1540,7 @@ PM_HISTORY_HTML = """<!DOCTYPE html>
   <a href="/machines">&larr; Machines</a>
 </div>
 
-<div id="historyList">2026-09-06 - Tap Refresh</div>
+<div id="historyList">Loading...</div>
 
 <script>
 const machineId = "{{ machine_id }}";
@@ -1686,7 +1662,7 @@ async function doLogin(){
   st.textContent='Checking...';
   const res=await fetch('/api/customer/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone,password:pwd})});
   const data=await res.json();
-  if(data.ok){st.textContent='OK! 2026-09-06 - Tap Refresh';window.location.href=`/customer/${data.reseller_id}/dashboard`;}
+  if(data.ok){st.textContent='OK! Loading...';window.location.href=`/customer/${data.reseller_id}/dashboard`;}
   else{st.textContent=data.error||'Wrong phone or password';st.className='status err';}
 }
 async function showOTP(){
@@ -1738,7 +1714,7 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 <button onclick="bulkUpdateAllToPreparing()" style="padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">Mark as Preparing</button>
 </div>
 </div>
-<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">Real-time Orders</div><div id="ordersList">2026-09-06 - Tap Refresh</div></div>
+<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">Real-time Orders</div><div id="ordersList">Loading...</div></div>
 <script>
 const resellerId="{{ reseller_id }}";
 async function loadOrders(){
@@ -2078,13 +2054,6 @@ def api_update_order_status(order_id):
         update_data["sales_date"] = today  # <-- This fixes "1 delivered today but recent sales not updated"
         update_data["created_at"] = now_str  # Make it appear on top of Recent sales
     fb_patch(f"daily_sales/{order_id}", update_data)
-    # Clear cache after delivered so dashboard updates instantly
-    for k in list(globals().keys()):
-        if k.startswith("_dashboard_cache_"):
-            try:
-                del globals()[k]
-            except:
-                pass
     return jsonify({"ok": True, "status": new_status, "sales_updated": new_status == "Delivered"})
 
 @app.route("/customers")
@@ -2246,19 +2215,12 @@ def api_set_reseller_password(reseller_id):
 @login_required
 def api_sales_dashboard():
     period = request.args.get("period", "daily").lower()
-    # Fast path for daily - use Manila time
     try:
         import pytz
         manila = pytz.timezone('Asia/Manila')
         now = datetime.now(manila)
     except:
         now = datetime.now()
-    # Cache daily_sales for 10 sec to avoid hammering Firebase with 1600 records
-    cache_key = f"_dashboard_cache_{period}"
-    cached = globals().get(cache_key)
-    if cached and (now - cached.get("time", datetime.min)).total_seconds() < 10:
-        return jsonify(cached.get("data"))
-
     def kg_value(s):
         try: return float(str(s).lower().replace("kg","").strip())
         except: return 0
@@ -2318,9 +2280,7 @@ def api_sales_dashboard():
                 if kg_size in pending_breakdown: pending_breakdown[kg_size] += qty
     except Exception as e:
         print(f"dashboard error {e}")
-    result = {"period": period, "label": label, "total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "pending_total": pending_peso, "pending_kg": pending_kg, "pending_count": pending_count, "pending_breakdown": pending_breakdown, "date": now.strftime("%Y-%m-%d"), "start": start_date.strftime("%Y-%m-%d") if start_date else "All"}
-    globals()[cache_key] = {"time": now, "data": result}
-    return jsonify(result)
+    return jsonify({"period": period, "label": label, "total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "pending_total": pending_peso, "pending_kg": pending_kg, "pending_count": pending_count, "pending_breakdown": pending_breakdown, "date": now.strftime("%Y-%m-%d"), "start": start_date.strftime("%Y-%m-%d") if start_date else "All"})
 
 @app.route("/api/sales/today")
 @login_required
@@ -2409,7 +2369,7 @@ def staff_orders_page():
 <div class="topbar"><h1>Live Customer Orders</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a></div></div>
 <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><span class="live">● LIVE</span><button onclick="bulkUpdateAllStaff()" style="padding:6px 12px;border-radius:20px;border:none;background:#16a34a;color:#fff;font-size:11px">✅ All Pending → Delivered</button>
 <button onclick="archiveAllOldStaff()" style="padding:6px 12px;border-radius:20px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-size:11px">📦 Archive Old >7d</button><button onclick="loadOrders()" style="padding:6px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px">Refresh</button></div>
-<div id="ordersList">2026-09-06 - Tap Refresh</div>
+<div id="ordersList">Loading...</div>
 <script>
 async function loadOrders(){
   const res=await fetch('/api/staff/customer_orders');
@@ -2704,12 +2664,10 @@ def api_staff_archive_all_old():
 def api_staff_reset_today():
     try:
         staff = (session.get("staff_name") or "").lower()
-        print(f"RESET TODAY called by {staff}")
         if staff not in ["isesmo", "isesmo gamboa"]:
-            return jsonify({"ok": False, "error": f"Only ISESMO can reset today. You are {staff}"}), 403
+            return jsonify({"ok": False, "error": "Only ISESMO can reset today"}), 403
         data = request.json or {}
-        date_str = data.get("date")
-        force_all = data.get("force_all", False)
+        date_str = data.get("date")  # optional, defaults to today
         if not date_str:
             try:
                 import pytz
@@ -2718,54 +2676,22 @@ def api_staff_reset_today():
             except:
                 now = datetime.now()
             date_str = now.strftime("%Y-%m-%d")
-        print(f"Resetting date {date_str}, force_all={force_all}")
         sales = fb_get("daily_sales") or {}
-        print(f"Found {len(sales)} total sales")
         deleted = 0
-        to_delete = []
         for key,val in sales.items():
             if not val: continue
-            if force_all:
-                to_delete.append(key)
-                continue
-            sd = (val.get("sales_date") or "")[:10]
-            dd = (val.get("delivered_date") or "")[:10]
-            ca = (val.get("created_at") or "")[:10]
-            # Match ANY date field to today
-            if date_str in [sd, dd, ca]:
-                to_delete.append(key)
-            # Also if sales_date contains date_str
-            elif sd == date_str or dd == date_str or ca == date_str:
-                to_delete.append(key)
-        
-        print(f"Will delete {len(to_delete)} records")
-        for key in to_delete:
-            # Try delete first, if fails, archive it (fallback for Firebase rules)
-            ok = fb_delete(f"daily_sales/{key}")
-            if not ok:
-                # Fallback: archive instead
-                try:
-                    fb_patch(f"daily_sales/{key}", {"archived": True, "archived_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "reset_by": staff})
-                    ok = True
-                except:
-                    ok = False
-            print(f"Delete/Archive {key}: {ok}")
-            if ok:
+            sd = val.get("sales_date") or (val.get("created_at")[:10] if val.get("created_at") else "")
+            dd = val.get("delivered_date") or ""
+            # Delete if sales_date or delivered_date matches today
+            if sd and sd[:10] == date_str:
+                fb_delete(f"daily_sales/{key}")
                 deleted += 1
-        
-        # Clear dashboard cache
-        for key in list(globals().keys()):
-            if key.startswith("_dashboard_cache_"):
-                try:
-                    del globals()[key]
-                except:
-                    pass
-        
-        print(f"Deleted {deleted}/{len(to_delete)}")
-        return jsonify({"ok": True, "deleted": deleted, "found": len(to_delete), "total": len(sales), "date": date_str})
+            elif dd and dd[:10] == date_str and val.get("order_status") == "Delivered":
+                # Also delete delivered today that were originally old but updated to today
+                fb_delete(f"daily_sales/{key}")
+                deleted += 1
+        return jsonify({"ok": True, "deleted": deleted, "date": date_str})
     except Exception as e:
-        import traceback
-        print(f"Reset error: {e}\n{traceback.format_exc()}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/staff/reset_all_simulated", methods=["POST"])
