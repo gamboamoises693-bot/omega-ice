@@ -247,13 +247,14 @@ async function loadRecent(){
 }
 async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sale/${id}`,{method:'DELETE'});loadRecent();loadToday();}
 async function resetTodayData(){
-  if(!confirm('🗑️ RESET TODAY?\n\nThis will DELETE ALL sales with date TODAY (2026-09-06) including your simulated delivered data!\n\nOnly ISESMO can do this.\n\nAre you sure? This cannot be undone!')) return;
-  if(!confirm('FINAL CONFIRM: Delete today\\'s data? Type OK')) return;
+  if(!confirm('🗑️ RESET TODAY?\n\nThis will DELETE ALL sales with date TODAY including your simulated delivered data!\n\nOnly ISESMO can do this.\n\nAre you sure?')) return;
+  const typed = prompt('Type DELETE to confirm reset today:');
+  if(typed !== 'DELETE'){ alert('Cancelled - you must type DELETE'); return; }
   try{
     const res = await fetch('/api/staff/reset_today', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
     const data = await res.json();
     if(data.ok){
-      alert(`✅ Deleted ${data.deleted} records from today (${data.date})! Dashboard reset!`);
+      alert(`✅ Deleted ${data.deleted}/${data.found||data.deleted} records from today (${data.date})! Total was ${data.total||'?'}! Dashboard reset!`);
       // Force clear and reload instantly
       document.getElementById('todayKg').textContent='0kg';
       document.getElementById('todayPeso').textContent='₱0';
@@ -2703,10 +2704,12 @@ def api_staff_archive_all_old():
 def api_staff_reset_today():
     try:
         staff = (session.get("staff_name") or "").lower()
+        print(f"RESET TODAY called by {staff}")
         if staff not in ["isesmo", "isesmo gamboa"]:
-            return jsonify({"ok": False, "error": "Only ISESMO can reset today"}), 403
+            return jsonify({"ok": False, "error": f"Only ISESMO can reset today. You are {staff}"}), 403
         data = request.json or {}
-        date_str = data.get("date")  # optional, defaults to today
+        date_str = data.get("date")
+        force_all = data.get("force_all", False)
         if not date_str:
             try:
                 import pytz
@@ -2715,29 +2718,46 @@ def api_staff_reset_today():
             except:
                 now = datetime.now()
             date_str = now.strftime("%Y-%m-%d")
+        print(f"Resetting date {date_str}, force_all={force_all}")
         sales = fb_get("daily_sales") or {}
+        print(f"Found {len(sales)} total sales")
         deleted = 0
+        to_delete = []
         for key,val in sales.items():
             if not val: continue
-            sd = val.get("sales_date") or (val.get("created_at")[:10] if val.get("created_at") else "")
-            dd = val.get("delivered_date") or ""
-            # Delete if sales_date or delivered_date matches today
-            if sd and sd[:10] == date_str:
-                fb_delete(f"daily_sales/{key}")
+            if force_all:
+                to_delete.append(key)
+                continue
+            sd = (val.get("sales_date") or "")[:10]
+            dd = (val.get("delivered_date") or "")[:10]
+            ca = (val.get("created_at") or "")[:10]
+            # Match ANY date field to today
+            if date_str in [sd, dd, ca]:
+                to_delete.append(key)
+            # Also if sales_date contains date_str
+            elif sd == date_str or dd == date_str or ca == date_str:
+                to_delete.append(key)
+        
+        print(f"Will delete {len(to_delete)} records")
+        for key in to_delete:
+            ok = fb_delete(f"daily_sales/{key}")
+            print(f"Delete {key}: {ok}")
+            if ok:
                 deleted += 1
-            elif dd and dd[:10] == date_str and val.get("order_status") == "Delivered":
-                # Also delete delivered today that were originally old but updated to today
-                fb_delete(f"daily_sales/{key}")
-                deleted += 1
-        # Clear dashboard cache so it shows 0 instantly after reset
+        
+        # Clear dashboard cache
         for key in list(globals().keys()):
             if key.startswith("_dashboard_cache_"):
                 try:
                     del globals()[key]
                 except:
                     pass
-        return jsonify({"ok": True, "deleted": deleted, "date": date_str})
+        
+        print(f"Deleted {deleted}/{len(to_delete)}")
+        return jsonify({"ok": True, "deleted": deleted, "found": len(to_delete), "total": len(sales), "date": date_str})
     except Exception as e:
+        import traceback
+        print(f"Reset error: {e}\n{traceback.format_exc()}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/staff/reset_all_simulated", methods=["POST"])
