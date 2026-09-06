@@ -1226,16 +1226,7 @@ def fix_reseller_duplicates():
     it does nothing.
     """
     resellers = fb_get("resellers") or {}
-    sales = fb_get("daily_sales") 
-        from datetime import timedelta
-        try:
-            import pytz
-            manila = pytz.timezone('Asia/Manila')
-            now = datetime.now(manila)
-        except:
-            now = datetime.now()
-        cutoff_24h = now - timedelta(hours=24)
-or {}
+    sales = fb_get("daily_sales") or {}
 
     by_name = {}
     for key, val in resellers.items():
