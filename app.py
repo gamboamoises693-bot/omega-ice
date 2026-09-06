@@ -210,7 +210,7 @@ async function loadRecent(){
 }
 async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sale/${id}`,{method:'DELETE'});loadRecent();loadToday();}
 async function logout(){await fetch('/api/logout',{method:'POST'});window.location.href='/login'}
-updateTotal();loadRecent();loadToday();setInterval(loadRecent,5000);setInterval(loadToday,15000);
+updateTotal();loadRecent();loadToday();setInterval(loadRecent,30000);setInterval(loadToday,30000);
 </script>
 </body></html>
 """
@@ -1656,7 +1656,15 @@ const resellerId="{{ reseller_id }}";
 async function loadOrders(){
   const res=await fetch(`/api/customer/${resellerId}/orders?show_archived=${showArchived?1:0}`);
   const data=await res.json();
-  const orders=data.orders||[];
+  const ordersRaw=data.orders||[];
+  // Sort: New Order on top, Delivered at bottom
+  const priority = {"New Order":0, "Pending":1, "Preparing":2, "Out for Delivery":3, "Delivered":4, "Cancelled":5};
+  const orders = ordersRaw.sort((a,b)=>{
+    const pa = priority[a.order_status] ?? 1;
+    const pb = priority[b.order_status] ?? 1;
+    if(pa!==pb) return pa-pb;
+    return (b.created_at||'').localeCompare(a.created_at||'');
+  });
   const stats=data.stats||{};
   document.getElementById('totalKg').textContent=(stats.total_kg||0).toLocaleString()+'kg';
   document.getElementById('totalPeso').textContent='₱'+(stats.total_peso||0).toLocaleString();
@@ -1690,7 +1698,7 @@ async function bulkUpdateAllToPreparing(){
   const data=await res.json();
   if(data.ok){alert(`Updated ${data.updated}`);loadOrders();}else{alert(data.error||'Failed');}
 }
-loadOrders();setInterval(loadOrders,3000);
+loadOrders();setInterval(loadOrders,30000);
 
 </script>
 </body></html>
@@ -1900,7 +1908,20 @@ def api_customer_orders(reseller_id):
             total_peso += peso
             status_counts[status] = status_counts.get(status,0)+1
             orders.append({"id": key, "sales_date": val.get("sales_date"), "quantity": qty, "kg_size": kg_size, "total_sales": peso, "mode": val.get("mode"), "payment": val.get("payment"), "order_status": status, "created_at": val.get("created_at")})
-        orders.sort(key=lambda x: x.get("created_at") or x.get("sales_date") or "", reverse=True)
+        def status_priority_c(s):
+            order = (s.get("order_status") or "Pending")
+            priorities = {"New Order": 0, "Pending": 1, "Preparing": 2, "Out for Delivery": 3, "Delivered": 4, "Cancelled": 5}
+            return priorities.get(order, 1)
+        orders.sort(key=lambda x: (status_priority_c(x), x.get("created_at") or ""), reverse=False)
+        from collections import defaultdict as dd2
+        grouped2 = dd2(list)
+        for o in orders:
+            grouped2[status_priority_c(o)].append(o)
+        sorted_orders_c = []
+        for p in sorted(grouped2.keys()):
+            grouped2[p].sort(key=lambda x: x.get("created_at") or "", reverse=True)
+            sorted_orders_c.extend(grouped2[p])
+        orders = sorted_orders_c
         stats = {"total_kg": total_kg, "total_peso": total_peso, "count": len(orders), "status_counts": status_counts, "credit_balance": reseller.get("credit_balance",0)}
         return jsonify({"orders": orders[:50], "stats": stats, "reseller_name": reseller.get("store_name")})
     except Exception as e:
@@ -1957,13 +1978,17 @@ def api_update_order_status(order_id):
         return jsonify({"ok": False, "error": "Invalid status"}), 400
     existing = fb_get(f"daily_sales/{order_id}") or {}
     update_data = {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")}
-    # When marked as Delivered, also update sales record to count as real sale
+    # When marked as Delivered, update sales record so it counts as TODAY'S real sale
     if new_status == "Delivered":
-        update_data["delivered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        update_data["delivered_date"] = datetime.now().strftime("%Y-%m-%d")
-        # If sales_date is old pending, keep original but mark delivered
-        if not existing.get("sales_date"):
-            update_data["sales_date"] = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d")
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        update_data["delivered_at"] = now_str
+        update_data["delivered_date"] = today
+        # Keep original order date for history, but update sales_date to today so Recent Sales + Dashboard counts it
+        if existing.get("sales_date"):
+            update_data["original_sales_date"] = existing.get("sales_date")
+        update_data["sales_date"] = today  # <-- This fixes "1 delivered today but recent sales not updated"
+        update_data["created_at"] = now_str  # Make it appear on top of Recent sales
     fb_patch(f"daily_sales/{order_id}", update_data)
     return jsonify({"ok": True, "status": new_status, "sales_updated": new_status == "Delivered"})
 
@@ -2285,7 +2310,15 @@ def staff_orders_page():
 async function loadOrders(){
   const res=await fetch('/api/staff/customer_orders');
   const data=await res.json();
-  const orders=data.orders||[];
+  const ordersRaw=data.orders||[];
+  // Sort: New Order on top, Delivered at bottom
+  const priority = {"New Order":0, "Pending":1, "Preparing":2, "Out for Delivery":3, "Delivered":4, "Cancelled":5};
+  const orders = ordersRaw.sort((a,b)=>{
+    const pa = priority[a.order_status] ?? 1;
+    const pb = priority[b.order_status] ?? 1;
+    if(pa!==pb) return pa-pb;
+    return (b.created_at||'').localeCompare(a.created_at||'');
+  });
   let showArchived=false;
 function toggleArchived(){showArchived=!showArchived;document.getElementById('toggleArchBtn').textContent=showArchived?'Hide Archived':'Show Archived';loadOrders();}
 const list=document.getElementById('ordersList');
@@ -2341,7 +2374,7 @@ async function bulkUpdateAllToPreparing(){
   const data=await res.json();
   if(data.ok){alert(`Updated ${data.updated}`);loadOrders();}else{alert(data.error||'Failed');}
 }
-loadOrders();setInterval(loadOrders,3000);
+loadOrders();setInterval(loadOrders,30000);
 
 </script>
 </body></html>"""
@@ -2357,8 +2390,23 @@ def api_staff_customer_orders():
             if not val: continue
             if val.get("order_source") != "customer": continue
             orders.append({"id":key,"reseller_name":val.get("reseller_name"),"quantity":val.get("quantity"),"kg_size":val.get("kg_size"),"total_sales":val.get("total_sales"),"mode":val.get("mode"),"sales_date":val.get("sales_date"),"order_status":val.get("order_status","New Order"),"created_at":val.get("created_at")})
-        orders.sort(key=lambda x: x.get("created_at") or "", reverse=True)
-        return jsonify({"orders": orders[:50]})
+        # Sort: New Orders first, Delivered at bottom
+        def status_priority(s):
+            order = (s.get("order_status") or "Pending")
+            priorities = {"New Order": 0, "Pending": 1, "Preparing": 2, "Out for Delivery": 3, "Delivered": 4, "Cancelled": 5}
+            return priorities.get(order, 1)
+        orders.sort(key=lambda x: (status_priority(x), -(len(x.get("created_at") or "")), x.get("created_at") or ""), reverse=False)
+        # Actually sort by priority then newest first within same priority
+        from collections import defaultdict
+        grouped = defaultdict(list)
+        for o in orders:
+            grouped[status_priority(o)].append(o)
+        sorted_orders = []
+        for p in sorted(grouped.keys()):
+            # Within same priority, newest first
+            grouped[p].sort(key=lambda x: x.get("created_at") or "", reverse=True)
+            sorted_orders.extend(grouped[p])
+        return jsonify({"orders": sorted_orders[:100]})
     except Exception as e:
         return jsonify({"orders":[]}), 500
 
@@ -2402,10 +2450,14 @@ def api_customer_bulk_update(reseller_id):
             current_status = val.get("order_status") or "Pending"
             if from_status != "ALL" and current_status != from_status:
                 continue
-            upd = {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("customer_name") or session.get("staff_name") or "Bulk Update"}
+            today = datetime.now().strftime("%Y-%m-%d")
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            upd = {"order_status": new_status, "status_updated_at": now_str, "status_updated_by": session.get("customer_name") or session.get("staff_name") or "Bulk Update"}
             if new_status == "Delivered":
-                upd["delivered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                upd["delivered_date"] = datetime.now().strftime("%Y-%m-%d")
+                upd["delivered_at"] = now_str
+                upd["delivered_date"] = today
+                upd["sales_date"] = today
+                upd["created_at"] = now_str
             fb_patch(f"daily_sales/{key}", upd)
             updated += 1
         return jsonify({"ok": True, "updated": updated, "from": from_status, "to": new_status})
@@ -2430,10 +2482,14 @@ def api_staff_bulk_update_all():
             current = val.get("order_status") or "Pending"
             if from_status != "ALL" and current != from_status:
                 continue
-            upd2 = {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")}
+            today2 = datetime.now().strftime("%Y-%m-%d")
+            now_str2 = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            upd2 = {"order_status": new_status, "status_updated_at": now_str2, "status_updated_by": session.get("staff_name")}
             if new_status == "Delivered":
-                upd2["delivered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                upd2["delivered_date"] = datetime.now().strftime("%Y-%m-%d")
+                upd2["delivered_at"] = now_str2
+                upd2["delivered_date"] = today2
+                upd2["sales_date"] = today2
+                upd2["created_at"] = now_str2
             fb_patch(f"daily_sales/{key}", upd2)
             updated += 1
         return jsonify({"ok": True, "updated": updated})
