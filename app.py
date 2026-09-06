@@ -16,19 +16,6 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "omega-ice-realtime-2026")
 FIREBASE_URL = "https://moises-92842-default-rtdb.asia-southeast1.firebasedatabase.app".rstrip("/")
 
-def login_required(v):
-    def w(*a,**k):
-        from flask import session, redirect, url_for, jsonify, request
-        if not session.get("staff_name"):
-            # For API calls, return JSON 401 not HTML redirect (fixes Unexpected token '<')
-            if request.path.startswith('/api/'):
-                return jsonify({"ok": False, "error": "Session expired - please login again", "redirect": "/login"}), 401
-            return redirect(url_for("login_page"))
-        return v(*a,**k)
-    w.__name__=v.__name__
-    return w
-
-
 KG_OPTIONS = ["1Kg", "5Kg", "10Kg", "25Kg"]
 FALLBACK_PRICES = {"1Kg": 10, "5Kg": 50, "10Kg": 100, "25Kg": 250}
 
@@ -65,7 +52,7 @@ CASHIER_HTML = """<!DOCTYPE html>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px;color:#1a1a1a}
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:4px 2px}
-.topbar h1{font-size:16px;color:#00609C;margin:0;font-weight:700}
+.topbar h1{font-size:15px;color:#00609C;margin:0;font-weight:700}
 .topbar .staff{font-size:12px;color:#555}.topbar .logout{font-size:12px;color:#c0392b;background:#fff;border:1px solid #e0c0c0;padding:6px 10px;border-radius:8px}
 .one-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .cloud-badge{display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:600}
@@ -93,6 +80,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
   <span class="cloud-badge pending" id="pendingBadge" style="display:none" onclick="syncOffline()">0 Pending</span>
   <a href="/cashier" class="nav-pill active">Sales</a>
   <a href="/machines" class="nav-pill">Machines</a>
+  <a href="/dashboard" class="nav-pill">Dashboard</a>
 </div>
 <div class="today-card">
   <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -100,13 +88,12 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
     <button onclick="loadToday()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;">Refresh</button>
   </div>
   <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-    <button class="period-btn active" data-period="daily" onclick="setCashierPeriod('daily')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.2);color:#fff;font-size:10px">Daily</button>
+    <button class="period-btn active" data-period="daily" onclick="setCashierPeriod('daily')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.3);color:#fff;font-size:10px">Daily</button>
     <button class="period-btn" data-period="weekly" onclick="setCashierPeriod('weekly')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">Weekly</button>
     <button class="period-btn" data-period="monthly" onclick="setCashierPeriod('monthly')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">Monthly</button>
     <button class="period-btn" data-period="quarterly" onclick="setCashierPeriod('quarterly')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">Quarterly</button>
     <button class="period-btn" data-period="yearly" onclick="setCashierPeriod('yearly')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">Year</button>
-    <button class="period-btn" data-period="all" onclick="setCashierPeriod('all')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">All</button>
-    <a href="/dashboard" style="padding:5px 10px;border-radius:12px;background:#fff;color:#00609C;font-size:10px;text-decoration:none;margin-left:auto">Full Dashboard</a>
+    <button class="period-btn" data-period="all" onclick="setCashierPeriod('all')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">All Time</button>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;text-align:center;">
     <div><div style="font-size:18px;font-weight:700;" id="todayKg">0kg</div><div style="font-size:9px;opacity:.8;">TOTAL KG</div></div>
@@ -128,7 +115,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 </div>
 <div class="card"><label style="font-weight:600;margin-bottom:8px;display:block">Recent sales</label><table><thead><tr><th>Date</th><th>Reseller</th><th>Qty</th><th>Size</th><th>Total</th><th></th></tr></thead><tbody id="recentBody"></tbody></table></div>
 <script>
-let mode='DELIVER';let payment='Cash';let kg='{{ kg_options[0] }}';let selectedReseller=null;let unitPrice=0;let editingSaleId=null;
+let mode='DELIVER';let payment='Cash';let kg='{{ kg_options[0] }}';let selectedReseller=null;let unitPrice=0;let editingSaleId=null;let cashierPeriod='daily';
 function setMode(m){mode=m;document.getElementById('modeDeliver').classList.toggle('active',m==='DELIVER');document.getElementById('modePickup').classList.toggle('active',m==='PICKUP');updateTotal()}
 function setPayment(p){payment=p;document.getElementById('payCash').classList.toggle('active',p==='Cash');document.getElementById('payCredit').classList.toggle('active',p==='Credit')}
 function setKg(k){kg=k;document.querySelectorAll('.kg-row button').forEach(b=>b.classList.toggle('active',b.dataset.kg===k));updateTotal()}
@@ -139,14 +126,7 @@ function pickReseller(id,name){selectedReseller={id,name};resellerInput.value=na
 async function saveSale(){const qty=parseInt(document.getElementById('qtyInput').value)||0;const name=resellerInput.value.trim();const statusEl=document.getElementById('statusMsg');if(!name||qty<=0){statusEl.textContent='Enter reseller';statusEl.className='status err';return}const payload={reseller_id:selectedReseller?selectedReseller.id:null,reseller_name:name,quantity:qty,kg_size:kg,mode:mode,payment:payment};const url=editingSaleId?`/api/sale/${editingSaleId}`:`/api/sale`;const method=editingSaleId?'PUT':'POST';statusEl.textContent='Saving...';const res=await fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(data.ok){statusEl.textContent=`Saved ₱${data.total}`;statusEl.className='status ok';cancelEdit();loadRecent();loadToday();}else{statusEl.textContent=data.error||'Error';statusEl.className='status err'}}
 async function editSale(id){const res=await fetch(`/api/sale/${id}`);const data=await res.json();if(!data.ok)return alert('Cannot edit');const s=data.sale;editingSaleId=id;resellerInput.value=s.reseller_name;selectedReseller=s.reseller_id?{id:s.reseller_id,name:s.reseller_name}:null;document.getElementById('qtyInput').value=s.quantity;setMode(s.mode);setPayment(s.payment);setKg(s.kg_size);document.getElementById('saveBtn').textContent='Update';document.getElementById('cancelEditBtn').style.display='block';window.scrollTo({top:0,behavior:'smooth'})}
 function cancelEdit(){editingSaleId=null;resellerInput.value='';selectedReseller=null;document.getElementById('qtyInput').value=1;document.getElementById('saveBtn').textContent='Save sale';document.getElementById('cancelEditBtn').style.display='none';updateTotal()}
-
-
-let cashierPeriod='daily';
-function setCashierPeriod(p){
-  cashierPeriod=p;
-  document.querySelectorAll('.today-card .period-btn').forEach(b=>{b.classList.toggle('active',b.dataset.period===p); if(b.dataset.period===p){b.style.background='rgba(255,255,255,.3)'} else {b.style.background='transparent'}});
-  loadToday();
-}
+function setCashierPeriod(p){cashierPeriod=p;document.querySelectorAll('.today-card .period-btn').forEach(b=>{const is=b.dataset.period===p;b.style.background=is?'rgba(255,255,255,.3)':'transparent';});loadToday();}
 async function loadToday(){
   try{
     const res=await fetch('/api/sales/dashboard?period='+cashierPeriod);
@@ -158,44 +138,602 @@ async function loadToday(){
     document.getElementById('todayDate').textContent=(data.start||'')+' to '+(data.date||'');
     document.getElementById('todayLabel').textContent=(data.label||'').toUpperCase()+' SALES';
     const b=data.breakdown||{};document.getElementById('todayBreakdown').textContent=`1Kg:${b['1Kg']||0} 5Kg:${b['5Kg']||0} 10Kg:${b['10Kg']||0} 25Kg:${b['25Kg']||0}`;
-  }catch(e){console.error('today error',e);}
-}
-    const data=await res.json();
-    document.getElementById('todayKg').textContent=(data.total_kg||0).toLocaleString()+'kg';
-    document.getElementById('todayPeso').textContent='₱'+(data.total||0).toLocaleString();
-    document.getElementById('todayCount').textContent=data.count||0;
-    document.getElementById('todayDate').textContent=data.date||new Date().toISOString().slice(0,10);
-    const b=data.breakdown||{};document.getElementById('todayBreakdown').textContent=`1Kg:${b['1Kg']||0} 5Kg:${b['5Kg']||0} 10Kg:${b['10Kg']||0} 25Kg:${b['25Kg']||0}`;
-  }catch(e){console.error('today error',e);}
+  }catch(e){console.error(e);}
 }
 async function loadRecent(){
   try{
     const res=await fetch('/api/sales/recent');
     if(res.status===401){window.location.href='/login';return;}
-    if(!res.ok){throw new Error('HTTP '+res.status);}
     let rows=await res.json();
-    if(rows && rows.error && !Array.isArray(rows)){
-      if(rows.redirect){window.location.href='/login';return;}
-      document.getElementById('recentBody').innerHTML=`<tr><td colspan=6 style="color:#c0392b">${rows.error}</td></tr>`;
-      return;
-    }
     if(rows.sales)rows=rows.sales;
     if(!Array.isArray(rows)){document.getElementById('recentBody').innerHTML=`<tr><td colspan=6>No data</td></tr>`;return;}
-    if(!rows.length){document.getElementById('recentBody').innerHTML=`<tr><td colspan=6 style="color:#888">No recent sales yet - Save a sale to see it here</td></tr>`;return;}
-    document.getElementById('recentBody').innerHTML=rows.slice(0,20).map(r=>{
-      let d=r.sales_date||(r.created_at?r.created_at.slice(0,10):'')||'';
-      return `<tr><td style="font-size:11px">${d}</td><td>${r.reseller_name||''}</td><td>${r.quantity||0}</td><td>${r.kg_size||''}</td><td>₱${r.total_sales||0}</td><td><button class="edit-btn" onclick="editSale('${r.id}')">Edit</button><button class="del-btn" onclick="deleteSale('${r.id}')">Del</button></td></tr>`;
-    }).join('');
-  }catch(e){
-    console.error('loadRecent error',e);
-    if(e.message.includes('<') || e.message.includes('Unexpected token')){
-      document.getElementById('recentBody').innerHTML=`<tr><td colspan=6 style="color:#c0392b">Session expired - <a href="/login">Login again</a><br><small>Error: ${e.message.slice(0,80)}</small></td></tr>`;
-    } else {
-      document.getElementById('recentBody').innerHTML=`<tr><td colspan=6 style="color:#c0392b">Error: ${e.message} - <a href="/login">Login</a></td></tr>`;
-    }
-  }
+    if(!rows.length){document.getElementById('recentBody').innerHTML=`<tr><td colspan=6 style="color:#888">No recent sales yet</td></tr>`;return;}
+    document.getElementById('recentBody').innerHTML=rows.slice(0,20).map(r=>`<tr><td style="font-size:11px">${r.sales_date||''}</td><td>${r.reseller_name}</td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td><button class="edit-btn" onclick="editSale('${r.id}')">Edit</button><button class="del-btn" onclick="deleteSale('${r.id}')">Del</button></td></tr>`).join('');
+  }catch(e){document.getElementById('recentBody').innerHTML=`<tr><td colspan=6 style="color:#c0392b">Error: ${e.message} <a href="/login">Login</a></td></tr>`;}
 }
+async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sale/${id}`,{method:'DELETE'});loadRecent();loadToday();}
+async function logout(){await fetch('/api/logout',{method:'POST'});window.location.href='/login'}
+updateTotal();loadRecent();loadToday();setInterval(loadRecent,5000);setInterval(loadToday,15000);
+</script>
+</body></html>
+"""
 
+# ---------- Local offline DB ----------
+LOCAL_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "omega_local.db")
+
+def init_local_db():
+    conn = sqlite3.connect(LOCAL_DB)
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS pending_sales (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data TEXT,
+        created_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS cached_resellers (
+        firebase_id TEXT,
+        store_name TEXT,
+        credit_balance REAL,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS cached_sales (
+        firebase_id TEXT,
+        sales_date TEXT,
+        reseller_name TEXT,
+        quantity INTEGER,
+        kg_size TEXT,
+        total_sales REAL,
+        mode TEXT,
+        payment TEXT,
+        created_at TEXT
+    )""")
+    conn.commit()
+    conn.close()
+
+init_local_db()
+
+def is_online():
+    try:
+        r = requests.get(f"{FIREBASE_URL}/.json", timeout=3)
+        return r.status_code in [200, 401, 403]
+    except:
+        return False
+
+def save_local_pending(sale_dict):
+    conn = sqlite3.connect(LOCAL_DB)
+    c = conn.cursor()
+    c.execute("INSERT INTO pending_sales (data, created_at) VALUES (?,?)", (json.dumps(sale_dict), datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+def get_pending_count():
+    conn = sqlite3.connect(LOCAL_DB)
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM pending_sales")
+    count = c.fetchone()[0]
+    conn.close()
+    return count
+
+def save_cached_resellers(fb_data):
+    if not fb_data:
+        return
+    conn = sqlite3.connect(LOCAL_DB)
+    c = conn.cursor()
+    c.execute("DELETE FROM cached_resellers")
+    for fid, val in fb_data.items():
+        if val and val.get("store_name"):
+            c.execute("INSERT INTO cached_resellers VALUES (?,?,?,?)", (fid, val.get("store_name"), float(val.get("credit_balance",0) or 0), datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+def get_cached_resellers(q=""):
+    conn = sqlite3.connect(LOCAL_DB)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    q = q.lower()
+    if q:
+        c.execute("SELECT * FROM cached_resellers WHERE lower(store_name) LIKE ? ORDER BY store_name LIMIT 50", (f"%{q}%",))
+    else:
+        c.execute("SELECT * FROM cached_resellers ORDER BY store_name LIMIT 50")
+    rows = c.fetchall()
+    conn.close()
+    return [{"id": r["firebase_id"], "store_name": r["store_name"], "credit_balance": r["credit_balance"]} for r in rows]
+
+# ---------- Firebase helpers ----------
+def fb_get(path):
+    try:
+        r = requests.get(f"{FIREBASE_URL}/{path}.json", timeout=7)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        print(f"GET {path} error: {e}")
+    return None
+
+def fb_post(path, data):
+    try:
+        r = requests.post(f"{FIREBASE_URL}/{path}.json", json=data, timeout=10)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        print(f"POST {path} error: {e}")
+    return None
+
+def fb_put(path, data):
+    try:
+        r = requests.put(f"{FIREBASE_URL}/{path}.json", json=data, timeout=10)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        print(f"PUT {path} error: {e}")
+    return None
+
+def fb_patch(path, data):
+    try:
+        r = requests.patch(f"{FIREBASE_URL}/{path}.json", json=data, timeout=10)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        print(f"PATCH {path} error: {e}")
+    return None
+
+def get_price(kg_label, mode):
+    ptype = "PICKUP" if mode == "PICKUP" else "REGULAR"
+    col_map = {"1Kg": "kg1", "5Kg": "kg5", "10Kg": "kg10", "25Kg": "kg25"}
+    col = col_map.get(kg_label, "kg1")
+    try:
+        data = fb_get(f"price_settings/{ptype}")
+        if data and data.get(col):
+            return float(data[col])
+    except:
+        pass
+    price = FALLBACK_PRICES.get(kg_label, 10)
+    if mode == "PICKUP":
+        price = max(1, price - 1) if kg_label == "1Kg" else max(5, price - 5)
+    return float(price)
+
+# ---------- Machine monitoring helpers ----------
+
+def get_electricity_rate():
+    """₱ per kWh, used to compute electricity cost of a machine run."""
+    try:
+        data = fb_get("settings/electricity_rate")
+        if data:
+            return float(data)
+    except:
+        pass
+    return 12.0  # fallback default rate
+
+def calc_machine_age(date_purchase):
+    if not date_purchase:
+        return "N/A"
+    try:
+        d = datetime.strptime(date_purchase, "%Y-%m-%d")
+        days = (datetime.now() - d).days
+        years, rem_days = divmod(days, 365)
+        months = rem_days // 30
+        if years > 0:
+            return f"{years}y {months}m"
+        elif months > 0:
+            return f"{months}m"
+        return f"{days}d"
+    except:
+        return "N/A"
+
+def is_pm_overdue(pm_date):
+    if not pm_date:
+        return False
+    try:
+        d = datetime.strptime(pm_date, "%Y-%m-%d")
+        return d.date() < datetime.now().date()
+    except:
+        return False
+
+def login_required(view):
+    def wrapped(*args, **kwargs):
+        if not session.get("staff_name"):
+            return redirect(url_for("login_page"))
+        return view(*args, **kwargs)
+    wrapped.__name__ = view.__name__
+    return wrapped
+
+@app.route("/")
+def root():
+    if session.get("staff_name"):
+        return redirect(url_for("cashier_page"))
+    return redirect(url_for("login_page"))
+
+@app.route("/login")
+def login_page():
+    return render_template_string(LOGIN_HTML)
+
+@app.route("/debug")
+def debug_page():
+    import os
+    info = []
+    info.append(f"FIREBASE_URL: {FIREBASE_URL}")
+    info.append(f"Online: {is_online()}")
+    info.append(f"CWD: {os.getcwd()}")
+    info.append(f"Local DB: {LOCAL_DB} exists={os.path.exists(LOCAL_DB)}")
+    info.append(f"Pending offline sales: {get_pending_count()}")
+    try:
+        r = requests.get(f"{FIREBASE_URL}/.json", timeout=5)
+        info.append(f"Firebase status: {r.status_code}")
+    except Exception as e:
+        info.append(f"Firebase failed: {e}")
+    return "<br>".join(info)
+
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    pin = (request.json or {}).get("pin", "").strip()
+    if len(pin) != 4:
+        return jsonify({"ok": False, "error": "Enter 4-digit PIN"}), 400
+    # Try online first
+    staff_data = fb_get("staff")
+    # If offline, allow login with cached PINs (fallback)
+    if not staff_data:
+        # offline fallback PINs
+        offline_pins = {"1928":"Tatay/Nanay","0615":"Yhel","0519":"OMEGA","0712":"ISESMO"}
+        if pin in offline_pins:
+            session["staff_id"] = f"offline-{pin}"
+            session["staff_name"] = offline_pins[pin]
+            session["staff_position"] = "Offline"
+            return jsonify({"ok": True, "name": offline_pins[pin], "position": "Offline Mode"})
+        return jsonify({"ok": False, "error": "No internet + no cached staff. Connect once to login."}), 404
+    for key, val in staff_data.items():
+        if val and val.get("pin") == pin and val.get("status") == "Active":
+            session["staff_id"] = key
+            session["staff_name"] = val.get("name")
+            session["staff_position"] = val.get("position", "Staff")
+            return jsonify({"ok": True, "name": val.get("name"), "position": val.get("position")})
+    return jsonify({"ok": False, "error": "Wrong PIN"}), 401
+
+@app.route("/api/setup")
+def api_setup():
+    existing = fb_get("staff")
+    if existing:
+        return jsonify({"ok": False, "message": "Already setup", "staff_count": len(existing)})
+    staff = {
+        "staff1": {"name": "Tatay/Nanay", "position": "Co-Owner", "pin": "1928", "status": "Active"},
+        "staff2": {"name": "Yhel", "position": "Staff", "pin": "0615", "status": "Active"},
+        "staff3": {"name": "OMEGA", "position": "ADMIN", "pin": "0519", "status": "Active"},
+        "staff4": {"name": "ISESMO", "position": "Manager/Owner", "pin": "0712", "status": "Active"},
+    }
+    fb_put("staff", staff)
+    fb_put("price_settings/REGULAR", {"kg1": 10, "kg5": 50, "kg10": 100, "kg25": 250, "type": "REGULAR"})
+    fb_put("price_settings/PICKUP", {"kg1": 9, "kg5": 45, "kg10": 90, "kg25": 230, "type": "PICKUP"})
+    return jsonify({"ok": True, "message": "Setup done! PIN 1928"})
+
+@app.route("/api/logout", methods=["POST"])
+def api_logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+@app.route("/cashier")
+@login_required
+def cashier_page():
+    return render_template_string(CASHIER_HTML, staff_name=session.get("staff_name"), staff_position=session.get("staff_position"), kg_options=KG_OPTIONS)
+
+@app.route("/api/resellers")
+@login_required
+def api_resellers():
+    q = request.args.get("q", "").strip().lower()
+    # Try online
+    data = fb_get("resellers")
+    if data:
+        save_cached_resellers(data)
+        resellers = []
+        for key, val in data.items():
+            if val:
+                name = val.get("store_name", "")
+                if not q or q in name.lower():
+                    resellers.append({"id": key, "store_name": name, "credit_balance": val.get("credit_balance", 0)})
+        resellers.sort(key=lambda x: x["store_name"])
+        return jsonify(resellers[:50] if not q else resellers[:20])
+    else:
+        # offline fallback - use cached
+        cached = get_cached_resellers(q)
+        return jsonify(cached)
+
+@app.route("/api/price")
+@login_required
+def api_price():
+    kg = request.args.get("kg", "1Kg")
+    mode = request.args.get("mode", "DELIVER")
+    return jsonify({"price": get_price(kg, mode)})
+
+@app.route("/api/sale", methods=["POST"])
+@login_required
+def api_create_sale():
+    data = request.json or {}
+    reseller_id = data.get("reseller_id")
+    reseller_name = data.get("reseller_name", "").strip()
+    qty = int(data.get("quantity", 1))
+    kg_size = data.get("kg_size", "1Kg")
+    mode = data.get("mode", "DELIVER")
+    payment = data.get("payment", "Cash")
+    notes = data.get("notes", "")
+
+    if not reseller_name or qty <= 0:
+        return jsonify({"ok": False, "error": "Reseller and quantity required"}), 400
+
+    unit_price = get_price(kg_size, mode)
+    total = round(unit_price * qty, 2)
+
+    sale = {
+        "sales_date": datetime.now().strftime("%Y-%m-%d"),
+        "reseller_id": reseller_id,
+        "reseller_name": reseller_name,
+        "quantity": qty,
+        "kg_size": kg_size,
+        "total_sales": total,
+        "unit_price": unit_price,
+        "mode": mode,
+        "payment": payment,
+        "payment_mode": payment,
+        "delivery_mode": mode,
+        "notes": notes,
+        "staff_name": session.get("staff_name"),
+        "created_at": datetime.now().isoformat()
+    }
+
+    # Try online
+    result = fb_post("daily_sales", sale)
+    if result:
+        # online success - ALSO cache locally for instant Recent display
+        try:
+            conn = sqlite3.connect(LOCAL_DB)
+            c = conn.cursor()
+            c.execute("INSERT INTO cached_sales (sales_date, reseller_name, quantity, kg_size, total_sales, mode, payment, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                      (sale["sales_date"], sale["reseller_name"], sale["quantity"], sale["kg_size"], sale["total_sales"], sale["mode"], sale["payment"], sale["created_at"]))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"Cache error: {e}")
+        if payment == "Credit" and reseller_id:
+            reseller = fb_get(f"resellers/{reseller_id}")
+            if reseller:
+                cur = float(reseller.get("credit_balance", 0) or 0)
+                fb_patch(f"resellers/{reseller_id}", {"credit_balance": cur + total})
+        fb_post("staff_logs", {
+            "log_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "staff_name": session.get("staff_name"),
+            "action": "SALE",
+            "reseller_name": reseller_name,
+            "qty": qty,
+            "total": total,
+            "notes": notes
+        })
+        return jsonify({"ok": True, "total": total, "unit_price": unit_price, "offline": False, "firebase_key": result.get("name")})
+    else:
+        # OFFLINE - save locally
+        save_local_pending(sale)
+        # Also save to cached_sales for recent list
+        conn = sqlite3.connect(LOCAL_DB)
+        c = conn.cursor()
+        c.execute("INSERT INTO cached_sales (sales_date, reseller_name, quantity, kg_size, total_sales, mode, payment, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                  (sale["sales_date"], sale["reseller_name"], sale["quantity"], sale["kg_size"], sale["total_sales"], sale["mode"], sale["payment"], sale["created_at"]))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "total": total, "unit_price": unit_price, "offline": True, "pending_count": get_pending_count(), "message": "Saved offline - will sync when online"})
+
+@app.route("/api/sales/recent")
+@login_required
+def api_recent_sales():
+    # Try online first
+    data = fb_get("daily_sales")
+    sales = []
+    recent = []
+    if data:
+        for key, val in data.items():
+            if val:
+                sales.append({
+                    "id": key,
+                    "sales_date": val.get("sales_date"),
+                    "reseller_name": val.get("reseller_name"),
+                    "quantity": val.get("quantity"),
+                    "kg_size": val.get("kg_size"),
+                    "total_sales": val.get("total_sales"),
+                    "mode": val.get("mode"),
+                    "payment": val.get("payment"),
+                    "created_at": val.get("created_at","")
+                })
+        # sort by created_at desc for newest first
+        sales.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        recent = sales[:20]
+    
+    # Also include cached local sales (for instant display + offline)
+    try:
+        conn = sqlite3.connect(LOCAL_DB)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM cached_sales ORDER BY id DESC LIMIT 20")
+        for r in c.fetchall():
+            # Avoid duplicates if already in recent (check by created_at)
+            recent.append({
+                "id": f"offline-{r['id']}",
+                "sales_date": r["sales_date"],
+                "reseller_name": r["reseller_name"],
+                "quantity": r["quantity"],
+                "kg_size": r["kg_size"],
+                "total_sales": r["total_sales"],
+                "mode": r["mode"],
+                "payment": r["payment"],
+                "created_at": r["created_at"]
+            })
+        conn.close()
+    except Exception as e:
+        print(f"Recent local read error: {e}")
+    
+    # Sort combined by created_at
+    recent.sort(key=lambda x: x.get("created_at",""), reverse=True)
+    return jsonify(recent[:20])
+
+@app.route("/api/debug/sales")
+@login_required
+def api_debug_sales():
+    import os
+    data = fb_get("daily_sales")
+    fb_count = len(data) if data else 0
+    local_count = 0
+    try:
+        conn = sqlite3.connect(LOCAL_DB)
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM cached_sales")
+        local_count = c.fetchone()[0]
+        conn.close()
+    except:
+        pass
+    return jsonify({"firebase_daily_sales_count": fb_count, "local_cached_count": local_count, "firebase_raw": str(data)[:1000] if data else None, "online": is_online()})
+
+@app.route("/api/offline/pending")
+@login_required
+def api_offline_pending():
+    return jsonify({"pending_count": get_pending_count(), "offline": not is_online()})
+
+@app.route("/api/offline/sync", methods=["POST"])
+@login_required
+def api_offline_sync():
+    if not is_online():
+        return jsonify({"ok": False, "error": "Still offline - no internet"}), 400
+    conn = sqlite3.connect(LOCAL_DB)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM pending_sales")
+    rows = c.fetchall()
+    synced = 0
+    failed = 0
+    for r in rows:
+        try:
+            sale = json.loads(r["data"])
+            result = fb_post("daily_sales", sale)
+            if result:
+                c.execute("DELETE FROM pending_sales WHERE id=?", (r["id"],))
+                synced += 1
+                time.sleep(0.2)
+            else:
+                failed += 1
+        except Exception as e:
+            failed += 1
+    conn.commit()
+    # clear cached_sales after sync
+    if synced>0:
+        c.execute("DELETE FROM cached_sales")
+        conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "synced": synced, "failed": failed, "remaining": get_pending_count()})
+
+@app.route("/api/sale/<sale_id>", methods=["DELETE"])
+@login_required
+def api_delete_sale(sale_id):
+    if str(sale_id).startswith("offline-"):
+        # delete local
+        try:
+            oid = int(str(sale_id).replace("offline-",""))
+            conn = sqlite3.connect(LOCAL_DB)
+            c = conn.cursor()
+            c.execute("DELETE FROM cached_sales WHERE id=?", (oid,))
+            conn.commit()
+            conn.close()
+            return jsonify({"ok": True})
+        except:
+            return jsonify({"ok": False}), 400
+    try:
+        requests.delete(f"{FIREBASE_URL}/daily_sales/{sale_id}.json", timeout=10)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+MACHINES_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Omega Ice - Machines</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: #eef7ff; margin: 0; padding: 12px 12px 40px; color: #1a1a1a;
+  }
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .topbar h1 { font-size: 16px; color: #00609C; margin: 0; }
+  .topbar a { font-size: 12px; color: #00609C; text-decoration: none; }
+  .card { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+  input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccd; font-size: 14px; margin-bottom: 8px; }
+  label { display: block; font-size: 12px; color: #666; margin: 8px 0 4px; }
+  .add-btn { width: 100%; padding: 12px; background: #0096D6; color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; }
+  .m-card { background: #fff; border-radius: 12px; padding: 14px; margin-bottom: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+  .m-name { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
+  .m-meta { font-size: 12px; color: #777; margin: 0 0 2px; }
+  .m-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .m-actions button { flex: 1; min-width: 70px; padding: 8px 0; font-size: 12px; border-radius: 8px; border: 1px solid #ccd; background: #f5f5f5; }
+  .m-actions button.monitor { background: #0096D6; color: #fff; border-color: #0096D6; }
+  .m-actions button.pm { background: #1a8a4a; color: #fff; border-color: #1a8a4a; }
+  .m-actions button.delete { color: #c0392b; }
+  .pm-overdue { color: #c73333; font-weight: 600; }
+  #formPanel { display: none; }
+  .form-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .form-actions button { flex: 1; padding: 10px; border-radius: 8px; border: none; font-size: 13px; }
+  .form-actions .save { background: #00609C; color: #fff; }
+  .form-actions .cancel { background: #ddd; }
+  .status { font-size: 13px; text-align: center; margin-top: 8px; min-height: 18px; }
+  .status.ok { color: #1a8a4a; }
+  .status.err { color: #c73333; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Machines</h1>
+  <a href="/cashier">&larr; Cashier</a>
+</div>
+
+<div class="card">
+  <input type="text" id="searchInput" placeholder="Search machine or vendor..." oninput="loadMachines()">
+  <button class="add-btn" onclick="openAddForm()">+ Add machine</button>
+</div>
+
+<div class="card" id="formPanel">
+  <h3 id="formTitle" style="margin:0 0 8px; font-size:14px;">Add machine</h3>
+  <label>Machine name *</label>
+  <input type="text" id="f_name">
+  <label>Date purchased</label>
+  <input type="date" id="f_date_purchase">
+  <label>Unit price (₱)</label>
+  <input type="number" id="f_unit_price">
+  <label>Power rating (e.g. 220V / 2HP)</label>
+  <input type="text" id="f_power_rating">
+  <label>Wattage (W)</label>
+  <input type="number" id="f_wattage">
+  <label>Vendor</label>
+  <input type="text" id="f_vendor">
+  <label>Capacity (kg/day)</label>
+  <input type="number" id="f_capacity">
+  <label>PM (maintenance) date</label>
+  <input type="date" id="f_pm_date">
+  <label>Filter change date</label>
+  <input type="date" id="f_filter_change_date">
+  <label>Notes</label>
+  <input type="text" id="f_notes">
+  <div class="form-actions">
+    <button class="save" onclick="saveMachine()">Save</button>
+    <button class="cancel" onclick="closeForm()">Cancel</button>
+  </div>
+  <p class="status" id="formStatus"></p>
+</div>
+
+<div id="machineList"></div>
+
+<script>
+let editingId = null;
+
+function openAddForm() {
+  editingId = null;
+  document.getElementById('formTitle').textContent = 'Add machine';
+  ['f_name','f_date_purchase','f_unit_price','f_power_rating','f_wattage','f_vendor','f_capacity','f_pm_date','f_filter_change_date','f_notes']
+    .forEach(id => document.getElementById(id).value = '');
+  document.getElementById('formPanel').style.display = 'block';
+  window.scrollTo({top:0, behavior:'smooth'});
+}
 
 function closeForm() {
   document.getElementById('formPanel').style.display = 'none';
