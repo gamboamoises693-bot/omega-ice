@@ -196,17 +196,33 @@ async function fetchLiveOrdersCount(){
 setInterval(fetchLiveOrdersCount, 30000);
 fetchLiveOrdersCount();
 async function loadToday(){
+  // Show date immediately so not stuck on Loading...
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+  document.getElementById('todayDate').textContent = todayStr + ' to ' + todayStr;
+  document.getElementById('todayLabel').textContent = (cashierPeriod||'daily').toUpperCase() + ' SALES';
   try{
-    const res=await fetch('/api/sales/dashboard?period='+cashierPeriod);
+    const controller = new AbortController();
+    const timeout = setTimeout(()=>controller.abort(), 8000); // 8 sec timeout
+    const res=await fetch('/api/sales/dashboard?period='+cashierPeriod, {signal: controller.signal});
+    clearTimeout(timeout);
     if(res.status===401){window.location.href='/login';return;}
     const data=await res.json();
     document.getElementById('todayKg').textContent=(data.total_kg||0).toLocaleString()+'kg';
     document.getElementById('todayPeso').textContent='₱'+(data.total||0).toLocaleString();
     document.getElementById('todayCount').textContent=data.count||0;
-    document.getElementById('todayDate').textContent=(data.start||'')+' to '+(data.date||'');
-    document.getElementById('todayLabel').textContent=(data.label||'').toUpperCase()+' SALES';
+    document.getElementById('todayDate').textContent=(data.start||todayStr)+' to '+(data.date||todayStr);
+    document.getElementById('todayLabel').textContent=(data.label||cashierPeriod||'TODAY').toUpperCase()+' SALES';
     const b=data.breakdown||{};document.getElementById('todayBreakdown').textContent=`1Kg:${b['1Kg']||0} 5Kg:${b['5Kg']||0} 10Kg:${b['10Kg']||0} 25Kg:${b['25Kg']||0}`;
-  }catch(e){console.error(e);}
+    if(data.pending_count!==undefined){
+      document.getElementById('todayBreakdown').textContent += ` | Pending:${data.pending_count||0}`;
+    }
+  }catch(e){
+    console.error('Dashboard load error', e);
+    document.getElementById('todayDate').textContent = todayStr + ' (offline/cached)';
+    // Keep 0kg 0 peso if failed, but not stuck on Loading...
+    document.getElementById('todayBreakdown').textContent = 'Failed to load - tap Refresh. Error: ' + (e.message||'timeout');
+  }
 }
 async function loadRecent(){
   try{
@@ -238,7 +254,14 @@ async function resetTodayData(){
     const data = await res.json();
     if(data.ok){
       alert(`✅ Deleted ${data.deleted} records from today (${data.date})! Dashboard reset!`);
-      loadToday(); loadRecent();
+      // Force clear and reload instantly
+      document.getElementById('todayKg').textContent='0kg';
+      document.getElementById('todayPeso').textContent='₱0';
+      document.getElementById('todayCount').textContent='0';
+      document.getElementById('todayBreakdown').textContent='1Kg:0 5Kg:0 10Kg:0 25Kg:0';
+      localStorage.removeItem('omega_last_delivered');
+      setTimeout(()=>{loadToday(); loadRecent();}, 500);
+      setTimeout(()=>{loadToday(); loadRecent();}, 2000);
     } else {
       alert('Failed: '+(data.error||'Not allowed - Only ISESMO'));
     }
@@ -2054,6 +2077,13 @@ def api_update_order_status(order_id):
         update_data["sales_date"] = today  # <-- This fixes "1 delivered today but recent sales not updated"
         update_data["created_at"] = now_str  # Make it appear on top of Recent sales
     fb_patch(f"daily_sales/{order_id}", update_data)
+    # Clear cache after delivered so dashboard updates instantly
+    for k in list(globals().keys()):
+        if k.startswith("_dashboard_cache_"):
+            try:
+                del globals()[k]
+            except:
+                pass
     return jsonify({"ok": True, "status": new_status, "sales_updated": new_status == "Delivered"})
 
 @app.route("/customers")
@@ -2215,12 +2245,19 @@ def api_set_reseller_password(reseller_id):
 @login_required
 def api_sales_dashboard():
     period = request.args.get("period", "daily").lower()
+    # Fast path for daily - use Manila time
     try:
         import pytz
         manila = pytz.timezone('Asia/Manila')
         now = datetime.now(manila)
     except:
         now = datetime.now()
+    # Cache daily_sales for 10 sec to avoid hammering Firebase with 1600 records
+    cache_key = f"_dashboard_cache_{period}"
+    cached = globals().get(cache_key)
+    if cached and (now - cached.get("time", datetime.min)).total_seconds() < 10:
+        return jsonify(cached.get("data"))
+
     def kg_value(s):
         try: return float(str(s).lower().replace("kg","").strip())
         except: return 0
@@ -2280,7 +2317,9 @@ def api_sales_dashboard():
                 if kg_size in pending_breakdown: pending_breakdown[kg_size] += qty
     except Exception as e:
         print(f"dashboard error {e}")
-    return jsonify({"period": period, "label": label, "total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "pending_total": pending_peso, "pending_kg": pending_kg, "pending_count": pending_count, "pending_breakdown": pending_breakdown, "date": now.strftime("%Y-%m-%d"), "start": start_date.strftime("%Y-%m-%d") if start_date else "All"})
+    result = {"period": period, "label": label, "total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "pending_total": pending_peso, "pending_kg": pending_kg, "pending_count": pending_count, "pending_breakdown": pending_breakdown, "date": now.strftime("%Y-%m-%d"), "start": start_date.strftime("%Y-%m-%d") if start_date else "All"}
+    globals()[cache_key] = {"time": now, "data": result}
+    return jsonify(result)
 
 @app.route("/api/sales/today")
 @login_required
@@ -2690,6 +2729,13 @@ def api_staff_reset_today():
                 # Also delete delivered today that were originally old but updated to today
                 fb_delete(f"daily_sales/{key}")
                 deleted += 1
+        # Clear dashboard cache so it shows 0 instantly after reset
+        for key in list(globals().keys()):
+            if key.startswith("_dashboard_cache_"):
+                try:
+                    del globals()[key]
+                except:
+                    pass
         return jsonify({"ok": True, "deleted": deleted, "date": date_str})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
