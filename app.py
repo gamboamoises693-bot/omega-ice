@@ -80,8 +80,9 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
   <span class="cloud-badge pending" id="pendingBadge" style="display:none" onclick="syncOffline()">0 Pending</span>
   <a href="/cashier" class="nav-pill active">Sales</a>
   <a href="/machines" class="nav-pill">Machines</a>
-  <a href="/dashboard" class="nav-pill">Dashboard</a>
+  {% if is_admin %}<a href="/dashboard" class="nav-pill">Dashboard</a>{% endif %}
 </div>
+{% if is_admin %}
 <div class="today-card">
   <div style="display:flex;justify-content:space-between;align-items:center;">
     <div><div style="font-size:11px;opacity:.8;" id="todayLabel">TODAY'S SALES</div><div style="font-size:10px;opacity:.7;" id="todayDate">Loading...</div></div>
@@ -102,8 +103,9 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
   </div>
   <div style="font-size:10px;margin-top:8px;opacity:.8;text-align:center;" id="todayBreakdown">1Kg:0 5Kg:0 10Kg:0 25Kg:0</div>
 </div>
+{% endif %}
 <div class="card">
-<label>Sale Date (for backdated sales)</label><input type="date" id="saleDateInput" style="margin-bottom:10px">
+<label>Sale Date</label><input type="date" id="saleDateInput" style="margin-bottom:10px">
 <label>Reseller / customer</label><input type="text" id="resellerInput" placeholder="Type to search" autocomplete="off"><div id="resellerResults"></div>
 <label>Delivery mode</label><div class="toggle-row"><button id="modeDeliver" class="active" onclick="setMode('DELIVER')">Deliver</button><button id="modePickup" onclick="setMode('PICKUP')">Pickup</button></div>
 <label>Payment</label><div class="toggle-row"><button id="payCash" class="active" onclick="setPayment('Cash')">Cash</button><button id="payCredit" onclick="setPayment('Credit')">Credit</button></div>
@@ -149,7 +151,8 @@ function setCashierPeriod(p){cashierPeriod=p;document.querySelectorAll('.today-c
 async function loadToday(){
   try{
     const res=await fetch('/api/sales/dashboard?period='+cashierPeriod);
-    if(res.status===401){window.location.href='/login';return;}
+    if(res.redirected||res.url.includes('/login')){document.getElementById('todayDate').textContent='Session expired - please log in again';return;}
+    if(res.status===403){document.getElementById('todayDate').textContent='Admin/Owner access only';return;}
     const data=await res.json();
     document.getElementById('todayKg').textContent=(data.total_kg||0).toLocaleString()+'kg';
     document.getElementById('todayPeso').textContent='₱'+(data.total||0).toLocaleString();
@@ -172,7 +175,7 @@ async function loadRecent(){
 }
 async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sale/${id}`,{method:'DELETE'});loadRecent();loadToday();}
 async function logout(){await fetch('/api/logout',{method:'POST'});window.location.href='/login'}
-initSaleDate();updateTotal();loadRecent();loadToday();setInterval(loadRecent,5000);setInterval(loadToday,15000);
+initSaleDate();updateTotal();loadRecent();{% if is_admin %}loadToday();setInterval(loadToday,15000);{% endif %}setInterval(loadRecent,5000);
 </script>
 </body></html>
 """
@@ -354,6 +357,23 @@ def login_required(view):
     wrapped.__name__ = view.__name__
     return wrapped
 
+def is_admin_or_owner():
+    position = (session.get("staff_position") or "").lower()
+    return "admin" in position or "owner" in position
+
+def admin_required(view):
+    def wrapped(*args, **kwargs):
+        if not session.get("staff_name"):
+            return redirect(url_for("login_page"))
+        if not is_admin_or_owner():
+            # API routes get a clean JSON 403; page routes get sent back to Cashier
+            if request.path.startswith("/api/"):
+                return jsonify({"ok": False, "error": "Admin or Owner access only"}), 403
+            return redirect(url_for("cashier_page"))
+        return view(*args, **kwargs)
+    wrapped.__name__ = view.__name__
+    return wrapped
+
 @app.route("/")
 def root():
     if session.get("staff_name"):
@@ -429,7 +449,13 @@ def api_logout():
 @app.route("/cashier")
 @login_required
 def cashier_page():
-    return render_template_string(CASHIER_HTML, staff_name=session.get("staff_name"), staff_position=session.get("staff_position"), kg_options=KG_OPTIONS)
+    return render_template_string(
+        CASHIER_HTML,
+        staff_name=session.get("staff_name"),
+        staff_position=session.get("staff_position"),
+        kg_options=KG_OPTIONS,
+        is_admin=is_admin_or_owner(),
+    )
 
 @app.route("/api/resellers")
 @login_required
@@ -1160,7 +1186,7 @@ def normalize_kg_size(raw):
 
 
 @app.route("/api/sales/dashboard")
-@login_required
+@admin_required
 def api_sales_dashboard():
     period = request.args.get("period", "daily")
     sales = fb_get("daily_sales") or {}
@@ -1286,7 +1312,14 @@ function setPeriod(p) {
 async function load() {
   try {
     const res = await fetch('/api/sales/dashboard?period=' + period);
-    if (res.status === 401) { window.location.href = '/login'; return; }
+    if (res.redirected || res.url.includes('/login')) {
+      document.getElementById('periodRange').textContent = 'Session expired - please log in again';
+      return;
+    }
+    if (res.status === 403) {
+      document.getElementById('periodRange').textContent = 'Admin/Owner access only';
+      return;
+    }
     const data = await res.json();
     document.getElementById('periodLabel').textContent = (data.label || '').toUpperCase() + ' SALES';
     document.getElementById('periodRange').textContent = data.start + ' to ' + data.date;
@@ -1311,7 +1344,7 @@ load();
 
 
 @app.route("/dashboard")
-@login_required
+@admin_required
 def dashboard_page():
     return render_template_string(DASHBOARD_HTML)
 
