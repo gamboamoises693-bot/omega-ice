@@ -140,7 +140,7 @@ async function updateTotal(){try{const res=await fetch(`/api/price?kg=${kg}&mode
 const resellerInput=document.getElementById('resellerInput');const resultsBox=document.getElementById('resellerResults');
 resellerInput.addEventListener('input',async()=>{selectedReseller=null;const q=resellerInput.value.trim();if(!q){resultsBox.style.display='none';return}const res=await fetch(`/api/resellers?q=${encodeURIComponent(q)}`);const rows=await res.json();if(!rows.length){resultsBox.style.display='none';return}resultsBox.innerHTML=rows.map(r=>`<div class="res-item" data-id="${r.id}" data-name="${r.store_name.replace(/"/g,'&quot;')}">${r.store_name}</div>`).join('');resultsBox.style.display='block';resultsBox.querySelectorAll('.res-item').forEach(el=>{el.addEventListener('click',()=>{pickReseller(el.getAttribute('data-id'),el.getAttribute('data-name'))})})});
 function pickReseller(id,name){selectedReseller={id,name};resellerInput.value=name;resultsBox.style.display='none'}
-async function saveSale(){const qty=parseInt(document.getElementById('qtyInput').value)||0;const name=resellerInput.value.trim();const statusEl=document.getElementById('statusMsg');if(!name||qty<=0){statusEl.textContent='Enter reseller';statusEl.className='status err';return}const saleDate = document.getElementById('saleDateInput').value || new Date().toISOString().slice(0,10);
+async function saveSale(){const qty=parseInt(document.getElementById('qtyInput').value)||0;const name=resellerInput.value.trim();const statusEl=document.getElementById('statusMsg');if(!name||qty<=0){statusEl.textContent='Enter reseller';statusEl.className='status err';return}
   const saleDate = document.getElementById('saleDateInput').value || new Date().toISOString().slice(0,10);
   const payload={reseller_id:selectedReseller?selectedReseller.id:null,reseller_name:name,quantity:qty,kg_size:kg,mode:mode,payment:payment,sales_date:saleDate};const url=editingSaleId?`/api/sale/${editingSaleId}`:`/api/sale`;const method=editingSaleId?'PUT':'POST';statusEl.textContent='Saving...';const res=await fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(data.ok){statusEl.textContent=`Saved ₱${data.total}`;statusEl.className='status ok';cancelEdit();loadRecent();loadToday();}else{statusEl.textContent=data.error||'Error';statusEl.className='status err'}}
 async function editSale(id){const res=await fetch(`/api/sale/${id}`);const data=await res.json();if(!data.ok)return alert('Cannot edit');const s=data.sale;editingSaleId=id;resellerInput.value=s.reseller_name;selectedReseller=s.reseller_id?{id:s.reseller_id,name:s.reseller_name}:null;document.getElementById('qtyInput').value=s.quantity;setMode(s.mode);setPayment(s.payment);setKg(s.kg_size);document.getElementById('saveBtn').textContent='Update';document.getElementById('cancelEditBtn').style.display='block';window.scrollTo({top:0,behavior:'smooth'})}
@@ -1143,6 +1143,161 @@ def fix_reseller_duplicates():
             })
 
     return jsonify({"merged": report, "duplicates_fixed": len(report)})
+
+@app.route("/api/sales/dashboard")
+@login_required
+def api_sales_dashboard():
+    period = request.args.get("period", "daily")
+    sales = fb_get("daily_sales") or {}
+
+    today = datetime.now().date()
+    label = period
+    if period == "daily":
+        start = today
+    elif period == "weekly":
+        start = today - timedelta(days=6)
+    elif period == "monthly":
+        start = today.replace(day=1)
+    elif period == "quarterly":
+        q_start_month = ((today.month - 1) // 3) * 3 + 1
+        start = today.replace(month=q_start_month, day=1)
+    elif period == "yearly":
+        start = today.replace(month=1, day=1)
+    else:  # "all"
+        start = None
+        label = "all time"
+
+    kg_multiplier = {"1Kg": 1, "5Kg": 5, "10Kg": 10, "25Kg": 25}
+    total_kg = 0.0
+    total_peso = 0.0
+    count = 0
+    breakdown = {"1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0}
+
+    for s in sales.values():
+        if not s:
+            continue
+        sdate_str = s.get("sales_date")
+        if not sdate_str:
+            continue
+        try:
+            sdate = datetime.strptime(sdate_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if start and sdate < start:
+            continue
+        if sdate > today:
+            continue
+
+        qty = s.get("quantity") or 0
+        kg_size = s.get("kg_size") or "1Kg"
+        total_kg += qty * kg_multiplier.get(kg_size, 1)
+        total_peso += s.get("total_sales") or 0
+        count += 1
+        if kg_size in breakdown:
+            breakdown[kg_size] += 1
+
+    return jsonify({
+        "label": label,
+        "start": start.strftime("%Y-%m-%d") if start else "the beginning",
+        "date": today.strftime("%Y-%m-%d"),
+        "total_kg": total_kg,
+        "total": round(total_peso, 2),
+        "count": count,
+        "breakdown": breakdown,
+    })
+
+
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Omega Ice - Dashboard</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px;color:#1a1a1a}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:4px 2px}
+.topbar h1{font-size:15px;color:#00609C;margin:0;font-weight:700}
+.topbar a{font-size:12px;color:#00609C;text-decoration:none}
+.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C;margin-right:6px}
+.nav-pill.active{background:#00609C;color:#fff;border-color:#00609C}
+.card{padding:16px;background:linear-gradient(135deg,#00609C,#0096D6);color:#fff;border-radius:12px;margin-bottom:14px}
+.period-row{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.period-row button{padding:6px 12px;border-radius:14px;border:1px solid #cde;background:#fff;color:#00609C;font-size:12px}
+.period-row button.active{background:#00609C;color:#fff;border-color:#00609C}
+.metrics{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-top:10px}
+.metrics .val{font-size:18px;font-weight:700}.metrics .lbl{font-size:9px;opacity:.85}
+table{width:100%;border-collapse:collapse;font-size:12px;background:#fff;border-radius:10px;overflow:hidden}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #eee}th{color:#888;font-weight:500;background:#f7f7f7}
+</style></head><body>
+<div class="topbar"><h1>Dashboard</h1><a href="/cashier">&larr; Sales</a></div>
+<div style="margin-bottom:10px;">
+  <a href="/cashier" class="nav-pill">Sales</a>
+  <a href="/machines" class="nav-pill">Machines</a>
+  <a href="/dashboard" class="nav-pill active">Dashboard</a>
+</div>
+
+<div class="period-row" id="periodRow">
+  <button data-period="daily" class="active" onclick="setPeriod('daily')">Daily</button>
+  <button data-period="weekly" onclick="setPeriod('weekly')">Weekly</button>
+  <button data-period="monthly" onclick="setPeriod('monthly')">Monthly</button>
+  <button data-period="quarterly" onclick="setPeriod('quarterly')">Quarterly</button>
+  <button data-period="yearly" onclick="setPeriod('yearly')">Year</button>
+  <button data-period="all" onclick="setPeriod('all')">All Time</button>
+</div>
+
+<div class="card">
+  <div id="periodLabel" style="font-size:12px;opacity:.85;">DAILY SALES</div>
+  <div id="periodRange" style="font-size:10px;opacity:.7;">Loading...</div>
+  <div class="metrics">
+    <div><div class="val" id="dTotalKg">0kg</div><div class="lbl">TOTAL KG</div></div>
+    <div><div class="val" id="dTotalPeso">₱0</div><div class="lbl">TOTAL PESO</div></div>
+    <div><div class="val" id="dCount">0</div><div class="lbl">TRANSACTIONS</div></div>
+  </div>
+  <div style="margin-top:10px;font-size:11px;opacity:.85;" id="dBreakdown"></div>
+</div>
+
+<table>
+  <thead><tr><th>Size</th><th>Orders</th></tr></thead>
+  <tbody id="breakdownBody"></tbody>
+</table>
+
+<script>
+let period = 'daily';
+
+function setPeriod(p) {
+  period = p;
+  document.querySelectorAll('#periodRow button').forEach(b => b.classList.toggle('active', b.dataset.period === p));
+  load();
+}
+
+async function load() {
+  try {
+    const res = await fetch('/api/sales/dashboard?period=' + period);
+    if (res.status === 401) { window.location.href = '/login'; return; }
+    const data = await res.json();
+    document.getElementById('periodLabel').textContent = (data.label || '').toUpperCase() + ' SALES';
+    document.getElementById('periodRange').textContent = data.start + ' to ' + data.date;
+    document.getElementById('dTotalKg').textContent = (data.total_kg || 0).toLocaleString() + 'kg';
+    document.getElementById('dTotalPeso').textContent = '₱' + (data.total || 0).toLocaleString();
+    document.getElementById('dCount').textContent = data.count || 0;
+    const b = data.breakdown || {};
+    document.getElementById('dBreakdown').textContent =
+      `1Kg:${b['1Kg']||0} 5Kg:${b['5Kg']||0} 10Kg:${b['10Kg']||0} 25Kg:${b['25Kg']||0}`;
+    document.getElementById('breakdownBody').innerHTML = Object.entries(b).map(([size, cnt]) =>
+      `<tr><td>${size}</td><td>${cnt}</td></tr>`
+    ).join('');
+  } catch (e) {
+    document.getElementById('periodRange').textContent = 'Error loading data: ' + e.message;
+  }
+}
+
+load();
+</script>
+</body></html>
+"""
+
+
+@app.route("/dashboard")
+@login_required
+def dashboard_page():
+    return render_template_string(DASHBOARD_HTML)
+
 
 @app.route("/machines")
 @login_required
