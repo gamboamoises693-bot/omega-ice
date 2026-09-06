@@ -2542,7 +2542,24 @@ async function bulkUpdateAllToPreparing(){
   const data=await res.json();
   if(data.ok){alert(`Updated ${data.updated}`);loadOrders();}else{alert(data.error||'Failed');}
 }
-loadOrders();setInterval(loadOrders,30000);
+
+async function deleteOrder(id){
+  if(!confirm('🗑️ Delete this order? This will remove from Live + Sales records.')) return;
+  try{
+    const res = await fetch(`/api/orders/${id}`, {method:'DELETE'});
+    const data = await res.json();
+    if(data.ok){
+      alert('✅ Deleted! Sales updated.');
+      loadOrders();
+      await fetch('/api/sales/clear_cache', {method:'POST'}).catch(()=>{});
+    }else{
+      alert(data.error||'Failed: '+(data.message||''));
+    }
+  }catch(e){alert('Network error: '+e.message);}
+}
+
+loadOrders();setInterval(loadOrders,10000);
+
 
 </script>
 </body></html>"""
@@ -3486,21 +3503,52 @@ def api_clear_sales_cache():
 @app.route("/api/orders/<order_id>", methods=["DELETE"])
 @login_required
 def api_delete_order(order_id):
-    """Delete order - staff only, updates recent sales"""
+    """Delete order - HARD DELETE - fixed"""
     try:
-        staff = (session.get("staff_name") or "").lower()
-        if staff not in ["isesmo", "isesmo gamboa"] and not session.get("staff_name"):
+        if not session.get("staff_name"):
             return jsonify({"ok": False, "error": "Only staff"}), 403
-        # Archive instead of delete for safety, but mark deleted
-        fb_patch(f"daily_sales/{order_id}", {"archived": True, "deleted": True, "deleted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "deleted_by": staff})
-        # Clear cache so recent sales updates instantly
+        staff = (session.get("staff_name") or "").lower()
+        # HARD DELETE from Firebase
+        try:
+            import requests
+            url = f"{FIREBASE_URL}/daily_sales/{order_id}.json"
+            r = requests.delete(url, timeout=10)
+            hard_deleted = r.status_code in [200, 204]
+        except Exception as e:
+            hard_deleted = False
+        
+        if not hard_deleted:
+            # Fallback: archive + delete flags
+            fb_patch(f"daily_sales/{order_id}", {"archived": True, "deleted": True, "hidden_24h": True, "deleted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "deleted_by": staff})
+        
+        # Clear cache
         for kk in list(globals().keys()):
             if kk.startswith("_dashboard_cache_"):
                 try: del globals()[kk]
                 except: pass
-        return jsonify({"ok": True, "deleted": order_id})
+        return jsonify({"ok": True, "deleted": order_id, "hard_deleted": hard_deleted})
+    except Exception as e:
+        import traceback
+        return jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()}), 500
+
+@app.route("/api/orders/<order_id>/force_delete", methods=["POST", "DELETE"])
+@login_required
+def api_force_delete_order(order_id):
+    """Force delete - for when Delete not working"""
+    try:
+        if not session.get("staff_name"):
+            return jsonify({"ok": False, "error": "Only staff"}), 403
+        import requests
+        url = f"{FIREBASE_URL}/daily_sales/{order_id}.json"
+        r = requests.delete(url, timeout=10)
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+        return jsonify({"ok": True, "status": r.status_code, "deleted": order_id})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
 
 
 if __name__ == "__main__":
