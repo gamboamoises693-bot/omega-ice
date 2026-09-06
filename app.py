@@ -1144,6 +1144,21 @@ def fix_reseller_duplicates():
 
     return jsonify({"merged": report, "duplicates_fixed": len(report)})
 
+def normalize_kg_size(raw):
+    """
+    Historical data stores kg_size two different ways:
+    - legacy sales: plain numbers like '1', '5', '10', '25'
+    - current app: labeled like '1Kg', '5Kg', '10Kg', '25Kg'
+    This maps either format to the canonical '<N>Kg' label so
+    dashboard totals and breakdowns count everything correctly.
+    """
+    if not raw:
+        return "1Kg"
+    s = str(raw).strip().lower().replace("kg", "")
+    mapping = {"1": "1Kg", "5": "5Kg", "10": "10Kg", "25": "25Kg"}
+    return mapping.get(s, str(raw))
+
+
 @app.route("/api/sales/dashboard")
 @login_required
 def api_sales_dashboard():
@@ -1189,12 +1204,14 @@ def api_sales_dashboard():
             continue
 
         qty = s.get("quantity") or 0
-        kg_size = s.get("kg_size") or "1Kg"
+        kg_size = normalize_kg_size(s.get("kg_size"))
         total_kg += qty * kg_multiplier.get(kg_size, 1)
         total_peso += s.get("total_sales") or 0
         count += 1
         if kg_size in breakdown:
             breakdown[kg_size] += 1
+        else:
+            breakdown[kg_size] = breakdown.get(kg_size, 0) + 1
 
     return jsonify({
         "label": label,
