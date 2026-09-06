@@ -10,10 +10,52 @@ Firebase: https://moises-92842-default-rtdb.asia-southeast1.firebasedatabase.app
 
 import os, sqlite3, json, requests, time
 from datetime import datetime, timedelta
+from werkzeug.security import generate_password_hash, check_password_hash
+import random, string, re
 from flask import Flask, request, jsonify, session, redirect, url_for, render_template_string
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "omega-ice-realtime-2026")
+
+def hash_customer_password(pwd):
+    try:
+        return generate_password_hash(pwd)
+    except:
+        import hashlib
+        return hashlib.sha256(pwd.encode()).hexdigest()
+
+def verify_customer_password(hash_val, pwd):
+    try:
+        return check_password_hash(hash_val, pwd)
+    except:
+        import hashlib
+        return hash_val == hashlib.sha256(pwd.encode()).hexdigest() or hash_val == pwd
+
+def customer_login_required(v):
+    def w(*a,**k):
+        if not session.get("customer_id"):
+            return redirect(url_for("customer_login_page"))
+        return v(*a,**k)
+    w.__name__=v.__name__
+    return w
+
+def isesmo_only(v):
+    def w(*a,**k):
+        staff = (session.get("staff_name") or "").lower()
+        # Only ISESMO can add/manage customers
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": "Only ISESMO can add customers"}), 403
+        return v(*a,**k)
+    w.__name__=v.__name__
+    return w
+
+def generate_otp():
+    return ''.join(random.choices('0123456789', k=6))
+
+def clean_phone(phone):
+    return re.sub(r'[^0-9+]', '', phone or "")
+
+
 FIREBASE_URL = "https://moises-92842-default-rtdb.asia-southeast1.firebasedatabase.app".rstrip("/")
 
 KG_OPTIONS = ["1Kg", "5Kg", "10Kg", "25Kg"]
@@ -1495,6 +1537,704 @@ def pm_history_page(machine_id):
         machine_id=machine_id,
         machine_name=m.get("machine_name", "Machine"),
     )
+
+
+
+# ============= CUSTOMER PORTAL - SECURE WITH OTP =============
+
+CUSTOMER_LOGIN_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Customer Login - Omega Ice</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:linear-gradient(135deg,#00609C,#0096D6);margin:0;min-height:100vh;padding:16px;display:flex;align-items:center;justify-content:center}
+.card{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:380px;box-shadow:0 8px 30px rgba(0,0,0,.2)}
+.header{text-align:center;margin-bottom:20px}.header h1{font-size:20px;color:#00609C;margin:0}.header p{font-size:12px;color:#666;margin:4px 0}
+label{font-size:12px;color:#666;display:block;margin:12px 0 6px}input{width:100%;padding:14px;border-radius:12px;border:1.5px solid #ccd;font-size:15px}
+.btn{width:100%;padding:14px;background:#00609C;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;margin-top:16px}
+.btn-otp{background:#f59e0b;margin-top:8px}
+.status{font-size:12px;text-align:center;margin-top:10px;min-height:18px}.status.err{color:#c0392b}.status.ok{color:#1a8a4a}
+</style></head>
+<body>
+<div class="card">
+<div class="header"><h1>🧊 OMEGA ICE</h1><p>Customer Secure Login</p><p style="font-size:11px;color:#888">One phone + password per store</p></div>
+<label>Registered Phone</label><input type="tel" id="phone" placeholder="09xx xxx xxxx">
+<label>Password</label><input type="password" id="password" placeholder="Enter password">
+<button class="btn" onclick="doLogin()">🔐 Login</button>
+<button class="btn btn-otp" onclick="showOTP()">📱 Forgot Password? Get OTP</button>
+<p class="status" id="status"></p>
+
+<div id="otpBox" style="display:none;margin-top:16px;border-top:1px solid #eee;padding-top:16px">
+<label>Enter OTP (sent to staff / shown here for demo)</label><input type="text" id="otp" placeholder="6-digit OTP">
+<label>New Password</label><input type="password" id="newPwd" placeholder="New password min 4 chars">
+<button class="btn" style="background:#22c55e" onclick="resetWithOTP()">Reset Password with OTP</button>
+<p style="font-size:10px;color:#888;text-align:center;margin-top:8px">OTP valid for 5 minutes. Contact ISESMO if not received.</p>
+</div>
+</div>
+<script>
+async function doLogin(){
+  const phone=document.getElementById('phone').value.trim();
+  const pwd=document.getElementById('password').value;
+  const st=document.getElementById('status');
+  if(!phone||!pwd){st.textContent='Enter phone and password';st.className='status err';return;}
+  st.textContent='Checking...';
+  const res=await fetch('/api/customer/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone,password:pwd})});
+  const data=await res.json();
+  if(data.ok){st.textContent='OK! Loading...';window.location.href=`/customer/${data.reseller_id}/dashboard`;}
+  else{st.textContent=data.error||'Wrong phone or password';st.className='status err';}
+}
+async function showOTP(){
+  const phone=document.getElementById('phone').value.trim();
+  if(!phone){document.getElementById('status').textContent='Enter phone first';return;}
+  const res=await fetch('/api/customer/request_otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone})});
+  const data=await res.json();
+  if(data.ok){
+    document.getElementById('status').innerHTML='✅ OTP: <b style="font-size:18px">'+data.otp+'</b> (Demo: In production this is SMS)<br>Valid 5 mins';
+    document.getElementById('status').className='status ok';
+    document.getElementById('otpBox').style.display='block';
+  }else{document.getElementById('status').textContent=data.error||'Failed';document.getElementById('status').className='status err';}
+}
+async function resetWithOTP(){
+  const phone=document.getElementById('phone').value.trim();
+  const otp=document.getElementById('otp').value.trim();
+  const newPwd=document.getElementById('newPwd').value.trim();
+  if(!otp||!newPwd){document.getElementById('status').textContent='Enter OTP and new password';return;}
+  const res=await fetch('/api/customer/verify_otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone,otp:otp,new_password:newPwd})});
+  const data=await res.json();
+  if(data.ok){document.getElementById('status').textContent='✅ Password reset! Now login.';document.getElementById('status').className='status ok';document.getElementById('otpBox').style.display='none';}
+  else{document.getElementById('status').textContent=data.error||'Invalid OTP';document.getElementById('status').className='status err';}
+}
+</script>
+</body></html>
+"""
+
+CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>My Orders - Omega Ice</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:15px;color:#00609C;margin:0}
+.live{display:inline-flex;align-items:center;gap:6px;background:#22c55e;color:#fff;padding:6px 12px;border-radius:20px;font-size:11px}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}.stat-val{font-size:18px;font-weight:700;color:#00609C}.stat-lbl{font-size:9px;color:#888}
+.status-pill{padding:4px 10px;border-radius:12px;font-size:10px;font-weight:600}
+.status-new{background:#fef3c7;color:#92400e}.status-pending{background:#fef3c7;color:#92400e}.status-preparing{background:#dbeafe;color:#1e40af}.status-out{background:#e0e7ff;color:#3730a3}.status-delivered{background:#dcfce7;color:#166534}
+.order-card{border-left:4px solid #0096D6;padding:12px;margin:8px 0;background:#fff;border-radius:8px}
+.btn{padding:10px 14px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px;text-decoration:none}
+.btn-primary{background:#00609C;color:#fff;border-color:#00609C;padding:12px 20px;font-weight:600}
+</style></head>
+<body>
+<div class="topbar"><div><h1 id="storeName">My Orders</h1><div style="font-size:11px;color:#666" id="storeMeta"></div></div><div style="display:flex;gap:6px"><span class="live">● LIVE</span><a href="/customer/logout" class="btn">Logout</a></div></div>
+<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;font-weight:600">Summary</span><a href="/customer/{{ reseller_id }}/order" class="btn btn-primary">+ New Order</a></div><div class="stat-grid"><div><div class="stat-val" id="totalKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div><div><div class="stat-val" id="totalPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div><div><div class="stat-val" id="totalOrders">0</div><div class="stat-lbl">ORDERS</div></div></div><div id="statusCounts" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;font-size:10px"></div></div>
+<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">Real-time Orders</div><div id="ordersList">Loading...</div></div>
+<script>
+const resellerId="{{ reseller_id }}";
+async function loadOrders(){
+  const res=await fetch(`/api/customer/${resellerId}/orders`);
+  const data=await res.json();
+  const orders=data.orders||[];
+  const stats=data.stats||{};
+  document.getElementById('totalKg').textContent=(stats.total_kg||0).toLocaleString()+'kg';
+  document.getElementById('totalPeso').textContent='₱'+(stats.total_peso||0).toLocaleString();
+  document.getElementById('totalOrders').textContent=stats.count||0;
+  document.getElementById('storeName').textContent=data.reseller_name||'My Orders';
+  document.getElementById('storeMeta').textContent=`Balance: ₱${stats.credit_balance||0} | ${new Date().toLocaleTimeString()}`;
+  const counts=stats.status_counts||{};
+  document.getElementById('statusCounts').innerHTML=Object.entries(counts).map(([k,v])=>`<span class="status-pill status-${k.toLowerCase().replace(/ /g,'-')}">${k}: ${v}</span>`).join('');
+  const list=document.getElementById('ordersList');
+  if(!orders.length){list.innerHTML='<div style="text-align:center;color:#888;padding:20px">No orders yet. Tap + New Order</div>';return;}
+  list.innerHTML=orders.map(o=>`<div class="order-card"><div style="display:flex;justify-content:space-between"><span style="font-size:11px;color:#888">${o.sales_date||''}</span><span class="status-pill status-${(o.order_status||'pending').toLowerCase().replace(/ /g,'-')}">${o.order_status||'Pending'}</span></div><div style="font-size:13px;margin-top:4px">${o.quantity}x ${o.kg_size} • ${o.mode} • ₱${o.total_sales}</div></div>`).join('');
+}
+loadOrders();setInterval(loadOrders,3000);
+</script>
+</body></html>
+"""
+
+CUSTOMER_ORDER_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Place Order - Omega Ice</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:15px;color:#00609C;margin:0}
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px}
+label{font-size:12px;color:#666;display:block;margin:10px 0 4px}input,textarea{width:100%;padding:12px;border-radius:10px;border:1px solid #ccd;font-size:14px}
+.kg-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.kg-row button{padding:12px;border-radius:10px;border:1px solid #ccd;background:#f5f5f5}
+.kg-row button.active{background:#00609C;color:#fff}
+.toggle-row{display:flex;gap:8px}.toggle-row button{flex:1;padding:12px;border-radius:10px;border:1px solid #ccd;background:#f5f5f5}
+.toggle-row button.active{background:#0096D6;color:#fff}
+.total-row{display:flex;justify-content:space-between;margin:16px 0}.amount{font-size:24px;font-weight:700;color:#00609C}
+.btn{width:100%;padding:14px;background:#00609C;color:#fff;border:none;border-radius:12px;font-weight:700}
+</style></head>
+<body>
+<div class="topbar"><h1>🧊 New Order</h1><a href="/customer/{{ reseller_id }}/dashboard" style="font-size:12px;color:#00609C;text-decoration:none;background:#fff;padding:6px 12px;border-radius:20px;border:1px solid #cde">My Orders</a></div>
+<div class="card">
+<label>Date Needed</label><input type="date" id="needDate">
+<label>Size</label><div class="kg-row"><button data-kg="1Kg" class="active" onclick="setKg('1Kg')">1Kg</button><button data-kg="5Kg" onclick="setKg('5Kg')">5Kg</button><button data-kg="10Kg" onclick="setKg('10Kg')">10Kg</button><button data-kg="25Kg" onclick="setKg('25Kg')">25Kg</button></div>
+<label>Quantity</label><input type="number" id="qty" value="10" min="1" oninput="calc()">
+<label>Delivery</label><div class="toggle-row"><button id="modeDeliver" class="active" onclick="setMode('DELIVER')">Deliver</button><button id="modePickup" onclick="setMode('PICKUP')">Pickup</button></div>
+<label>Payment</label><div class="toggle-row"><button id="payCash" class="active" onclick="setPay('Cash')">Cash</button><button id="payCredit" onclick="setPay('Credit')">Credit</button></div>
+<label>Notes</label><textarea id="notes" rows="2" placeholder="Leave at back gate"></textarea>
+<div class="total-row"><span>Total</span><span class="amount" id="totalAmt">₱100</span></div>
+<button class="btn" onclick="placeOrder()">Place Order Live</button>
+<p id="status" style="font-size:12px;text-align:center;margin-top:8px"></p>
+</div>
+<script>
+const resellerId="{{ reseller_id }}";
+let kg='1Kg';let mode='DELIVER';let pay='Cash';
+const prices={"1Kg":10,"5Kg":50,"10Kg":100,"25Kg":250};
+function setKg(k){kg=k;document.querySelectorAll('.kg-row button').forEach(b=>b.classList.toggle('active',b.dataset.kg===k));calc();}
+function setMode(m){mode=m;document.getElementById('modeDeliver').classList.toggle('active',m==='DELIVER');document.getElementById('modePickup').classList.toggle('active',m==='PICKUP');}
+function setPay(p){pay=p;document.getElementById('payCash').classList.toggle('active',p==='Cash');document.getElementById('payCredit').classList.toggle('active',p==='Credit');}
+function calc(){const qty=parseInt(document.getElementById('qty').value)||0;document.getElementById('totalAmt').textContent='₱'+((prices[kg]||10)*qty).toLocaleString();}
+document.getElementById('needDate').value=new Date().toISOString().slice(0,10);calc();
+async function placeOrder(){
+  const qty=parseInt(document.getElementById('qty').value)||0;
+  const needDate=document.getElementById('needDate').value;
+  const notes=document.getElementById('notes').value;
+  const res=await fetch(`/api/customer/${resellerId}/place_order`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({quantity:qty,kg_size:kg,mode:mode,payment:pay,sales_date:needDate,notes:notes})});
+  const data=await res.json();
+  if(data.ok){window.location.href=`/customer/${resellerId}/dashboard`;}else{document.getElementById('status').textContent=data.error||'Failed';}
+}
+</script>
+</body></html>
+"""
+
+# Customer routes
+
+@app.route("/customer")
+def customer_login_page():
+    return render_template_string(CUSTOMER_LOGIN_HTML)
+
+@app.route("/customer/logout")
+def customer_logout_page():
+    session.pop("customer_id", None)
+    return redirect(url_for("customer_login_page"))
+
+@app.route("/customer/<reseller_id>/dashboard")
+def customer_dashboard_page(reseller_id):
+    if not session.get("customer_id") and not session.get("staff_name"):
+        return redirect(url_for("customer_login_page"))
+    if session.get("customer_id") and session.get("customer_id") != reseller_id and not session.get("staff_name"):
+        return redirect(f"/customer/{session.get('customer_id')}/dashboard")
+    return render_template_string(CUSTOMER_DASHBOARD_HTML, reseller_id=reseller_id)
+
+@app.route("/customer/<reseller_id>/order")
+def customer_order_page(reseller_id):
+    if not session.get("customer_id") and not session.get("staff_name"):
+        return redirect(url_for("customer_login_page"))
+    return render_template_string(CUSTOMER_ORDER_HTML, reseller_id=reseller_id)
+
+@app.route("/api/customer/login", methods=["POST"])
+def api_customer_login():
+    try:
+        data = request.json or {}
+        phone = clean_phone(data.get("phone") or "")
+        pwd = data.get("password") or ""
+        if not phone or not pwd:
+            return jsonify({"ok": False, "error": "Phone and password required"}), 400
+        resellers = fb_get("resellers") or {}
+        matched = None
+        matched_id = None
+        for key,val in resellers.items():
+            if not val: continue
+            rphone = clean_phone(val.get("phone") or val.get("contact") or "")
+            if rphone == phone:
+                matched = val
+                matched_id = key
+                break
+        if not matched:
+            return jsonify({"ok": False, "error": "Phone not registered. Only ISESMO can register."}), 404
+        stored_hash = matched.get("password_hash") or ""
+        if not stored_hash:
+            return jsonify({"ok": False, "error": "No password set. Contact ISESMO."}), 401
+        if not verify_customer_password(stored_hash, pwd):
+            return jsonify({"ok": False, "error": "Wrong password"}), 401
+        session["customer_id"] = matched_id
+        session["customer_name"] = matched.get("store_name")
+        return jsonify({"ok": True, "reseller_id": matched_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/customer/request_otp", methods=["POST"])
+def api_customer_request_otp():
+    try:
+        data = request.json or {}
+        phone = clean_phone(data.get("phone") or "")
+        if not phone:
+            return jsonify({"ok": False, "error": "Phone required"}), 400
+        resellers = fb_get("resellers") or {}
+        found = False
+        for val in resellers.values():
+            if not val: continue
+            if clean_phone(val.get("phone") or "") == phone:
+                found = True
+                break
+        if not found:
+            return jsonify({"ok": False, "error": "Phone not registered"}), 404
+        otp = generate_otp()
+        # Save OTP with 5 min expiry
+        otp_data = {"phone": phone, "otp": otp, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "expires_at": (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"), "used": False}
+        fb_post("customer_otps", otp_data)
+        # In production, send SMS here. For now return OTP for demo + staff can see in /customers
+        return jsonify({"ok": True, "otp": otp, "message": "OTP generated. Valid 5 mins. In production this would be SMS."})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/customer/verify_otp", methods=["POST"])
+def api_customer_verify_otp():
+    try:
+        data = request.json or {}
+        phone = clean_phone(data.get("phone") or "")
+        otp = (data.get("otp") or "").strip()
+        new_pwd = (data.get("new_password") or "").strip()
+        if not phone or not otp or not new_pwd:
+            return jsonify({"ok": False, "error": "Phone, OTP and new password required"}), 400
+        if len(new_pwd) < 4:
+            return jsonify({"ok": False, "error": "Password min 4 chars"}), 400
+        otps = fb_get("customer_otps") or {}
+        valid = None
+        valid_id = None
+        now = datetime.now()
+        for key,val in otps.items():
+            if not val: continue
+            if clean_phone(val.get("phone") or "") != phone: continue
+            if val.get("otp") != otp: continue
+            if val.get("used"): continue
+            exp_str = val.get("expires_at")
+            try:
+                exp = datetime.strptime(exp_str, "%Y-%m-%d %H:%M:%S")
+                if now > exp: continue
+            except:
+                pass
+            valid = val
+            valid_id = key
+            break
+        if not valid:
+            return jsonify({"ok": False, "error": "Invalid or expired OTP"}), 400
+        # Find reseller and update password
+        resellers = fb_get("resellers") or {}
+        target_id = None
+        for key,val in resellers.items():
+            if not val: continue
+            if clean_phone(val.get("phone") or "") == phone:
+                target_id = key
+                break
+        if not target_id:
+            return jsonify({"ok": False, "error": "Reseller not found"}), 404
+        hashed = hash_customer_password(new_pwd)
+        fb_patch(f"resellers/{target_id}", {"password_hash": hashed, "status": "active"})
+        fb_patch(f"customer_otps/{valid_id}", {"used": True})
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/customer/<reseller_id>/orders")
+def api_customer_orders(reseller_id):
+    try:
+        reseller = fb_get(f"resellers/{reseller_id}") or {}
+        sales = fb_get("daily_sales") or {}
+        orders = []
+        total_kg = 0
+        total_peso = 0
+        status_counts = {}
+        def kg_val(s):
+            try: return float(str(s).lower().replace("kg","").strip())
+            except: return 0
+        for key,val in sales.items():
+            if not val: continue
+            rid = val.get("reseller_id")
+            rname = (val.get("reseller_name") or "").strip()
+            target_name = (reseller.get("store_name") or "").strip()
+            if rid != reseller_id and rname.lower() != target_name.lower():
+                continue
+            qty = int(val.get("quantity",0) or 0)
+            kg_size = val.get("kg_size","1Kg")
+            peso = float(val.get("total_sales",0) or 0)
+            status = val.get("order_status","Pending")
+            total_kg += qty * kg_val(kg_size)
+            total_peso += peso
+            status_counts[status] = status_counts.get(status,0)+1
+            orders.append({"id": key, "sales_date": val.get("sales_date"), "quantity": qty, "kg_size": kg_size, "total_sales": peso, "mode": val.get("mode"), "payment": val.get("payment"), "order_status": status, "created_at": val.get("created_at")})
+        orders.sort(key=lambda x: x.get("created_at") or x.get("sales_date") or "", reverse=True)
+        stats = {"total_kg": total_kg, "total_peso": total_peso, "count": len(orders), "status_counts": status_counts, "credit_balance": reseller.get("credit_balance",0)}
+        return jsonify({"orders": orders[:50], "stats": stats, "reseller_name": reseller.get("store_name")})
+    except Exception as e:
+        return jsonify({"orders": [], "stats": {}, "error": str(e)}), 500
+
+@app.route("/api/customer/<reseller_id>/place_order", methods=["POST"])
+def api_customer_place_order(reseller_id):
+    try:
+        # Only logged customer can place for self, or staff
+        if session.get("customer_id") and session.get("customer_id") != reseller_id:
+            return jsonify({"ok": False, "error": "Not allowed"}), 403
+        d = request.json or {}
+        qty = int(d.get("quantity",1))
+        kg_size = d.get("kg_size","1Kg")
+        mode = d.get("mode","DELIVER")
+        payment = d.get("payment","Cash")
+        sales_date = d.get("sales_date") or datetime.now().strftime("%Y-%m-%d")
+        notes = d.get("notes","")
+        if qty<=0:
+            return jsonify({"ok": False, "error": "Invalid qty"}), 400
+        reseller = fb_get(f"resellers/{reseller_id}") or {}
+        if not reseller:
+            return jsonify({"ok": False, "error": "Reseller not found"}), 404
+        fallback={"1Kg":10,"5Kg":50,"10Kg":100,"25Kg":250}
+        unit_price=fallback.get(kg_size,10)
+        total = round(unit_price*qty,2)
+        sale = {
+            "reseller_id": reseller_id,
+            "reseller_name": reseller.get("store_name",""),
+            "quantity": qty,
+            "kg_size": kg_size,
+            "unit_price": unit_price,
+            "total_sales": total,
+            "mode": mode,
+            "payment": payment,
+            "sales_date": sales_date,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "staff_name": "Customer Order",
+            "order_status": "New Order",
+            "order_source": "customer",
+            "notes": notes
+        }
+        fb_post("daily_sales", sale)
+        return jsonify({"ok": True, "total": total})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/order/<order_id>/status", methods=["POST"])
+@login_required
+def api_update_order_status(order_id):
+    data = request.json or {}
+    new_status = data.get("status","").strip()
+    if new_status not in ["New Order","Pending","Preparing","Out for Delivery","Delivered","Cancelled"]:
+        return jsonify({"ok": False, "error": "Invalid status"}), 400
+    fb_patch(f"daily_sales/{order_id}", {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")})
+    return jsonify({"ok": True, "status": new_status})
+
+@app.route("/customers")
+@login_required
+def staff_customers_page():
+    # Only ISESMO can view/manage
+    staff = (session.get("staff_name") or "").lower()
+    if staff not in ["isesmo", "isesmo gamboa"]:
+        return "<h3>Access Denied</h3><p>Only ISESMO can manage customers.</p><a href='/cashier'>Back</a>", 403
+    html = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Customers - Only ISESMO</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:16px;color:#00609C;margin:0}
+.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+label{font-size:11px;color:#666;display:block;margin:8px 0 4px}input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:13px}
+.btn{padding:8px 14px;border-radius:8px;border:none;font-size:12px;font-weight:600;margin:4px 2px}
+.btn-save{background:#00609C;color:#fff}.btn-otp{background:#f59e0b;color:#fff}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px 4px;border-bottom:1px solid #eee;text-align:left}
+</style></head>
+<body>
+<div class="topbar"><h1>👥 Customers (ISESMO Only)</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/orders" class="nav-pill">Live Orders</a></div></div>
+<div class="card">
+<h3 style="margin:0 0 8px;font-size:14px">Add New Customer - Only ISESMO</h3>
+<label>Store Name *</label><input id="newStore" placeholder="AMO Store">
+<label>Phone (will be login) *</label><input id="newPhone" placeholder="09xx xxx xxxx">
+<label>Password *</label><input id="newPassword" placeholder="Set password min 4 chars">
+<label>Address</label><input id="newAddress" placeholder="Angeles City">
+<button class="btn btn-save" style="width:100%;margin-top:10px;padding:12px" onclick="addCustomer()">+ Add Customer (ISESMO Only)</button>
+<p id="addStatus" style="font-size:12px;margin-top:8px"></p>
+</div>
+<div class="card"><input type="text" id="search" placeholder="Search store or phone..." oninput="loadCustomers()"></div>
+<div class="card"><table><thead><tr><th>Store</th><th>Phone / Login</th><th>OTP / Status</th><th>Action</th></tr></thead><tbody id="tbody"></tbody></table></div>
+<div class="card" id="editCard" style="display:none">
+<h3 style="margin:0 0 8px;font-size:14px">Edit Phone & Password</h3>
+<p style="font-size:11px;color:#666" id="editStore"></p>
+<label>Phone</label><input id="editPhone">
+<label>New Password</label><input id="editPassword" type="text">
+<button class="btn btn-save" onclick="savePassword()">Save</button><button class="btn" style="background:#ddd" onclick="closeEdit()">Cancel</button>
+<p id="editStatus" style="font-size:12px;margin-top:8px"></p>
+</div>
+<script>
+let editingId=null;
+async function addCustomer(){
+  const store=document.getElementById('newStore').value.trim();
+  const phone=document.getElementById('newPhone').value.trim();
+  const pwd=document.getElementById('newPassword').value.trim();
+  const addr=document.getElementById('newAddress').value.trim();
+  if(!store||!phone||!pwd){document.getElementById('addStatus').textContent='All fields required';return;}
+  const res=await fetch('/api/customers/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({store_name:store,phone:phone,password:pwd,address:addr})});
+  const data=await res.json();
+  document.getElementById('addStatus').textContent=data.ok?'✅ Customer added!':'Error: '+(data.error||'');
+  if(data.ok){document.getElementById('newStore').value='';document.getElementById('newPhone').value='';document.getElementById('newPassword').value='';loadCustomers();}
+}
+async function loadCustomers(){
+  const res=await fetch('/api/customers/list');
+  const data=await res.json();
+  const rows=data.resellers||[];
+  const otps=data.otps||{};
+  const q=document.getElementById('search').value.toLowerCase();
+  const filtered=rows.filter(r=>(r.store_name||'').toLowerCase().includes(q)||(r.phone||'').includes(q));
+  document.getElementById('tbody').innerHTML=filtered.map(r=>{
+    const otpInfo=otps[r.phone]||'';
+    return `<tr><td><b>${r.store_name}</b><br><small>₱${r.credit_balance||0}</small></td><td>${r.phone}<br><small style="color:${r.password_hash?'green':'red'}">${r.password_hash?'Has pwd':'No pwd'}</small></td><td>${otpInfo?'<span style="background:#fef3c7;padding:2px 6px;border-radius:10px;font-size:10px">OTP:'+otpInfo+'</span>':'-'}<br><small>${r.status||'active'}</small></td><td><button class="btn" style="background:#22c55e;color:#fff" onclick="openEdit('${r.id}','${r.store_name}','${r.phone}')">Edit</button></td></tr>`;
+  }).join('');
+}
+function openEdit(id,store,phone){editingId=id;document.getElementById('editStore').textContent=store;document.getElementById('editPhone').value=phone;document.getElementById('editCard').style.display='block';}
+function closeEdit(){document.getElementById('editCard').style.display='none';}
+async function savePassword(){
+  const phone=document.getElementById('editPhone').value.trim();
+  const pwd=document.getElementById('editPassword').value.trim();
+  const res=await fetch(`/api/reseller/${editingId}/set_password`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone,password:pwd})});
+  const data=await res.json();
+  document.getElementById('editStatus').textContent=data.ok?'Saved!':'Error: '+(data.error||'');
+  if(data.ok)loadCustomers();
+}
+loadCustomers();
+</script>
+</body></html>"""
+    return render_template_string(html)
+
+@app.route("/api/customers/add", methods=["POST"])
+@login_required
+def api_customers_add():
+    # Only ISESMO can add
+    staff = (session.get("staff_name") or "").lower()
+    if staff not in ["isesmo", "isesmo gamboa"]:
+        return jsonify({"ok": False, "error": "Only ISESMO can add customers"}), 403
+    try:
+        data = request.json or {}
+        store_name = (data.get("store_name") or "").strip()
+        phone = clean_phone(data.get("phone") or "")
+        pwd = (data.get("password") or "").strip()
+        address = (data.get("address") or "").strip()
+        if not store_name or not phone or not pwd:
+            return jsonify({"ok": False, "error": "Store, phone, password required"}), 400
+        if len(pwd) < 4:
+            return jsonify({"ok": False, "error": "Password min 4 chars"}), 400
+        resellers = fb_get("resellers") or {}
+        for val in resellers.values():
+            if not val: continue
+            if clean_phone(val.get("phone") or "") == phone:
+                return jsonify({"ok": False, "error": "Phone already registered"}), 400
+        hashed = hash_customer_password(pwd)
+        reseller_data = {"store_name": store_name, "phone": phone, "address": address, "credit_balance": 0, "password_hash": hashed, "status": "active", "created_by": session.get("staff_name"), "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        fb_post("resellers", reseller_data)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/customers/list")
+@login_required
+def api_customers_list():
+    try:
+        resellers = fb_get("resellers") or {}
+        otps = fb_get("customer_otps") or {}
+        # Get latest OTP per phone
+        latest_otps = {}
+        for val in otps.values():
+            if not val or val.get("used"): continue
+            phone = val.get("phone")
+            exp_str = val.get("expires_at")
+            try:
+                exp = datetime.strptime(exp_str, "%Y-%m-%d %H:%M:%S")
+                if datetime.now() > exp: continue
+            except:
+                pass
+            latest_otps[phone] = val.get("otp")
+        out=[]
+        for key,val in resellers.items():
+            if not val: continue
+            out.append({"id":key,"store_name":val.get("store_name"),"phone":val.get("phone") or val.get("contact",""),"credit_balance":val.get("credit_balance",0),"password_hash":"yes" if val.get("password_hash") else "","status":val.get("status","active")})
+        return jsonify({"resellers": out[:100], "otps": latest_otps})
+    except Exception as e:
+        return jsonify({"resellers": [], "otps": {}, "error": str(e)}), 500
+
+@app.route("/api/reseller/<reseller_id>/set_password", methods=["POST"])
+@login_required
+def api_set_reseller_password(reseller_id):
+    staff = (session.get("staff_name") or "").lower()
+    if staff not in ["isesmo", "isesmo gamboa"]:
+        return jsonify({"ok": False, "error": "Only ISESMO can set password"}), 403
+    try:
+        data = request.json or {}
+        phone = clean_phone(data.get("phone") or "")
+        password = (data.get("password") or "").strip()
+        if not phone or not password:
+            return jsonify({"ok": False, "error": "Phone and password required"}), 400
+        if len(password) < 4:
+            return jsonify({"ok": False, "error": "Password min 4"}), 400
+        hashed = hash_customer_password(password)
+        fb_patch(f"resellers/{reseller_id}", {"phone": phone, "password_hash": hashed, "status": "active"})
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/sales/dashboard")
+@login_required
+def api_sales_dashboard():
+    period = request.args.get("period", "daily").lower()
+    try:
+        import pytz
+        manila = pytz.timezone('Asia/Manila')
+        now = datetime.now(manila)
+    except:
+        now = datetime.now()
+    def kg_value(s):
+        try: return float(str(s).lower().replace("kg","").strip())
+        except: return 0
+    def parse_date(d):
+        try: return datetime.strptime(d[:10], "%Y-%m-%d")
+        except: return None
+    start_date = None
+    label = "Today"
+    if period == "daily":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        label = "Today"
+    elif period == "weekly":
+        start_date = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
+        label = "Last 7 Days"
+    elif period == "monthly":
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        label = "This Month"
+    elif period == "quarterly":
+        q = (now.month-1)//3 + 1
+        start_month = (q-1)*3 + 1
+        start_date = now.replace(month=start_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        label = f"Q{q} {now.year}"
+    elif period in ("yearly","year"):
+        start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        label = f"Year {now.year}"
+    else:
+        start_date = None
+        label = "All Time"
+    total_peso = 0; total_kg = 0; count = 0
+    breakdown = {"1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0}
+    try:
+        data = fb_get("daily_sales") or {}
+        for v in data.values():
+            if not v: continue
+            sd = v.get("sales_date") or (v.get("created_at")[:10] if v.get("created_at") else "")
+            if not sd: continue
+            dt = parse_date(sd)
+            if not dt: continue
+            if start_date and dt < start_date.replace(tzinfo=None): continue
+            qty = int(v.get("quantity",0) or 0)
+            kg_size = v.get("kg_size","1Kg")
+            total_peso += float(v.get("total_sales",0) or 0)
+            total_kg += qty * kg_value(kg_size)
+            count += 1
+            if kg_size in breakdown: breakdown[kg_size] += qty
+    except Exception as e:
+        print(f"dashboard error {e}")
+    return jsonify({"period": period, "label": label, "total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "date": now.strftime("%Y-%m-%d"), "start": start_date.strftime("%Y-%m-%d") if start_date else "All"})
+
+@app.route("/api/sales/today")
+@login_required
+def api_today_sales():
+    try:
+        import pytz
+        manila = pytz.timezone('Asia/Manila')
+        now = datetime.now(manila)
+    except:
+        now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    def kg_value(s):
+        try: return float(str(s).lower().replace("kg","").strip())
+        except: return 0
+    def parse_date(d):
+        try: return datetime.strptime(d[:10], "%Y-%m-%d")
+        except: return None
+    total_peso = 0; total_kg = 0; count = 0
+    breakdown = {"1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0}
+    try:
+        data = fb_get("daily_sales") or {}
+        for v in data.values():
+            if not v: continue
+            sd = v.get("sales_date") or (v.get("created_at")[:10] if v.get("created_at") else "")
+            if not sd: continue
+            dt = parse_date(sd)
+            if not dt: continue
+            if dt.date() != now.date(): continue
+            qty = int(v.get("quantity",0) or 0)
+            kg_size = v.get("kg_size","1Kg")
+            total_peso += float(v.get("total_sales",0) or 0)
+            total_kg += qty * kg_value(kg_size)
+            count += 1
+            if kg_size in breakdown: breakdown[kg_size] += qty
+    except: pass
+    return jsonify({"total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "date": today_str, "start": today_str})
+
+@app.route("/dashboard")
+@login_required
+def dashboard_page():
+    html = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard</title>
+<style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.topbar h1{font-size:16px;color:#00609C;margin:0}.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}.nav-pill.active{background:#00609C;color:#fff}.period-btn{padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px;color:#00609C}.period-btn.active{background:#00609C;color:#fff}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px}.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center}.stat-val{font-size:20px;font-weight:700;color:#00609C}</style></head>
+<body>
+<div class="topbar"><h1>OMEGA ICE</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a> <a href="/dashboard" class="nav-pill active">Dashboard</a></div></div>
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+<button class="period-btn active" data-p="daily" onclick="setPeriod('daily')">Daily</button>
+<button class="period-btn" data-p="weekly" onclick="setPeriod('weekly')">Weekly</button>
+<button class="period-btn" data-p="monthly" onclick="setPeriod('monthly')">Monthly</button>
+<button class="period-btn" data-p="quarterly" onclick="setPeriod('quarterly')">Quarterly</button>
+<button class="period-btn" data-p="yearly" onclick="setPeriod('yearly')">Yearly</button>
+<button class="period-btn" data-p="all" onclick="setPeriod('all')">All Time</button>
+</div>
+<div class="card"><div class="stat-grid"><div><div class="stat-val" id="totalKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div><div><div class="stat-val" id="totalPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div><div><div class="stat-val" id="totalCount">0</div><div class="stat-lbl">TRANS</div></div></div><div id="breakdown" style="font-size:11px;margin-top:10px;text-align:center"></div></div>
+<script>
+let currentPeriod='daily';
+async function setPeriod(p){currentPeriod=p;document.querySelectorAll('.period-btn').forEach(b=>b.classList.toggle('active',b.dataset.p===p));loadDashboard();}
+async function loadDashboard(){const res=await fetch('/api/sales/dashboard?period='+currentPeriod);const data=await res.json();document.getElementById('totalKg').textContent=(data.total_kg||0).toLocaleString()+'kg';document.getElementById('totalPeso').textContent='₱'+(data.total||0).toLocaleString();document.getElementById('totalCount').textContent=data.count||0;const b=data.breakdown||{};document.getElementById('breakdown').textContent=`1Kg:${b['1Kg']||0} 5Kg:${b['5Kg']||0} 10Kg:${b['10Kg']||0} 25Kg:${b['25Kg']||0}`;}loadDashboard();
+</script>
+</body></html>"""
+    return render_template_string(html)
+
+@app.route("/orders")
+@login_required
+def staff_orders_page():
+    html = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Live Orders</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:16px;color:#00609C;margin:0}
+.card{background:#fff;border-radius:12px;padding:12px;margin-bottom:10px}
+.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}
+.live{display:inline-flex;align-items:center;gap:6px;background:#ef4444;color:#fff;padding:6px 12px;border-radius:20px;font-size:11px}
+.order-card{border-left:4px solid #f59e0b;padding:12px;margin:8px 0;background:#fff;border-radius:8px}
+.btn{padding:6px 10px;border-radius:8px;border:1px solid #ccd;font-size:11px;margin:2px}
+</style></head>
+<body>
+<div class="topbar"><h1>Live Customer Orders</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a></div></div>
+<div style="display:flex;gap:8px;margin-bottom:12px"><span class="live">● LIVE</span><button onclick="loadOrders()" style="padding:6px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px">Refresh</button></div>
+<div id="ordersList">Loading...</div>
+<script>
+async function loadOrders(){
+  const res=await fetch('/api/staff/customer_orders');
+  const data=await res.json();
+  const orders=data.orders||[];
+  const list=document.getElementById('ordersList');
+  if(!orders.length){list.innerHTML='<div class="card" style="text-align:center;color:#888">No customer orders yet.</div>';return;}
+  list.innerHTML=orders.map(o=>`<div class="order-card"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}</span><span style="font-size:10px;background:#fef3c7;padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><button class="btn" onclick="updateStatus('${o.id}','Pending')">Accept</button><button class="btn" onclick="updateStatus('${o.id}','Preparing')">Preparing</button><button class="btn" onclick="updateStatus('${o.id}','Out for Delivery')">Out</button><button class="btn" onclick="updateStatus('${o.id}','Delivered')">Done</button></div></div>`).join('');
+}
+async function updateStatus(id,status){await fetch(`/api/order/${id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});loadOrders();}
+loadOrders();setInterval(loadOrders,3000);
+</script>
+</body></html>"""
+    return render_template_string(html)
+
+@app.route("/api/staff/customer_orders")
+@login_required
+def api_staff_customer_orders():
+    try:
+        sales = fb_get("daily_sales") or {}
+        orders=[]
+        for key,val in sales.items():
+            if not val: continue
+            if val.get("order_source") != "customer": continue
+            orders.append({"id":key,"reseller_name":val.get("reseller_name"),"quantity":val.get("quantity"),"kg_size":val.get("kg_size"),"total_sales":val.get("total_sales"),"mode":val.get("mode"),"sales_date":val.get("sales_date"),"order_status":val.get("order_status","New Order"),"created_at":val.get("created_at")})
+        orders.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        return jsonify({"orders": orders[:50]})
+    except Exception as e:
+        return jsonify({"orders":[]}), 500
+
+@app.route("/health")
+def health():
+    return jsonify({"ok": True, "version": "v28-otp-isesmo-only"})
+
 
 
 if __name__ == "__main__":
