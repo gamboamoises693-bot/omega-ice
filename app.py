@@ -46,10 +46,10 @@ def login_required(v):
     return w
 
 LOGIN_HTML = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>Login v9</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>Login</title>
 <style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}.card{background:#fff;border-radius:16px;padding:28px 24px;width:100%;max-width:340px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.06)}h1{font-size:20px;color:#00609C;margin:0 0 4px}.dots{font-size:28px;letter-spacing:8px;margin:12px 0;color:#222;min-height:36px}.msg{font-size:12px;color:#888;min-height:18px;margin-bottom:16px}.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}.keypad button{padding:20px 0;font-size:24px;border-radius:12px;border:none;background:#f0f0f0;cursor:pointer;touch-action:manipulation}.keypad button:active{background:#ddd;transform:scale(0.97)}.keypad button.clear{background:#e5433d;color:#fff}.keypad button.back{background:#999;color:#fff}</style>
 </head><body>
-<div class="card"><h1>OMEGA PURIFIED ICE</h1><p>STAFF LOGIN v9.0 INSTANT FIXED</p><div class="dots" id="dots">o o o o</div><p class="msg" id="msg">Tap PIN: 0712</p>
+<div class="card"><h1>OMEGA PURIFIED ICE</h1><p>STAFF LOGIN</p><div class="dots" id="dots">o o o o</div><p class="msg" id="msg">Enter PIN</p>
 <div class="keypad">
 <button type="button" onclick="addDigit('1')">1</button>
 <button type="button" onclick="addDigit('2')">2</button>
@@ -69,18 +69,20 @@ let pin="";
 function updateDots(){let out="";for(let i=0;i<4;i++)out+=(i<pin.length?"*":"o")+" ";document.getElementById("dots").innerText=out.trim()}
 function addDigit(d){if(pin.length<4){pin+=d;updateDots();if(pin.length==4)setTimeout(doLogin,200)}}
 function backspace(){pin=pin.slice(0,-1);updateDots()}
-function clearPin(){pin="";updateDots();document.getElementById("msg").textContent="Tap PIN: 0712"}
-async function doLogin(){document.getElementById("msg").textContent="Checking "+pin+"...";try{const res=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pin})});const data=await res.json();if(data.ok){document.getElementById("msg").textContent="OK "+data.name+"! Loading...";window.location.href="/cashier"}else{document.getElementById("msg").textContent=data.error||"Wrong PIN";setTimeout(clearPin,1200)}}catch(e){document.getElementById("msg").textContent="Network error - retry "+e.message;setTimeout(clearPin,1500)}}
+function clearPin(){pin="";updateDots();document.getElementById("msg").textContent="Enter PIN"}
+async function doLogin(){document.getElementById("msg").textContent="Checking...";try{const res=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pin})});const data=await res.json();if(data.ok){document.getElementById("msg").textContent="OK "+data.name+"! Loading...";window.location.href="/cashier"}else{document.getElementById("msg").textContent=data.error||"Wrong PIN";setTimeout(clearPin,1200)}}catch(e){document.getElementById("msg").textContent="Network error - retry "+e.message;setTimeout(clearPin,1500)}}
 </script>
 </body></html>
 """
 
 CASHIER_HTML = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cashier v9.0</title>
-<style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px;color:#1a1a1a}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.topbar h1{font-size:16px;color:#00609C;margin:0}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.05)}label{display:block;font-size:12px;color:#666;margin:10px 0 4px}input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:14px}.toggle-row{display:flex;gap:8px;margin-top:4px}.toggle-row button{flex:1;padding:10px;border-radius:8px;border:1px solid #ccd;background:#f5f5f5}.toggle-row button.active{background:#0096D6;color:#fff;border-color:#0096D6}.kg-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:4px}.kg-row button{padding:10px 0;border-radius:8px;border:1px solid #ccd;background:#f5f5f5}.kg-row button.active{background:#0096D6;color:#fff}.total-row{display:flex;justify-content:space-between;align-items:baseline;margin:16px 0 4px}.total-row .amount{font-size:24px;font-weight:600;color:#00609C}.save-btn{width:100%;padding:14px;margin-top:12px;background:#00609C;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600}#resellerResults{border:1px solid #ddd;border-radius:8px;margin-top:4px;max-height:160px;overflow-y:auto;display:none;background:#fff}#resellerResults div{padding:8px 10px;font-size:13px;border-bottom:1px solid #eee}.status{font-size:13px;text-align:center;margin-top:8px;min-height:18px}.status.ok{color:#1a8a4a}.status.err{color:#c73333}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:6px 4px;border-bottom:1px solid #eee}th{color:#888;font-weight:500}.del-btn{background:none;border:none;color:#c0392b;font-size:12px}.edit-btn{background:none;border:none;color:#0096D6;font-size:12px;margin-right:6px;font-weight:bold}.cloud-badge{position:fixed;top:10px;right:10px;z-index:9999;padding:6px 10px;border-radius:20px;font-size:11px;background:#00aa44;color:white}</style></head>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Omega Purified Ice - Staff</title>
+<style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px;color:#1a1a1a}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:4px 2px}.topbar h1{font-size:18px;color:#00609C;margin:0;font-weight:700}.topbar .staff{font-size:12px;color:#555}.topbar .logout{font-size:12px;color:#c0392b;background:#fff;border:1px solid #e0c0c0;padding:6px 10px;border-radius:8px}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.05)}label{display:block;font-size:12px;color:#666;margin:10px 0 4px}input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:14px}.toggle-row{display:flex;gap:8px;margin-top:4px}.toggle-row button{flex:1;padding:10px;border-radius:8px;border:1px solid #ccd;background:#f5f5f5}.toggle-row button.active{background:#0096D6;color:#fff;border-color:#0096D6}.kg-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:4px}.kg-row button{padding:10px 0;border-radius:8px;border:1px solid #ccd;background:#f5f5f5}.kg-row button.active{background:#0096D6;color:#fff}.total-row{display:flex;justify-content:space-between;align-items:baseline;margin:16px 0 4px}.total-row .amount{font-size:24px;font-weight:600;color:#00609C}.save-btn{width:100%;padding:14px;margin-top:12px;background:#00609C;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600}#resellerResults{border:1px solid #ddd;border-radius:8px;margin-top:4px;max-height:160px;overflow-y:auto;display:none;background:#fff}#resellerResults div{padding:8px 10px;font-size:13px;border-bottom:1px solid #eee}.status{font-size:13px;text-align:center;margin-top:8px;min-height:18px}.status.ok{color:#1a8a4a}.status.err{color:#c73333}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:6px 4px;border-bottom:1px solid #eee}th{color:#888;font-weight:500}.del-btn{background:none;border:none;color:#c0392b;font-size:12px}.edit-btn{background:none;border:none;color:#0096D6;font-size:12px;margin-right:6px;font-weight:bold}.cloud-badge{display:inline-flex;align-items:center;gap:4px;background:#22c55e;color:#fff;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600;margin-bottom:12px}.topbar-wrap{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}</style></head>
 <body>
-<div class="cloud-badge">☁️ Cloud v9.0 INSTANT FIXED LIVE</div>
-<div class="topbar"><h1>OMEGA ICE - Cashier v9.0 ☁️</h1><div><span class="staff">{{ staff_name }} ({{ staff_position }})</span><button class="logout" onclick="logout()" style="font-size:12px;color:#c0392b;background:none;border:none">Logout</button></div></div>
+<div class="topbar-wrap">
+<div class="topbar"><h1>OMEGA PURIFIED ICE</h1><div style="display:flex;align-items:center;gap:10px"><span class="staff">{{ staff_name }}</span><button class="logout" onclick="logout()">Logout</button></div></div>
+<div><span class="cloud-badge">☁️ Cloud Live</span></div>
+</div>
 <div class="card">
 <label>Reseller / customer</label><input type="text" id="resellerInput" placeholder="Type to search or add new" autocomplete="off"><div id="resellerResults"></div>
 <label>Delivery mode</label><div class="toggle-row"><button id="modeDeliver" class="active" onclick="setMode('DELIVER')">Deliver</button><button id="modePickup" onclick="setMode('PICKUP')">Pickup</button></div>
@@ -92,7 +94,7 @@ CASHIER_HTML = """<!DOCTYPE html>
 <button class="save-btn" id="cancelEditBtn" style="display:none;background:#999;margin-top:6px" onclick="cancelEdit()">Cancel edit</button>
 <p class="status" id="statusMsg"></p>
 </div>
-<div class="card"><label>Recent sales (Live from Cloud) - v6 with EDIT</label><table><thead><tr><th>Date</th><th>Reseller</th><th>Qty</th><th>Size</th><th>Total</th><th></th></tr></thead><tbody id="recentBody"></tbody></table></div>
+<div class="card"><label style="font-weight:600;margin-bottom:8px;display:block">Recent sales</label><table><thead><tr><th>Date</th><th>Reseller</th><th>Qty</th><th>Size</th><th>Total</th><th></th></tr></thead><tbody id="recentBody"></tbody></table></div>
 <script>
 let mode='DELIVER';let payment='Cash';let kg='{{ kg_options[0] }}';let selectedReseller=null;let unitPrice=0;let editingSaleId=null;
 function setMode(m){mode=m;document.getElementById('modeDeliver').classList.toggle('active',m==='DELIVER');document.getElementById('modePickup').classList.toggle('active',m==='PICKUP');updateTotal()}
@@ -132,7 +134,7 @@ def api_login():
             session["staff_name"]=offline_pins[pin]
             session["staff_position"]="Offline Mode"
             return jsonify({"ok":True,"name":offline_pins[pin],"position":"Offline Mode"})
-        return jsonify({"ok":False,"error":"Firebase staff not found - use 0712"}),404
+        return jsonify({"ok":False,"error":"Staff not found - contact admin"}),404
     for key,val in staff_data.items():
         if val and val.get("pin")==pin and val.get("status")=="Active":
             session["staff_id"]=key;session["staff_name"]=val.get("name");session["staff_position"]=val.get("position","Staff")
@@ -219,7 +221,7 @@ def api_today_sales():
     return jsonify({"total": total, "count": count, "date": today})
 
 @app.route("/health")
-def health(): return jsonify({"ok":True,"firebase":FIREBASE_URL,"version":"v9.0 INSTANT FIXED"})
+def health(): return jsonify({"ok":True,"firebase":FIREBASE_URL,"version":"live"})
 
 if __name__=="__main__":
     port=int(os.environ.get("PORT",5000))
