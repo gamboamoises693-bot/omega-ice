@@ -1409,6 +1409,9 @@ def fix_reseller_duplicates():
     over to the rich entry's key, merges credit_balance if needed,
     then deletes the sparse duplicate.
 
+    Everything is done in ONE bulk Firebase update (not one call per
+    sale) so this finishes in a couple seconds instead of timing out.
+
     Safe to run more than once - if there are no more duplicates,
     it does nothing.
     """
@@ -1422,14 +1425,13 @@ def fix_reseller_duplicates():
         name = (val.get("store_name") or "").strip()
         by_name.setdefault(name, []).append((key, val))
 
+    bulk_updates = {}  # path -> new value ; a value of None deletes that path
     report = []
 
     for name, entries in by_name.items():
         if len(entries) < 2:
             continue
 
-        # Prefer the entry with a real Firebase push-key (starts with "-")
-        # and more populated fields as the one to KEEP.
         def richness(entry):
             key, val = entry
             score = 1 if key.startswith("-") else 0
@@ -1440,29 +1442,31 @@ def fix_reseller_duplicates():
         keep_key, keep_val = entries_sorted[0]
         remove_entries = entries_sorted[1:]
 
-        merged_sales = 0
+        sales_repointed = 0
+        credit_to_add = 0
+
         for remove_key, remove_val in remove_entries:
-            # re-point any sales referencing the sparse entry
             for sale_id, sale in sales.items():
                 if sale and str(sale.get("reseller_id")) == str(remove_key):
-                    fb_patch(f"daily_sales/{sale_id}", {"reseller_id": keep_key})
-                    merged_sales += 1
+                    bulk_updates[f"daily_sales/{sale_id}/reseller_id"] = keep_key
+                    sales_repointed += 1
 
-            # merge credit balance if the removed entry had one
-            remove_bal = remove_val.get("credit_balance") or 0
-            if remove_bal:
-                keep_bal = keep_val.get("credit_balance") or 0
-                fb_patch(f"resellers/{keep_key}", {"credit_balance": keep_bal + remove_bal})
+            credit_to_add += remove_val.get("credit_balance") or 0
+            bulk_updates[f"resellers/{remove_key}"] = None  # deletes this node
 
-            # delete the sparse duplicate
-            requests.delete(f"{FIREBASE_URL}/resellers/{remove_key}.json", timeout=10)
+        if credit_to_add:
+            new_balance = (keep_val.get("credit_balance") or 0) + credit_to_add
+            bulk_updates[f"resellers/{keep_key}/credit_balance"] = new_balance
 
-            report.append({
-                "store_name": name,
-                "kept_key": keep_key,
-                "removed_key": remove_key,
-                "sales_repointed": merged_sales,
-            })
+        report.append({
+            "store_name": name,
+            "kept_key": keep_key,
+            "removed_keys": [k for k, _ in remove_entries],
+            "sales_repointed": sales_repointed,
+        })
+
+    if bulk_updates:
+        fb_patch("", bulk_updates)  # single request updates/deletes everything at once
 
     return jsonify({"merged": report, "duplicates_fixed": len(report)})
 
