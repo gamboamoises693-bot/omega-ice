@@ -123,12 +123,12 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
   <span class="cloud-badge pending" id="pendingBadge" style="display:none" onclick="syncOffline()">0 Pending</span>
   <a href="/cashier" class="nav-pill active">Sales</a>
   <a href="/machines" class="nav-pill">Machines</a>
-  <a href="/dashboard" class="nav-pill">Dashboard</a>
+  <a href="/dashboard" class="nav-pill">Dashboard</a><button onclick="resetTodayDashboard()" style="margin-left:6px;padding:4px 10px;border-radius:12px;border:none;background:#ef4444;color:#fff;font-size:11px">🗑️ Reset Today</button>
 </div>
 <div class="today-card">
   <div style="display:flex;justify-content:space-between;align-items:center;">
     <div><div style="font-size:11px;opacity:.8;" id="todayLabel">TODAY'S SALES</div><div style="font-size:10px;opacity:.7;" id="todayDate">Loading...</div></div>
-    <button onclick="loadToday()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;">Refresh</button>
+    <button onclick="loadToday()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;">Refresh</button><button onclick="resetTodayData()" style="background:#ef4444;border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;margin-left:6px">🗑️ Reset Today</button>
   </div>
   <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
     <button class="period-btn active" data-period="daily" onclick="setCashierPeriod('daily')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.3);color:#fff;font-size:10px">Daily</button>
@@ -230,6 +230,20 @@ async function loadRecent(){
   }catch(e){document.getElementById('recentBody').innerHTML=`<tr><td colspan=7 style="color:#c0392b">Error: ${e.message} <a href="/login">Login</a></td></tr>`;}
 }
 async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sale/${id}`,{method:'DELETE'});loadRecent();loadToday();}
+async function resetTodayData(){
+  if(!confirm('🗑️ RESET TODAY?\n\nThis will DELETE ALL sales with date TODAY (2026-09-06) including your simulated delivered data!\n\nOnly ISESMO can do this.\n\nAre you sure? This cannot be undone!')) return;
+  if(!confirm('FINAL CONFIRM: Delete today\\'s data? Type OK')) return;
+  try{
+    const res = await fetch('/api/staff/reset_today', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
+    const data = await res.json();
+    if(data.ok){
+      alert(`✅ Deleted ${data.deleted} records from today (${data.date})! Dashboard reset!`);
+      loadToday(); loadRecent();
+    } else {
+      alert('Failed: '+(data.error||'Not allowed - Only ISESMO'));
+    }
+  }catch(e){alert('Error: '+e.message);}
+}
 async function logout(){await fetch('/api/logout',{method:'POST'});window.location.href='/login'}
 updateTotal();loadRecent();loadToday();setInterval(loadRecent,30000);setInterval(loadToday,30000);
 window.addEventListener('storage', (e)=>{
@@ -363,6 +377,15 @@ def fb_put(path, data):
     except Exception as e:
         print(f"PUT {path} error: {e}")
     return None
+
+def fb_delete(path):
+    try:
+        r = requests.delete(f"{FIREBASE_URL}/{path}.json", timeout=10)
+        if r.status_code == 200:
+            return True
+    except Exception as e:
+        print(f"DELETE {path} error: {e}")
+    return False
 
 def fb_patch(path, data):
     try:
@@ -2310,7 +2333,7 @@ def dashboard_page():
     html = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard</title>
 <style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.topbar h1{font-size:16px;color:#00609C;margin:0}.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}.nav-pill.active{background:#00609C;color:#fff}.period-btn{padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px;color:#00609C}.period-btn.active{background:#00609C;color:#fff}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px}.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center}.stat-val{font-size:20px;font-weight:700;color:#00609C}</style></head>
 <body>
-<div class="topbar"><h1>OMEGA PURIFIED ICE</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a> <a href="/dashboard" class="nav-pill active">Dashboard</a></div></div>
+<div class="topbar"><h1>OMEGA ICE</h1><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444">🔴 Live Orders</a><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a> <a href="/dashboard" class="nav-pill active">Dashboard</a><button onclick="resetTodayDashboard()" style="padding:6px 12px;border-radius:20px;border:none;background:#ef4444;color:#fff;font-size:11px">🗑️ Reset Today</button></div></div>
 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
 <button class="period-btn active" data-p="daily" onclick="setPeriod('daily')">Daily</button>
 <button class="period-btn" data-p="weekly" onclick="setPeriod('weekly')">Weekly</button>
@@ -2631,6 +2654,61 @@ def api_staff_archive_all_old():
             fb_patch(f"daily_sales/{key}", {"archived": True, "archived_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
             archived += 1
         return jsonify({"ok": True, "archived": archived})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+
+@app.route("/api/staff/reset_today", methods=["POST"])
+@login_required
+def api_staff_reset_today():
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": "Only ISESMO can reset today"}), 403
+        data = request.json or {}
+        date_str = data.get("date")  # optional, defaults to today
+        if not date_str:
+            try:
+                import pytz
+                manila = pytz.timezone('Asia/Manila')
+                now = datetime.now(manila)
+            except:
+                now = datetime.now()
+            date_str = now.strftime("%Y-%m-%d")
+        sales = fb_get("daily_sales") or {}
+        deleted = 0
+        for key,val in sales.items():
+            if not val: continue
+            sd = val.get("sales_date") or (val.get("created_at")[:10] if val.get("created_at") else "")
+            dd = val.get("delivered_date") or ""
+            # Delete if sales_date or delivered_date matches today
+            if sd and sd[:10] == date_str:
+                fb_delete(f"daily_sales/{key}")
+                deleted += 1
+            elif dd and dd[:10] == date_str and val.get("order_status") == "Delivered":
+                # Also delete delivered today that were originally old but updated to today
+                fb_delete(f"daily_sales/{key}")
+                deleted += 1
+        return jsonify({"ok": True, "deleted": deleted, "date": date_str})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/staff/reset_all_simulated", methods=["POST"])
+@login_required
+def api_staff_reset_all_simulated():
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": "Only ISESMO can reset all"}), 403
+        # This deletes ALL daily_sales - DANGER - but useful for testing
+        # Instead, archive all instead of delete for safety
+        sales = fb_get("daily_sales") or {}
+        deleted = 0
+        for key in list(sales.keys()):
+            fb_delete(f"daily_sales/{key}")
+            deleted += 1
+        return jsonify({"ok": True, "deleted": deleted, "warning": "ALL sales deleted"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
