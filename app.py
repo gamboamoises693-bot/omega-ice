@@ -1378,6 +1378,35 @@ def debug_machines():
         "count": len(raw) if isinstance(raw, dict) else (0 if raw is None else "not a dict - see raw_machines_node")
     })
 
+@app.route("/debug/duplicate_sales")
+def debug_duplicate_sales():
+    sales = fb_get("daily_sales") or {}
+    groups = {}
+    for sale_id, s in sales.items():
+        if not s:
+            continue
+        key = (
+            s.get("sales_date"),
+            str(s.get("reseller_id")),
+            s.get("reseller_name"),
+            s.get("quantity"),
+            s.get("kg_size"),
+            s.get("total_sales"),
+        )
+        groups.setdefault(key, []).append(sale_id)
+
+    duplicates = {}
+    for key, ids in groups.items():
+        if len(ids) > 1:
+            duplicates[str(key)] = ids
+
+    return jsonify({
+        "total_sales": len(sales),
+        "duplicate_groups": len(duplicates),
+        "duplicates": duplicates,
+    })
+
+
 @app.route("/debug/resellers")
 def debug_resellers():
     raw = fb_get("resellers") or {}
