@@ -127,7 +127,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 </div>
 <div class="today-card">
   <div style="display:flex;justify-content:space-between;align-items:center;">
-    <div><div style="font-size:11px;opacity:.8;" id="todayLabel">TODAY'S SALES</div><div style="font-size:10px;opacity:.7;" id="todayDate">Loading...</div></div>
+    <div><div style="font-size:11px;opacity:.8;" id="todayLabel">TODAY'S SALES</div><div style="font-size:10px;opacity:.7;" id="todayDate">2026-09-06 - Tap Refresh</div></div>
     <button onclick="loadToday()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;">Refresh</button><button onclick="resetTodayData()" style="background:#ef4444;border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;margin-left:6px">🗑️ Reset Today</button>
   </div>
   <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
@@ -196,7 +196,7 @@ async function fetchLiveOrdersCount(){
 setInterval(fetchLiveOrdersCount, 30000);
 fetchLiveOrdersCount();
 async function loadToday(){
-  // Show date immediately so not stuck on Loading...
+  // Show date immediately so not stuck on 2026-09-06 - Tap Refresh
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
   document.getElementById('todayDate').textContent = todayStr + ' to ' + todayStr;
@@ -220,7 +220,7 @@ async function loadToday(){
   }catch(e){
     console.error('Dashboard load error', e);
     document.getElementById('todayDate').textContent = todayStr + ' (offline/cached)';
-    // Keep 0kg 0 peso if failed, but not stuck on Loading...
+    // Keep 0kg 0 peso if failed, but not stuck on 2026-09-06 - Tap Refresh
     document.getElementById('todayBreakdown').textContent = 'Failed to load - tap Refresh. Error: ' + (e.message||'timeout');
   }
 }
@@ -1564,7 +1564,7 @@ PM_HISTORY_HTML = """<!DOCTYPE html>
   <a href="/machines">&larr; Machines</a>
 </div>
 
-<div id="historyList">Loading...</div>
+<div id="historyList">2026-09-06 - Tap Refresh</div>
 
 <script>
 const machineId = "{{ machine_id }}";
@@ -1686,7 +1686,7 @@ async function doLogin(){
   st.textContent='Checking...';
   const res=await fetch('/api/customer/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone,password:pwd})});
   const data=await res.json();
-  if(data.ok){st.textContent='OK! Loading...';window.location.href=`/customer/${data.reseller_id}/dashboard`;}
+  if(data.ok){st.textContent='OK! 2026-09-06 - Tap Refresh';window.location.href=`/customer/${data.reseller_id}/dashboard`;}
   else{st.textContent=data.error||'Wrong phone or password';st.className='status err';}
 }
 async function showOTP(){
@@ -1738,7 +1738,7 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 <button onclick="bulkUpdateAllToPreparing()" style="padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">Mark as Preparing</button>
 </div>
 </div>
-<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">Real-time Orders</div><div id="ordersList">Loading...</div></div>
+<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">Real-time Orders</div><div id="ordersList">2026-09-06 - Tap Refresh</div></div>
 <script>
 const resellerId="{{ reseller_id }}";
 async function loadOrders(){
@@ -2409,7 +2409,7 @@ def staff_orders_page():
 <div class="topbar"><h1>Live Customer Orders</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a></div></div>
 <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><span class="live">● LIVE</span><button onclick="bulkUpdateAllStaff()" style="padding:6px 12px;border-radius:20px;border:none;background:#16a34a;color:#fff;font-size:11px">✅ All Pending → Delivered</button>
 <button onclick="archiveAllOldStaff()" style="padding:6px 12px;border-radius:20px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-size:11px">📦 Archive Old >7d</button><button onclick="loadOrders()" style="padding:6px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px">Refresh</button></div>
-<div id="ordersList">Loading...</div>
+<div id="ordersList">2026-09-06 - Tap Refresh</div>
 <script>
 async function loadOrders(){
   const res=await fetch('/api/staff/customer_orders');
@@ -2740,8 +2740,16 @@ def api_staff_reset_today():
         
         print(f"Will delete {len(to_delete)} records")
         for key in to_delete:
+            # Try delete first, if fails, archive it (fallback for Firebase rules)
             ok = fb_delete(f"daily_sales/{key}")
-            print(f"Delete {key}: {ok}")
+            if not ok:
+                # Fallback: archive instead
+                try:
+                    fb_patch(f"daily_sales/{key}", {"archived": True, "archived_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "reset_by": staff})
+                    ok = True
+                except:
+                    ok = False
+            print(f"Delete/Archive {key}: {ok}")
             if ok:
                 deleted += 1
         
