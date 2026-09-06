@@ -1786,6 +1786,7 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 <div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;font-weight:600">Summary</span><a href="/customer/{{ reseller_id }}/order" class="btn btn-primary">+ New Order</a></div><div class="stat-grid"><div><div class="stat-val" id="totalKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div><div><div class="stat-val" id="totalPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div><div><div class="stat-val" id="totalOrders">0</div><div class="stat-lbl">ORDERS</div></div></div><div id="statusCounts" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;font-size:10px"></div>
 <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
 <button onclick="loadOrders()" style="padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">🔄 Refresh</button>
+<button onclick="bulkMarkDelivered()" style="padding:8px 12px;border-radius:20px;border:1px solid #86efac;background:#f0fdf4;color:#166534;font-size:11px">✅ Mark all Pending as Delivered</button>
 <span style="font-size:10px;color:#888;padding:8px">Staff will update to Preparing → Delivered</span>
 </div>
 </div>
@@ -1822,6 +1823,7 @@ async function loadOrders(){
     document.getElementById('storeMeta').textContent=`Balance: ₱${stats.credit_balance||0} | ${new Date().toLocaleTimeString()}`;
     document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString();
     const counts=stats.status_counts||{};
+    pendingCountCache=counts['Pending']||0;
     document.getElementById('statusCounts').innerHTML=Object.entries(counts).map(([k,v])=>`<span class="status-pill status-${k.toLowerCase().replace(/ /g,'-')}">${k}: ${v}</span>`).join('');
     const list=document.getElementById('ordersList');
     lastOrders=orders;
@@ -1832,6 +1834,18 @@ async function loadOrders(){
   }
 }
 function toggleArchived(){showArchived=!showArchived;loadOrders();}
+
+let pendingCountCache=0;
+async function bulkMarkDelivered(){
+  const count = pendingCountCache || 'all';
+  if(!confirm(`Mark ${count} Pending orders as Delivered? This cannot be undone in bulk.`)) return;
+  try{
+    const res=await fetch(`/api/customer/${resellerId}/bulk_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Delivered'})});
+    const data=await res.json();
+    if(data.ok){alert(`✅ Updated ${data.updated} orders to Delivered!`);loadOrders();}
+    else{alert(data.error||'Failed');}
+  }catch(e){alert('Network error: '+e.message);}
+}
 
 const TRACK_STAGES=['Pending','Preparing','Out for Delivery','Delivered'];
 function trackStageIndex(status){
