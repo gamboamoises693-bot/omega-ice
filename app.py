@@ -20,7 +20,7 @@ KG_OPTIONS = ["1Kg", "5Kg", "10Kg", "25Kg"]
 FALLBACK_PRICES = {"1Kg": 10, "5Kg": 50, "10Kg": 100, "25Kg": 250}
 
 LOGIN_HTML = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>Omega Ice - Login</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>Omega Purified Ice - Login</title>
 <style>*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;background:#eef7ff;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}.card{background:#fff;border-radius:16px;padding:28px 24px;width:100%;max-width:340px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.06)}h1{font-size:20px;color:#00609C;margin:0 0 4px}.subtitle{font-size:13px;color:#333;margin:0 0 4px;font-weight:600}.tagline{font-size:11px;color:#888;margin:0 0 24px}.dots{font-size:28px;letter-spacing:8px;margin:12px 0;color:#222;min-height:36px}.msg{font-size:12px;color:#888;min-height:18px;margin-bottom:16px}.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}.keypad button{padding:20px 0;font-size:24px;border-radius:12px;border:none;background:#f0f0f0;cursor:pointer;touch-action:manipulation}.keypad button:active{background:#ddd;transform:scale(0.97)}.keypad button.clear{background:#e5433d;color:#fff}.keypad button.back{background:#999;color:#fff}.footer{font-size:10px;color:#aaa;margin-top:10px}</style>
 </head><body>
 <div class="card"><h1>OMEGA PURIFIED ICE</h1><p class="subtitle">STAFF LOGIN</p><p class="tagline">Sales quick access</p><div class="dots" id="dots">o o o o</div><p class="msg" id="msg">Enter PIN</p>
@@ -53,7 +53,7 @@ CASHIER_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Omega Ice - Cashier</title>
+<title>Omega Purified Ice - Cashier</title>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -127,7 +127,7 @@ CASHIER_HTML = """<!DOCTYPE html>
 
 <div class="topbar-wrap">
 <div class="topbar">
-  <h1>OMEGA ICE</h1>
+  <h1>OMEGA Purified ICE</h1>
   <div style="display:flex;align-items:center;gap:10px"><span class="staff">{{ staff_name }}</span><button class="logout" onclick="logout()">Logout</button></div>
 </div>
 <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -138,7 +138,7 @@ CASHIER_HTML = """<!DOCTYPE html>
 </div>
 
 <div class="card">
-  <label>Reseller / customer</label>
+  <label>Reseller / Customer</label>
   <input type="text" id="resellerInput" placeholder="Type to search or add new" autocomplete="off">
   <div id="resellerResults"></div>
 
@@ -1113,13 +1113,20 @@ MACHINE_MONITOR_HTML = """<!DOCTYPE html>
   .log-card.running { background: #fff7e0; }
   .log-top { font-size: 13px; font-weight: 500; }
   .log-sub { font-size: 11px; color: #888; margin-top: 2px; }
-  .log-actions { display: flex; gap: 6px; margin-top: 8px; }
-  .log-actions button { flex: 1; padding: 6px 0; font-size: 12px; border-radius: 6px; border: none; }
+  .log-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap:wrap; }
+  .log-actions button { flex: 1; padding: 7px 0; font-size: 11px; border-radius: 6px; border: none; min-width:60px; }
   .log-actions .add { background: #0096D6; color: #fff; }
   .log-actions .stop { background: #c0392b; color: #fff; }
+  .log-actions .edit { background: #f5f5f5; color: #00609C; border:1px solid #cde; }
+  .log-actions .del { background: #fff; color: #c0392b; border:1px solid #ecc; }
   .status { font-size: 13px; text-align: center; margin-top: 8px; min-height: 18px; }
   .status.ok { color: #1a8a4a; }
   .status.err { color: #c73333; }
+  .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); align-items:center; justify-content:center; padding:20px; z-index:999; }
+  .modal.open { display:flex; }
+  .modal .box { background:#fff; border-radius:12px; padding:16px; width:100%; max-width:340px; }
+  .modal label { display:block; font-size:12px; color:#666; margin:8px 0 4px; }
+  .modal input { width:100%; padding:10px; border:1px solid #ccd; border-radius:8px; font-size:14px; }
 </style>
 </head>
 <body>
@@ -1149,15 +1156,27 @@ MACHINE_MONITOR_HTML = """<!DOCTYPE html>
 
 <div id="logsList"></div>
 
+<!-- Edit Modal -->
+<div class="modal" id="editModal">
+  <div class="box">
+    <h3 style="margin:0 0 10px; font-size:15px;">Edit Log - Wrong Input?</h3>
+    <label>Start time (HH:MM)</label><input id="editStart">
+    <label>End time (HH:MM)</label><input id="editEnd">
+    <label>Output kg</label><input id="editOutput" type="number">
+    <label>Expense ₱ (optional, auto-calc if 0)</label><input id="editExpense" type="number" step="0.01">
+    <div style="display:flex; gap:8px; margin-top:14px;">
+      <button onclick="closeEdit()" style="flex:1; padding:10px; border-radius:8px; border:1px solid #ccd; background:#f5f5f5;">Cancel</button>
+      <button onclick="saveEdit()" style="flex:1; padding:10px; border-radius:8px; border:none; background:#0096D6; color:#fff;">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const machineId = "{{ machine_id }}";
-document.getElementById('machineTitle').textContent = "{{ machine_name }} \u2022 {{ wattage }}W";
+document.getElementById('machineTitle').textContent = "{{ machine_name }} • {{ wattage }}W";
 document.getElementById('dateInput').value = new Date().toISOString().slice(0,10);
+let editingLogId = null;
 
-// Wraps fetch so failures are always visible instead of silent:
-// - session expired (redirected to login) shows a clear message
-// - network errors show a clear message
-// - non-OK HTTP status shows the status code
 async function safeFetchJson(url, options) {
   const statusEl = document.getElementById('statusMsg');
   try {
@@ -1169,7 +1188,7 @@ async function safeFetchJson(url, options) {
     }
     const contentType = res.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
-      statusEl.textContent = `Unexpected response (status ${res.status}) — try logging in again`;
+      statusEl.textContent = `Unexpected response (status ${res.status})`;
       statusEl.className = 'status err';
       return null;
     }
@@ -1181,7 +1200,7 @@ async function safeFetchJson(url, options) {
     }
     return data;
   } catch (err) {
-    statusEl.textContent = 'Network error — check your connection: ' + err.message;
+    statusEl.textContent = 'Network error: ' + err.message;
     statusEl.className = 'status err';
     return null;
   }
@@ -1196,7 +1215,7 @@ async function startMachine() {
     statusEl.className = 'status ok';
     loadLogs();
   } else {
-    statusEl.textContent = data.error || 'Error starting machine';
+    statusEl.textContent = data.error || 'Error starting';
     statusEl.className = 'status err';
   }
 }
@@ -1212,17 +1231,17 @@ async function addHarvest(logId) {
   if (!data) return;
   const statusEl = document.getElementById('statusMsg');
   if (data.ok) {
-    statusEl.textContent = `Harvest of ${kg}kg added`;
+    statusEl.textContent = `Harvest ${kg}kg added`;
     statusEl.className = 'status ok';
   } else {
-    statusEl.textContent = data.error || 'Error adding harvest';
+    statusEl.textContent = data.error || 'Error';
     statusEl.className = 'status err';
   }
   loadLogs();
 }
 
 async function stopMachine(logId) {
-  if (!confirm('Stop this machine run? This will compute total output and electricity cost.')) return;
+  if (!confirm('Stop this run? Will compute output and cost.')) return;
   const data = await safeFetchJson(`/api/machine/${machineId}/stop`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1231,13 +1250,63 @@ async function stopMachine(logId) {
   if (!data) return;
   const statusEl = document.getElementById('statusMsg');
   if (data.ok) {
-    statusEl.textContent = `Stopped — ${data.output_kg}kg, ₱${data.expense} electricity`;
+    statusEl.textContent = `Stopped — ${data.output_kg}kg, ₱${data.expense}`;
     statusEl.className = 'status ok';
   } else {
-    statusEl.textContent = data.error || 'Error stopping machine';
+    statusEl.textContent = data.error || 'Error';
     statusEl.className = 'status err';
   }
   loadLogs();
+}
+
+function openEdit(lg) {
+  editingLogId = lg.id;
+  document.getElementById('editStart').value = lg.start_time || '';
+  document.getElementById('editEnd').value = lg.end_time || '';
+  document.getElementById('editOutput').value = lg.output_kg || 0;
+  document.getElementById('editExpense').value = lg.expense || 0;
+  document.getElementById('editModal').classList.add('open');
+}
+
+function closeEdit() {
+  document.getElementById('editModal').classList.remove('open');
+  editingLogId = null;
+}
+
+async function saveEdit() {
+  const payload = {
+    start_time: document.getElementById('editStart').value.trim(),
+    end_time: document.getElementById('editEnd').value.trim(),
+    output_kg: parseFloat(document.getElementById('editOutput').value) || 0,
+    expense: parseFloat(document.getElementById('editExpense').value) || 0
+  };
+  const data = await safeFetchJson(`/api/machine/log/${editingLogId}`, {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  });
+  if (!data) return;
+  if (data.ok) {
+    closeEdit();
+    document.getElementById('statusMsg').textContent = 'Log updated';
+    document.getElementById('statusMsg').className = 'status ok';
+    loadLogs();
+  } else {
+    alert(data.error || 'Failed to update');
+  }
+}
+
+async function deleteLog(logId) {
+  if (!confirm('Delete this log? Wrong input will be removed.')) return;
+  const data = await safeFetchJson(`/api/machine/log/${logId}`, { method: 'DELETE' });
+  if (!data) return;
+  if (data.ok) {
+    document.getElementById('statusMsg').textContent = 'Log deleted';
+    document.getElementById('statusMsg').className = 'status ok';
+    loadLogs();
+  } else {
+    alert(data.error || 'Failed to delete');
+  }
 }
 
 async function loadLogs() {
@@ -1265,10 +1334,11 @@ async function loadLogs() {
       return `
         <div class="log-card running">
           <div class="log-top">${lg.start_time} - RUNNING</div>
-          <div class="log-sub">Harvest so far: ${lg.harvest_kg || 0}kg (${lg.harvest_count || 0}x)</div>
+          <div class="log-sub">Harvest: ${lg.harvest_kg || 0}kg (${lg.harvest_count || 0}x)</div>
           <div class="log-actions">
             <button class="add" onclick="addHarvest('${lg.id}')">Add harvest</button>
             <button class="stop" onclick="stopMachine('${lg.id}')">Stop</button>
+            <button class="del" onclick="deleteLog('${lg.id}')">Delete</button>
           </div>
         </div>`;
     } else {
@@ -1276,6 +1346,10 @@ async function loadLogs() {
         <div class="log-card">
           <div class="log-top">${lg.start_time} - ${lg.end_time} = ${(lg.operating_hours||0).toFixed(1)}h</div>
           <div class="log-sub">Output ${(lg.output_kg||0).toFixed(0)}kg | ₱${(lg.expense||0).toFixed(0)} | ₱${(lg.cost_per_kg||0).toFixed(2)}/kg</div>
+          <div class="log-actions">
+            <button class="edit" onclick='openEdit(${JSON.stringify(lg).replace(/'/g,"&#39;")})'>Edit</button>
+            <button class="del" onclick="deleteLog('${lg.id}')">Delete</button>
+          </div>
         </div>`;
     }
   }).join('');
@@ -1588,6 +1662,80 @@ def api_stop_machine(machine_id):
     return jsonify({"ok": True, "output_kg": total_kg, "expense": expense, "cost_per_kg": cost_per_kg})
 
 
+
+@app.route("/api/machine/log/<log_id>", methods=["DELETE"])
+@login_required
+def api_delete_machine_log(log_id):
+    try:
+        # Delete log and its harvests
+        all_logs = fb_get("machine_logs") or {}
+        if log_id in all_logs:
+            requests.delete(f"{FIREBASE_URL}/machine_logs/{log_id}.json", timeout=10)
+        # Delete related harvests
+        harvests = fb_get("machine_harvests") or {}
+        for hid, h in (harvests or {}).items():
+            if h and h.get("log_id") == log_id:
+                requests.delete(f"{FIREBASE_URL}/machine_harvests/{hid}.json", timeout=5)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/machine/log/<log_id>", methods=["PUT"])
+@login_required
+def api_update_machine_log(log_id):
+    try:
+        d = request.json or {}
+        existing = fb_get(f"machine_logs/{log_id}")
+        if not existing:
+            return jsonify({"ok": False, "error": "Log not found"}), 404
+        machine_id = existing.get("machine_id")
+        machine = fb_get(f"machines/{machine_id}") or {}
+        wattage = float(machine.get("wattage") or 0)
+        # Parse times
+        start_time = d.get("start_time") or existing.get("start_time")
+        end_time = d.get("end_time") or existing.get("end_time")
+        output_kg = float(d.get("output_kg") if d.get("output_kg") is not None else existing.get("output_kg") or 0)
+        expense_input = float(d.get("expense") if d.get("expense") is not None else 0)
+
+        # Calculate hours if both times present
+        def parse_hm(s):
+            try:
+                hh, mm = s.split(":")
+                return int(hh)*60 + int(mm)
+            except: return None
+        sh = parse_hm(start_time)
+        eh = parse_hm(end_time)
+        operating_hours = existing.get("operating_hours") or 0
+        if sh is not None and eh is not None:
+            diff = eh - sh
+            if diff < 0: diff += 24*60
+            operating_hours = round(diff/60, 2)
+        # Expense auto-calc if 0
+        expense = expense_input
+        if expense == 0 and wattage and operating_hours:
+            rate = 12  # default per kwh, or get from settings
+            try:
+                rate_data = fb_get("settings/electricity_rate")
+                if rate_data: rate = float(rate_data)
+            except: pass
+            kwh = (wattage/1000)*operating_hours
+            expense = round(kwh*rate, 2)
+        cost_per_kg = round(expense/output_kg, 2) if output_kg else 0
+
+        patch = {
+            "start_time": start_time,
+            "end_time": end_time,
+            "output_kg": output_kg,
+            "operating_hours": operating_hours,
+            "expense": expense,
+            "cost_per_kg": cost_per_kg
+        }
+        fb_patch(f"machine_logs/{log_id}", patch)
+        return jsonify({"ok": True, "log": patch})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/machine/<machine_id>/logs")
 @login_required
 def api_machine_logs(machine_id):
@@ -1687,59 +1835,6 @@ loadHistory();
 """
 
 
-
-@app.route("/api/sale/<sale_id>", methods=["GET"])
-@login_required
-def api_get_sale(sale_id):
-    if str(sale_id).startswith("offline-"):
-        try:
-            oid = int(str(sale_id).replace("offline-",""))
-            conn = sqlite3.connect(LOCAL_DB)
-            conn.row_factory = sqlite3.Row
-            c = conn.cursor()
-            c.execute("SELECT * FROM cached_sales WHERE id=?", (oid,))
-            r = c.fetchone()
-            conn.close()
-            if r:
-                return jsonify({"ok": True, "sale": {"id": sale_id, "reseller_id": None, "reseller_name": r["reseller_name"], "quantity": r["quantity"], "kg_size": r["kg_size"], "mode": r["mode"], "payment": r["payment"]}})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 404
-    data = fb_get(f"daily_sales/{sale_id}")
-    if data:
-        return jsonify({"ok": True, "sale": {"id": sale_id, "reseller_id": data.get("reseller_id"), "reseller_name": data.get("reseller_name"), "quantity": data.get("quantity"), "kg_size": data.get("kg_size"), "mode": data.get("mode","DELIVER"), "payment": data.get("payment","Cash")}})
-    return jsonify({"ok": False, "error": "Not found"}), 404
-
-@app.route("/api/sale/<sale_id>", methods=["PUT"])
-@login_required
-def api_update_sale(sale_id):
-    d = request.json or {}
-    qty = int(d.get("quantity",1))
-    kg_size = d.get("kg_size","1Kg")
-    mode = d.get("mode","DELIVER")
-    payment = d.get("payment","Cash")
-    reseller_name = d.get("reseller_name","").strip()
-    reseller_id = d.get("reseller_id")
-    if not reseller_name or qty<=0:
-        return jsonify({"ok": False, "error": "Missing"}), 400
-    unit_price = get_price(kg_size, mode)
-    total = round(unit_price*qty,2)
-    if str(sale_id).startswith("offline-"):
-        try:
-            oid = int(str(sale_id).replace("offline-",""))
-            conn = sqlite3.connect(LOCAL_DB)
-            c = conn.cursor()
-            c.execute("UPDATE cached_sales SET reseller_name=?, quantity=?, kg_size=?, total_sales=?, mode=?, payment=? WHERE id=?", (reseller_name, qty, kg_size, total, mode, payment, oid))
-            conn.commit()
-            conn.close()
-            return jsonify({"ok": True, "total": total, "unit_price": unit_price})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
-    existing = fb_get(f"daily_sales/{sale_id}")
-    if not existing:
-        return jsonify({"ok": False, "error": "Not found"}), 404
-    fb_patch(f"daily_sales/{sale_id}", {"reseller_name": reseller_name, "reseller_id": reseller_id, "quantity": qty, "kg_size": kg_size, "mode": mode, "payment": payment, "payment_mode": payment, "delivery_mode": mode, "total_sales": total, "unit_price": unit_price})
-    return jsonify({"ok": True, "total": total, "unit_price": unit_price})
-
 # ---------- PM (preventive maintenance) routes ----------
 
 @app.route("/api/machine/<machine_id>/pm_done", methods=["POST"])
@@ -1794,7 +1889,7 @@ def pm_history_page(machine_id):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"Omega Purified Ice OFFLINE MODE ready")
+    print(f"Omega Ice OFFLINE MODE ready")
     print(f"Firebase: {FIREBASE_URL}")
     print(f"Local DB: {LOCAL_DB}")
     print(f"Pending offline: {get_pending_count()}")
