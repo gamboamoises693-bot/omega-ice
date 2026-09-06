@@ -13,468 +13,168 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, session, redirect, url_for, render_template_string
 
 app = Flask(__name__)
-app.secret_key = "omega-ice-realtime-2026"
+app.secret_key = os.environ.get("SECRET_KEY", "omega-ice-realtime-2026")
 FIREBASE_URL = "https://moises-92842-default-rtdb.asia-southeast1.firebasedatabase.app".rstrip("/")
 
 KG_OPTIONS = ["1Kg", "5Kg", "10Kg", "25Kg"]
 FALLBACK_PRICES = {"1Kg": 10, "5Kg": 50, "10Kg": 100, "25Kg": 250}
 
 LOGIN_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Omega Ice - Login</title>
-<style>
-  * { box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-    background: #eef7ff;
-    margin: 0;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-  }
-  .card {
-    background: #fff;
-    border-radius: 16px;
-    padding: 28px 24px;
-    width: 100%;
-    max-width: 340px;
-    text-align: center;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-  }
-  h1 { font-size: 20px; color: #00609C; margin: 0 0 4px; }
-  .subtitle { font-size: 13px; color: #333; margin: 0 0 4px; font-weight: 600; }
-  .tagline { font-size: 11px; color: #888; margin: 0 0 24px; }
-  .dots { font-size: 28px; letter-spacing: 6px; margin-bottom: 8px; color: #222; }
-  .msg { font-size: 12px; color: #888; min-height: 18px; margin-bottom: 16px; }
-  .keypad {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
-    margin-bottom: 20px;
-  }
-  .keypad button {
-    padding: 16px 0;
-    font-size: 20px;
-    border-radius: 10px;
-    border: none;
-    background: #f2f2f2;
-    color: #111;
-  }
-  .keypad button.clear { background: #e5433d; color: #fff; }
-  .keypad button.back { background: #999; color: #fff; }
-  .footer { font-size: 10px; color: #aaa; margin-top: 10px; }
-</style>
-</head>
-<body>
-
-<div class="card">
-  <h1>OMEGA PURIFIED ICE</h1>
-  <p class="subtitle">STAFF LOGIN</p>
-  <p class="tagline">Sales quick access</p>
-
-  <div class="dots" id="dots">o&nbsp;&nbsp;&nbsp;o&nbsp;&nbsp;&nbsp;o&nbsp;&nbsp;&nbsp;o</div>
-  <p class="msg" id="msg">Enter 4-digit PIN</p>
-
-  <div class="keypad">
-    <button onclick="addDigit('1')">1</button>
-    <button onclick="addDigit('2')">2</button>
-    <button onclick="addDigit('3')">3</button>
-    <button onclick="addDigit('4')">4</button>
-    <button onclick="addDigit('5')">5</button>
-    <button onclick="addDigit('6')">6</button>
-    <button onclick="addDigit('7')">7</button>
-    <button onclick="addDigit('8')">8</button>
-    <button onclick="addDigit('9')">9</button>
-    <button class="clear" onclick="clearPin()">C</button>
-    <button onclick="addDigit('0')">0</button>
-    <button class="back" onclick="backspace()">&lt;</button>
-  </div>
-
-  <p class="footer">Developed by: Moises Orio Gamboa | Computer Engineer</p>
-</div>
-
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Omega Purified Ice - Login</title>
+<style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}.card{background:#fff;border-radius:16px;padding:28px 24px;width:100%;max-width:340px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.06)}h1{font-size:20px;color:#00609C;margin:0 0 4px}.subtitle{font-size:13px;color:#333;margin:0 0 4px;font-weight:600}.tagline{font-size:11px;color:#888;margin:0 0 24px}.dots{font-size:28px;letter-spacing:8px;margin:12px 0;color:#222;min-height:36px}.msg{font-size:12px;color:#888;min-height:18px;margin-bottom:16px}.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}.keypad button{padding:20px 0;font-size:24px;border-radius:12px;border:none;background:#f0f0f0;cursor:pointer}.keypad button.clear{background:#e5433d;color:#fff}.keypad button.back{background:#999;color:#fff}</style>
+</head><body>
+<div class="card"><h1>OMEGA PURIFIED ICE</h1><p class="subtitle">STAFF LOGIN</p><p class="tagline">Sales quick access</p><div class="dots" id="dots">o o o o</div><p class="msg" id="msg">Enter PIN</p>
+<div class="keypad">
+<button type="button" onclick="addDigit('1')">1</button>
+<button type="button" onclick="addDigit('2')">2</button>
+<button type="button" onclick="addDigit('3')">3</button>
+<button type="button" onclick="addDigit('4')">4</button>
+<button type="button" onclick="addDigit('5')">5</button>
+<button type="button" onclick="addDigit('6')">6</button>
+<button type="button" onclick="addDigit('7')">7</button>
+<button type="button" onclick="addDigit('8')">8</button>
+<button type="button" onclick="addDigit('9')">9</button>
+<button type="button" class="clear" onclick="clearPin()">C</button>
+<button type="button" onclick="addDigit('0')">0</button>
+<button type="button" class="back" onclick="backspace()">&lt;</button>
+</div></div>
 <script>
-let pin = "";
-
-function updateDots() {
-  const dots = document.getElementById('dots');
-  let out = "";
-  for (let i = 0; i < 4; i++) out += (i < pin.length ? "*" : "o") + "&nbsp;&nbsp;&nbsp;";
-  dots.innerHTML = out;
-}
-
-function addDigit(d) {
-  if (pin.length < 4) {
-    pin += d;
-    updateDots();
-    if (pin.length === 4) setTimeout(doLogin, 200);
-  }
-}
-
-function backspace() {
-  pin = pin.slice(0, -1);
-  updateDots();
-}
-
-function clearPin() {
-  pin = "";
-  updateDots();
-  document.getElementById('msg').textContent = "Enter 4-digit PIN";
-}
-
-async function doLogin() {
-  const res = await fetch('/api/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin })
-  });
-  const data = await res.json();
-  if (data.ok) {
-    window.location.href = '/cashier';
-  } else {
-    document.getElementById('msg').textContent = data.error || 'Wrong PIN';
-    setTimeout(clearPin, 800);
-  }
-}
+let pin="";function updateDots(){let out="";for(let i=0;i<4;i++)out+=(i<pin.length?"*":"o")+" ";document.getElementById("dots").innerText=out.trim()}
+function addDigit(d){if(pin.length<4){pin+=d;updateDots();if(pin.length==4)setTimeout(doLogin,200)}}
+function backspace(){pin=pin.slice(0,-1);updateDots()}
+function clearPin(){pin="";updateDots();document.getElementById("msg").textContent="Enter PIN"}
+async function doLogin(){document.getElementById("msg").textContent="Checking...";try{const res=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pin})});const data=await res.json();if(data.ok){window.location.href="/cashier"}else{document.getElementById("msg").textContent=data.error||"Wrong PIN";setTimeout(clearPin,1200)}}catch(e){document.getElementById("msg").textContent="Network error";setTimeout(clearPin,1500)}}
 </script>
-
-</body>
-</html>
+</body></html>
 """
 CASHIER_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Omega Ice - Cashier</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Omega Purified Ice - Cashier</title>
 <style>
-  * { box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-    background: #eef7ff;
-    margin: 0;
-    padding: 12px 12px 40px;
-    color: #1a1a1a;
-  }
-  .topbar {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 14px;
-  }
-  .topbar h1 { font-size: 16px; color: #00609C; margin: 0; }
-  .topbar .staff { font-size: 12px; color: #555; }
-  .logout { font-size: 12px; color: #c0392b; background: none; border: none; }
-  .card {
-    background: #fff; border-radius: 12px; padding: 16px;
-    margin-bottom: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-  }
-  label { display: block; font-size: 12px; color: #666; margin: 10px 0 4px; }
-  input, select {
-    width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccd;
-    font-size: 14px;
-  }
-  .toggle-row { display: flex; gap: 8px; margin-top: 4px; }
-  .toggle-row button {
-    flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #ccd;
-    background: #f5f5f5; font-size: 13px;
-  }
-  .toggle-row button.active { background: #0096D6; color: #fff; border-color: #0096D6; }
-  .kg-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 4px; }
-  .kg-row button {
-    padding: 10px 0; border-radius: 8px; border: 1px solid #ccd; background: #f5f5f5; font-size: 13px;
-  }
-  .kg-row button.active { background: #0096D6; color: #fff; border-color: #0096D6; }
-  .total-row {
-    display: flex; justify-content: space-between; align-items: baseline;
-    margin: 16px 0 4px; font-size: 14px; color: #444;
-  }
-  .total-row .amount { font-size: 24px; font-weight: 600; color: #00609C; }
-  .save-btn {
-    width: 100%; padding: 14px; margin-top: 12px; background: #00609C; color: #fff;
-    border: none; border-radius: 10px; font-size: 15px; font-weight: 600;
-  }
-  #resellerResults {
-    border: 1px solid #ddd; border-radius: 8px; margin-top: 4px; max-height: 160px;
-    overflow-y: auto; display: none; background: #fff;
-  }
-  #resellerResults div { padding: 8px 10px; font-size: 13px; border-bottom: 1px solid #eee; }
-  #resellerResults div:last-child { border-bottom: none; }
-  .status { font-size: 13px; text-align: center; margin-top: 8px; min-height: 18px; }
-  .status.ok { color: #1a8a4a; }
-  .status.err { color: #c73333; }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid #eee; }
-  th { color: #888; font-weight: 500; }
-  .del-btn { background: none; border: none; color: #c0392b; font-size: 12px; }
-</style>
-</head>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px;color:#1a1a1a}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:4px 2px}
+.topbar h1{font-size:15px;color:#00609C;margin:0;font-weight:700}
+.topbar .staff{font-size:12px;color:#555}.topbar .logout{font-size:12px;color:#c0392b;background:#fff;border:1px solid #e0c0c0;padding:6px 10px;border-radius:8px}
+.one-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.cloud-badge{display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:600}
+.cloud-badge.online{background:#22c55e;color:#fff}.cloud-badge.offline{background:#ef4444;color:#fff}.cloud-badge.pending{background:#f59e0b;color:#fff;cursor:pointer}
+.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}
+.nav-pill.active{background:#00609C;color:#fff;border-color:#00609C}
+.today-card{padding:12px;background:linear-gradient(135deg,#00609C,#0096D6);color:#fff;border-radius:12px;margin-bottom:12px}
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+label{display:block;font-size:12px;color:#666;margin:10px 0 4px}input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:14px}
+.toggle-row{display:flex;gap:8px;margin-top:4px}.toggle-row button{flex:1;padding:10px;border-radius:8px;border:1px solid #ccd;background:#f5f5f5}
+.toggle-row button.active{background:#0096D6;color:#fff;border-color:#0096D6}
+.kg-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:4px}.kg-row button{padding:10px 0;border-radius:8px;border:1px solid #ccd;background:#f5f5f5}
+.kg-row button.active{background:#0096D6;color:#fff}
+.total-row{display:flex;justify-content:space-between;align-items:baseline;margin:16px 0 4px}.total-row .amount{font-size:24px;font-weight:600;color:#00609C}
+.save-btn{width:100%;padding:14px;margin-top:12px;background:#00609C;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600}
+#resellerResults{border:1px solid #ddd;border-radius:8px;margin-top:4px;max-height:160px;overflow-y:auto;display:none;background:#fff}#resellerResults div{padding:8px 10px;font-size:13px;border-bottom:1px solid #eee}
+.status{font-size:13px;text-align:center;margin-top:8px;min-height:18px}.status.ok{color:#1a8a4a}.status.err{color:#c73333}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:6px 4px;border-bottom:1px solid #eee}th{color:#888;font-weight:500}
+.del-btn{background:none;border:none;color:#c0392b;font-size:12px}.edit-btn{background:none;border:none;color:#0096D6;font-size:12px;margin-right:6px;font-weight:bold}
+</style></head>
 <body>
-
-<div class="topbar">
-  <h1>OMEGA ICE - Cashier</h1>
-  <div>
-    <a href="/machines" style="font-size:12px; color:#00609C; text-decoration:none; margin-right:12px;">Machines</a>
-    <span class="staff">{{ staff_name }} ({{ staff_position }})</span>
-    <button class="logout" onclick="logout()">Logout</button>
-  </div>
+<div class="topbar"><h1>OMEGA PURIFIED ICE</h1><div style="display:flex;align-items:center;gap:10px"><span class="staff">{{ staff_name }}</span><button class="logout" onclick="logout()">Logout</button></div></div>
+<div class="one-row">
+  <span class="cloud-badge online" id="onlineBadge">● Online</span>
+  <span class="cloud-badge pending" id="pendingBadge" style="display:none" onclick="syncOffline()">0 Pending</span>
+  <a href="/cashier" class="nav-pill active">Sales</a>
+  <a href="/machines" class="nav-pill">Machines</a>
+  <a href="/dashboard" class="nav-pill">Dashboard</a>
 </div>
-
+<div class="today-card">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div><div style="font-size:11px;opacity:.8;" id="todayLabel">TODAY'S SALES</div><div style="font-size:10px;opacity:.7;" id="todayDate">Loading...</div></div>
+    <button onclick="loadToday()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;">Refresh</button>
+  </div>
+  <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+    <button class="period-btn active" data-period="daily" onclick="setCashierPeriod('daily')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.3);color:#fff;font-size:10px">Daily</button>
+    <button class="period-btn" data-period="weekly" onclick="setCashierPeriod('weekly')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">Weekly</button>
+    <button class="period-btn" data-period="monthly" onclick="setCashierPeriod('monthly')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">Monthly</button>
+    <button class="period-btn" data-period="quarterly" onclick="setCashierPeriod('quarterly')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">Quarterly</button>
+    <button class="period-btn" data-period="yearly" onclick="setCashierPeriod('yearly')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">Year</button>
+    <button class="period-btn" data-period="all" onclick="setCashierPeriod('all')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">All Time</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;text-align:center;">
+    <div><div style="font-size:18px;font-weight:700;" id="todayKg">0kg</div><div style="font-size:9px;opacity:.8;">TOTAL KG</div></div>
+    <div><div style="font-size:18px;font-weight:700;" id="todayPeso">₱0</div><div style="font-size:9px;opacity:.8;">TOTAL PESO</div></div>
+    <div><div style="font-size:18px;font-weight:700;" id="todayCount">0</div><div style="font-size:9px;opacity:.8;">TRANS</div></div>
+  </div>
+  <div style="font-size:10px;margin-top:8px;opacity:.8;text-align:center;" id="todayBreakdown">1Kg:0 5Kg:0 10Kg:0 25Kg:0</div>
+</div>
 <div class="card">
-  <label>Reseller / customer</label>
-  <input type="text" id="resellerInput" placeholder="Type to search or add new" autocomplete="off">
-  <div id="resellerResults"></div>
-
-  <label>Delivery mode</label>
-  <div class="toggle-row">
-    <button id="modeDeliver" class="active" onclick="setMode('DELIVER')">Deliver</button>
-    <button id="modePickup" onclick="setMode('PICKUP')">Pickup</button>
-  </div>
-
-  <label>Payment</label>
-  <div class="toggle-row">
-    <button id="payCash" class="active" onclick="setPayment('Cash')">Cash</button>
-    <button id="payCredit" onclick="setPayment('Credit')">Credit</button>
-  </div>
-
-  <label>Size</label>
-  <div class="kg-row">
-    {% for kg in kg_options %}
-    <button data-kg="{{ kg }}" onclick="setKg('{{ kg }}')" class="{{ 'active' if loop.first else '' }}">{{ kg }}</button>
-    {% endfor %}
-  </div>
-
-  <label>Quantity</label>
-  <input type="number" id="qtyInput" value="1" min="1" oninput="updateTotal()">
-
-  <div class="total-row">
-    <span>Total</span>
-    <span class="amount" id="totalAmount">₱0</span>
-  </div>
-
-  <button class="save-btn" id="saveBtn" onclick="saveSale()">Save sale</button>
-  <button class="save-btn" id="cancelEditBtn" style="display:none; background:#999; margin-top:6px;" onclick="cancelEdit()">Cancel edit</button>
-  <p class="status" id="statusMsg"></p>
+<label>Sale Date (for backdated sales)</label><input type="date" id="saleDateInput" style="margin-bottom:10px">
+<label>Reseller / customer</label><input type="text" id="resellerInput" placeholder="Type to search" autocomplete="off"><div id="resellerResults"></div>
+<label>Delivery mode</label><div class="toggle-row"><button id="modeDeliver" class="active" onclick="setMode('DELIVER')">Deliver</button><button id="modePickup" onclick="setMode('PICKUP')">Pickup</button></div>
+<label>Payment</label><div class="toggle-row"><button id="payCash" class="active" onclick="setPayment('Cash')">Cash</button><button id="payCredit" onclick="setPayment('Credit')">Credit</button></div>
+<label>Size</label><div class="kg-row">{% for kg in kg_options %}<button data-kg="{{ kg }}" onclick="setKg('{{ kg }}')" class="{{ 'active' if loop.first else '' }}">{{ kg }}</button>{% endfor %}</div>
+<label>Quantity</label><input type="number" id="qtyInput" value="1" min="1" oninput="updateTotal()">
+<div class="total-row"><span>Total</span><span class="amount" id="totalAmount">₱0</span></div>
+<button class="save-btn" id="saveBtn" onclick="saveSale()">Save sale</button>
+<button class="save-btn" id="cancelEditBtn" style="display:none;background:#999;margin-top:6px" onclick="cancelEdit()">Cancel edit</button>
+<p class="status" id="statusMsg"></p>
 </div>
-
-<div class="card">
-  <label style="margin-top:0;">Recent sales</label>
-  <table>
-    <thead><tr><th>Date</th><th>Reseller</th><th>Qty</th><th>Size</th><th>Total</th><th></th></tr></thead>
-    <tbody id="recentBody"></tbody>
-  </table>
-</div>
-
+<div class="card"><label style="font-weight:600;margin-bottom:8px;display:block">Recent sales</label><table><thead><tr><th>Date</th><th>Reseller</th><th>Qty</th><th>Size</th><th>Total</th><th></th></tr></thead><tbody id="recentBody"></tbody></table></div>
 <script>
-let mode = 'DELIVER';
-let payment = 'Cash';
-let kg = '{{ kg_options[0] }}';
-let selectedReseller = null;
-let unitPrice = 0;
-let editingSaleId = null;
+let mode='DELIVER';let payment='Cash';let kg='{{ kg_options[0] }}';let selectedReseller=null;let unitPrice=0;let editingSaleId=null;let cashierPeriod='daily';
+function setMode(m){mode=m;document.getElementById('modeDeliver').classList.toggle('active',m==='DELIVER');document.getElementById('modePickup').classList.toggle('active',m==='PICKUP');updateTotal()}
+function setPayment(p){payment=p;document.getElementById('payCash').classList.toggle('active',p==='Cash');document.getElementById('payCredit').classList.toggle('active',p==='Credit')}
+function setKg(k){kg=k;document.querySelectorAll('.kg-row button').forEach(b=>b.classList.toggle('active',b.dataset.kg===k));updateTotal()}
 
-function setMode(m) {
-  mode = m;
-  document.getElementById('modeDeliver').classList.toggle('active', m === 'DELIVER');
-  document.getElementById('modePickup').classList.toggle('active', m === 'PICKUP');
-  updateTotal();
-}
-
-function setPayment(p) {
-  payment = p;
-  document.getElementById('payCash').classList.toggle('active', p === 'Cash');
-  document.getElementById('payCredit').classList.toggle('active', p === 'Credit');
-}
-
-function setKg(k) {
-  kg = k;
-  document.querySelectorAll('.kg-row button').forEach(b => b.classList.toggle('active', b.dataset.kg === k));
-  updateTotal();
-}
-
-async function updateTotal() {
-  const res = await fetch(`/api/price?kg=${kg}&mode=${mode}`);
-  const data = await res.json();
-  unitPrice = data.price;
-  const qty = parseInt(document.getElementById('qtyInput').value) || 0;
-  document.getElementById('totalAmount').textContent = '₱' + (unitPrice * qty).toLocaleString();
-}
-
-const resellerInput = document.getElementById('resellerInput');
-const resultsBox = document.getElementById('resellerResults');
-
-resellerInput.addEventListener('input', async () => {
-  selectedReseller = null;
-  const q = resellerInput.value.trim();
-  if (!q) { resultsBox.style.display = 'none'; return; }
-  const res = await fetch(`/api/resellers?q=${encodeURIComponent(q)}`);
-  const rows = await res.json();
-  if (!rows.length) { resultsBox.style.display = 'none'; return; }
-  resultsBox.innerHTML = rows.map(r => `<div class="res-item" data-id="${r.id}" data-name="${r.store_name.replace(/"/g,'&quot;')}">${r.store_name}</div>`).join('');
-  resultsBox.style.display = 'block';
-    resultsBox.querySelectorAll('.res-item').forEach(el => {
-      el.addEventListener('click', () => {
-        pickReseller(el.getAttribute('data-id'), el.getAttribute('data-name'));
-      });
-    });
-});
-
-function pickReseller(id, name) {
-  selectedReseller = { id, name };
-  resellerInput.value = name;
-  resultsBox.style.display = 'none';
-}
-
-async function saveSale() {
-  const qty = parseInt(document.getElementById('qtyInput').value) || 0;
-  const name = resellerInput.value.trim();
-  const statusEl = document.getElementById('statusMsg');
-  if (!name || qty <= 0) {
-    statusEl.textContent = 'Enter a reseller name and quantity';
-    statusEl.className = 'status err';
-    return;
-  }
-  const payload = {
-    reseller_id: selectedReseller ? selectedReseller.id : null,
-    reseller_name: name,
-    quantity: qty,
-    kg_size: kg,
-    mode: mode,
-    payment: payment
-  };
-
-  const url = editingSaleId ? `/api/sale/${editingSaleId}` : '/api/sale';
-  const method = editingSaleId ? 'PUT' : 'POST';
-
-  const res = await fetch(url, {
-    method: method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json();
-  if (data.ok) {
-    statusEl.textContent = editingSaleId ? `Updated — total ₱${data.total}` : `Saved — total ₱${data.total}`;
-    statusEl.className = 'status ok';
-    cancelEdit(); // resets the form back to add-mode
-    loadRecent();
-  } else {
-    statusEl.textContent = data.error || 'Error saving sale';
-    statusEl.className = 'status err';
+function initSaleDate(){
+  try{
+    const now = new Date();
+    const manilaOffset = 8*60; // Manila UTC+8
+    const localOffset = now.getTimezoneOffset();
+    const manilaTime = new Date(now.getTime() + (manilaOffset + localOffset)*60000);
+    const iso = manilaTime.toISOString().slice(0,10);
+    const el = document.getElementById('saleDateInput');
+    if(el && !el.value) el.value = iso;
+  }catch(e){
+    const el = document.getElementById('saleDateInput');
+    if(el) el.value = new Date().toISOString().slice(0,10);
   }
 }
 
-async function editSale(id) {
-  const res = await fetch(`/api/sale/${id}`);
-  const data = await res.json();
-  if (!data.ok) return;
-  const s = data.sale;
-
-  editingSaleId = id;
-  resellerInput.value = s.reseller_name;
-  selectedReseller = s.reseller_id ? { id: s.reseller_id, name: s.reseller_name } : null;
-  document.getElementById('qtyInput').value = s.quantity;
-  setMode(s.mode);
-  setPayment(s.payment);
-  setKg(s.kg_size);
-
-  document.getElementById('saveBtn').textContent = 'Update sale';
-  document.getElementById('cancelEditBtn').style.display = 'block';
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+async function updateTotal(){try{const res=await fetch(`/api/price?kg=${kg}&mode=${mode}`);const data=await res.json();unitPrice=data.price;}catch(e){unitPrice=10;}const qty=parseInt(document.getElementById('qtyInput').value)||0;document.getElementById('totalAmount').textContent='₱'+(unitPrice*qty).toLocaleString()}
+const resellerInput=document.getElementById('resellerInput');const resultsBox=document.getElementById('resellerResults');
+resellerInput.addEventListener('input',async()=>{selectedReseller=null;const q=resellerInput.value.trim();if(!q){resultsBox.style.display='none';return}const res=await fetch(`/api/resellers?q=${encodeURIComponent(q)}`);const rows=await res.json();if(!rows.length){resultsBox.style.display='none';return}resultsBox.innerHTML=rows.map(r=>`<div class="res-item" data-id="${r.id}" data-name="${r.store_name.replace(/"/g,'&quot;')}">${r.store_name}</div>`).join('');resultsBox.style.display='block';resultsBox.querySelectorAll('.res-item').forEach(el=>{el.addEventListener('click',()=>{pickReseller(el.getAttribute('data-id'),el.getAttribute('data-name'))})})});
+function pickReseller(id,name){selectedReseller={id,name};resellerInput.value=name;resultsBox.style.display='none'}
+async function saveSale(){const qty=parseInt(document.getElementById('qtyInput').value)||0;const name=resellerInput.value.trim();const statusEl=document.getElementById('statusMsg');if(!name||qty<=0){statusEl.textContent='Enter reseller';statusEl.className='status err';return}const saleDate = document.getElementById('saleDateInput').value || new Date().toISOString().slice(0,10);
+  const saleDate = document.getElementById('saleDateInput').value || new Date().toISOString().slice(0,10);
+  const payload={reseller_id:selectedReseller?selectedReseller.id:null,reseller_name:name,quantity:qty,kg_size:kg,mode:mode,payment:payment,sales_date:saleDate};const url=editingSaleId?`/api/sale/${editingSaleId}`:`/api/sale`;const method=editingSaleId?'PUT':'POST';statusEl.textContent='Saving...';const res=await fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(data.ok){statusEl.textContent=`Saved ₱${data.total}`;statusEl.className='status ok';cancelEdit();loadRecent();loadToday();}else{statusEl.textContent=data.error||'Error';statusEl.className='status err'}}
+async function editSale(id){const res=await fetch(`/api/sale/${id}`);const data=await res.json();if(!data.ok)return alert('Cannot edit');const s=data.sale;editingSaleId=id;resellerInput.value=s.reseller_name;selectedReseller=s.reseller_id?{id:s.reseller_id,name:s.reseller_name}:null;document.getElementById('qtyInput').value=s.quantity;setMode(s.mode);setPayment(s.payment);setKg(s.kg_size);document.getElementById('saveBtn').textContent='Update';document.getElementById('cancelEditBtn').style.display='block';window.scrollTo({top:0,behavior:'smooth'})}
+function cancelEdit(){editingSaleId=null;resellerInput.value='';selectedReseller=null;document.getElementById('qtyInput').value=1;document.getElementById('saveBtn').textContent='Save sale';document.getElementById('cancelEditBtn').style.display='none';updateTotal()}
+function setCashierPeriod(p){cashierPeriod=p;document.querySelectorAll('.today-card .period-btn').forEach(b=>{const is=b.dataset.period===p;b.style.background=is?'rgba(255,255,255,.3)':'transparent';});loadToday();}
+async function loadToday(){
+  try{
+    const res=await fetch('/api/sales/dashboard?period='+cashierPeriod);
+    if(res.status===401){window.location.href='/login';return;}
+    const data=await res.json();
+    document.getElementById('todayKg').textContent=(data.total_kg||0).toLocaleString()+'kg';
+    document.getElementById('todayPeso').textContent='₱'+(data.total||0).toLocaleString();
+    document.getElementById('todayCount').textContent=data.count||0;
+    document.getElementById('todayDate').textContent=(data.start||'')+' to '+(data.date||'');
+    document.getElementById('todayLabel').textContent=(data.label||'').toUpperCase()+' SALES';
+    const b=data.breakdown||{};document.getElementById('todayBreakdown').textContent=`1Kg:${b['1Kg']||0} 5Kg:${b['5Kg']||0} 10Kg:${b['10Kg']||0} 25Kg:${b['25Kg']||0}`;
+  }catch(e){console.error(e);}
 }
-
-function cancelEdit() {
-  editingSaleId = null;
-  resellerInput.value = '';
-  selectedReseller = null;
-  document.getElementById('qtyInput').value = 1;
-  document.getElementById('saveBtn').textContent = 'Save sale';
-  document.getElementById('cancelEditBtn').style.display = 'none';
-  updateTotal();
+async function loadRecent(){
+  try{
+    const res=await fetch('/api/sales/recent');
+    if(res.status===401){window.location.href='/login';return;}
+    let rows=await res.json();
+    if(rows.sales)rows=rows.sales;
+    if(!Array.isArray(rows)){document.getElementById('recentBody').innerHTML=`<tr><td colspan=6>No data</td></tr>`;return;}
+    if(!rows.length){document.getElementById('recentBody').innerHTML=`<tr><td colspan=6 style="color:#888">No recent sales yet</td></tr>`;return;}
+    document.getElementById('recentBody').innerHTML=rows.slice(0,20).map(r=>`<tr><td style="font-size:11px">${r.sales_date||''}</td><td>${r.reseller_name}</td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td><button class="edit-btn" onclick="editSale('${r.id}')">Edit</button><button class="del-btn" onclick="deleteSale('${r.id}')">Del</button></td></tr>`).join('');
+  }catch(e){document.getElementById('recentBody').innerHTML=`<tr><td colspan=6 style="color:#c0392b">Error: ${e.message} <a href="/login">Login</a></td></tr>`;}
 }
-
-async function loadRecent() {
-  const res = await fetch('/api/sales/recent');
-  const rows = await res.json();
-  document.getElementById('recentBody').innerHTML = rows.map(r => {
-    let dateStr = r.sales_date || '';
-    // format YYYY-MM-DD to MM/DD
-    if(dateStr.includes('-')) {
-      let parts = dateStr.split(' ')[0].split('-');
-      if(parts.length>=3) dateStr = parts[1]+'/'+parts[2];
-    }
-    return `
-    <tr>
-      <td style="font-size:11px;color:#666;white-space:nowrap;">${dateStr}</td>
-      <td>${r.reseller_name}</td>
-      <td>${r.quantity}</td>
-      <td>${r.kg_size}</td>
-      <td>₱${r.total_sales}</td>
-      <td>
-        <button class="del-btn" style="color:#0096D6;" onclick="editSale('${r.id}')">Edit</button>
-        <button class="del-btn" onclick="deleteSale('${r.id}')">Del</button>
-      </td>
-    </tr>
-  `}).join('');
-
-}
-
-async function deleteSale(id) {
-  if (!confirm('Delete this sale?')) return;
-  await fetch(`/api/sale/${id}`, { method: 'DELETE' });
-  loadRecent();
-}
-
-async function logout() {
-  await fetch('/api/logout', { method: 'POST' });
-  window.location.href = '/login';
-}
-
-updateTotal();
-loadRecent();
-setInterval(loadRecent, 5000); // so the other phone's sales show up here too
+async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sale/${id}`,{method:'DELETE'});loadRecent();loadToday();}
+async function logout(){await fetch('/api/logout',{method:'POST'});window.location.href='/login'}
+initSaleDate();updateTotal();loadRecent();loadToday();setInterval(loadRecent,5000);setInterval(loadToday,15000);
 </script>
-
-
-<script>
-// Offline handling injected
-(function(){
-  const origSave = window.saveSale || null;
-  // We'll override via API handling in python, but also show pending count
-  async function updatePendingCount(){
-    try{
-      const r = await fetch('/api/offline/pending');
-      const d = await r.json();
-      let badge = document.getElementById('offline-badge');
-      if(!badge){
-        badge = document.createElement('div');
-        badge.id='offline-badge';
-        badge.style.cssText='position:fixed;top:10px;right:10px;z-index:9999;padding:8px 12px;border-radius:20px;font-size:12px;font-weight:bold;';
-        document.body.appendChild(badge);
-      }
-      if(d.offline){
-        badge.textContent = '🔴 OFFLINE - ' + d.pending_count + ' pending';
-        badge.style.background='#ff4444'; badge.style.color='white'; badge.style.display='block';
-      } else if(d.pending_count>0){
-        badge.textContent = '🟡 ' + d.pending_count + ' pending - tap to sync';
-        badge.style.background='#ffaa00'; badge.style.color='black'; badge.style.display='block';
-        badge.onclick = async ()=>{ badge.textContent='Syncing...'; const sr=await fetch('/api/offline/sync',{method:'POST'}); const sd=await sr.json(); alert('Synced '+sd.synced+' sales'); location.reload(); };
-      } else {
-        badge.textContent='🟢 Online';
-        badge.style.background='#00aa44'; badge.style.color='white';
-        setTimeout(()=>{badge.style.display='none';},3000);
-      }
-    }catch(e){}
-  }
-  setInterval(updatePendingCount,5000);
-  updatePendingCount();
-})();
-</script>
-
-</body>
-</html>
+</body></html>
 """
 
 # ---------- Local offline DB ----------
@@ -777,8 +477,11 @@ def api_create_sale():
     unit_price = get_price(kg_size, mode)
     total = round(unit_price * qty, 2)
 
+    sale_date_input = (data.get("sales_date") or "").strip()
+    if not sale_date_input:
+        sale_date_input = datetime.now().strftime("%Y-%m-%d")
     sale = {
-        "sales_date": datetime.now().strftime("%Y-%m-%d"),
+        "sales_date": sale_date_input,
         "reseller_id": reseller_id,
         "reseller_name": reseller_name,
         "quantity": qty,
@@ -837,54 +540,29 @@ def api_create_sale():
 @app.route("/api/sales/recent")
 @login_required
 def api_recent_sales():
-    # Try online first
-    data = fb_get("daily_sales")
-    sales = []
-    recent = []
-    if data:
-        for key, val in data.items():
-            if val:
-                sales.append({
-                    "id": key,
-                    "sales_date": val.get("sales_date"),
-                    "reseller_name": val.get("reseller_name"),
-                    "quantity": val.get("quantity"),
-                    "kg_size": val.get("kg_size"),
-                    "total_sales": val.get("total_sales"),
-                    "mode": val.get("mode"),
-                    "payment": val.get("payment"),
-                    "created_at": val.get("created_at","")
-                })
-        # sort by created_at desc for newest first
-        sales.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-        recent = sales[:20]
-    
-    # Also include cached local sales (for instant display + offline)
     try:
-        conn = sqlite3.connect(LOCAL_DB)
-        conn.row_factory = sqlite3.Row
-        c = conn.cursor()
-        c.execute("SELECT * FROM cached_sales ORDER BY id DESC LIMIT 20")
-        for r in c.fetchall():
-            # Avoid duplicates if already in recent (check by created_at)
-            recent.append({
-                "id": f"offline-{r['id']}",
-                "sales_date": r["sales_date"],
-                "reseller_name": r["reseller_name"],
-                "quantity": r["quantity"],
-                "kg_size": r["kg_size"],
-                "total_sales": r["total_sales"],
-                "mode": r["mode"],
-                "payment": r["payment"],
-                "created_at": r["created_at"]
+        data = fb_get("daily_sales") or {}
+        sales = []
+        for key,val in data.items():
+            if not val or not isinstance(val, dict): continue
+            sales.append({
+                "id": key,
+                "sales_date": val.get("sales_date") or (val.get("created_at")[:10] if val.get("created_at") else ""),
+                "reseller_name": val.get("reseller_name") or "Unknown",
+                "quantity": val.get("quantity") or 0,
+                "kg_size": val.get("kg_size") or "",
+                "total_sales": val.get("total_sales") or 0,
+                "mode": val.get("mode") or "",
+                "payment": val.get("payment") or "",
+                "created_at": val.get("created_at") or ""
             })
-        conn.close()
+        def sort_key(x):
+            return x.get("created_at") or x.get("sales_date") or ""
+        sales.sort(key=sort_key, reverse=True)
+        return jsonify(sales[:30])
     except Exception as e:
-        print(f"Recent local read error: {e}")
-    
-    # Sort combined by created_at
-    recent.sort(key=lambda x: x.get("created_at",""), reverse=True)
-    return jsonify(recent[:20])
+        print(f"recent error {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/debug/sales")
 @login_required
@@ -1378,35 +1056,6 @@ def debug_machines():
         "count": len(raw) if isinstance(raw, dict) else (0 if raw is None else "not a dict - see raw_machines_node")
     })
 
-@app.route("/debug/duplicate_sales")
-def debug_duplicate_sales():
-    sales = fb_get("daily_sales") or {}
-    groups = {}
-    for sale_id, s in sales.items():
-        if not s:
-            continue
-        key = (
-            s.get("sales_date"),
-            str(s.get("reseller_id")),
-            s.get("reseller_name"),
-            s.get("quantity"),
-            s.get("kg_size"),
-            s.get("total_sales"),
-        )
-        groups.setdefault(key, []).append(sale_id)
-
-    duplicates = {}
-    for key, ids in groups.items():
-        if len(ids) > 1:
-            duplicates[str(key)] = ids
-
-    return jsonify({
-        "total_sales": len(sales),
-        "duplicate_groups": len(duplicates),
-        "duplicates": duplicates,
-    })
-
-
 @app.route("/debug/resellers")
 def debug_resellers():
     raw = fb_get("resellers") or {}
@@ -1438,9 +1087,6 @@ def fix_reseller_duplicates():
     over to the rich entry's key, merges credit_balance if needed,
     then deletes the sparse duplicate.
 
-    Everything is done in ONE bulk Firebase update (not one call per
-    sale) so this finishes in a couple seconds instead of timing out.
-
     Safe to run more than once - if there are no more duplicates,
     it does nothing.
     """
@@ -1454,13 +1100,14 @@ def fix_reseller_duplicates():
         name = (val.get("store_name") or "").strip()
         by_name.setdefault(name, []).append((key, val))
 
-    bulk_updates = {}  # path -> new value ; a value of None deletes that path
     report = []
 
     for name, entries in by_name.items():
         if len(entries) < 2:
             continue
 
+        # Prefer the entry with a real Firebase push-key (starts with "-")
+        # and more populated fields as the one to KEEP.
         def richness(entry):
             key, val = entry
             score = 1 if key.startswith("-") else 0
@@ -1471,31 +1118,29 @@ def fix_reseller_duplicates():
         keep_key, keep_val = entries_sorted[0]
         remove_entries = entries_sorted[1:]
 
-        sales_repointed = 0
-        credit_to_add = 0
-
+        merged_sales = 0
         for remove_key, remove_val in remove_entries:
+            # re-point any sales referencing the sparse entry
             for sale_id, sale in sales.items():
                 if sale and str(sale.get("reseller_id")) == str(remove_key):
-                    bulk_updates[f"daily_sales/{sale_id}/reseller_id"] = keep_key
-                    sales_repointed += 1
+                    fb_patch(f"daily_sales/{sale_id}", {"reseller_id": keep_key})
+                    merged_sales += 1
 
-            credit_to_add += remove_val.get("credit_balance") or 0
-            bulk_updates[f"resellers/{remove_key}"] = None  # deletes this node
+            # merge credit balance if the removed entry had one
+            remove_bal = remove_val.get("credit_balance") or 0
+            if remove_bal:
+                keep_bal = keep_val.get("credit_balance") or 0
+                fb_patch(f"resellers/{keep_key}", {"credit_balance": keep_bal + remove_bal})
 
-        if credit_to_add:
-            new_balance = (keep_val.get("credit_balance") or 0) + credit_to_add
-            bulk_updates[f"resellers/{keep_key}/credit_balance"] = new_balance
+            # delete the sparse duplicate
+            requests.delete(f"{FIREBASE_URL}/resellers/{remove_key}.json", timeout=10)
 
-        report.append({
-            "store_name": name,
-            "kept_key": keep_key,
-            "removed_keys": [k for k, _ in remove_entries],
-            "sales_repointed": sales_repointed,
-        })
-
-    if bulk_updates:
-        fb_patch("", bulk_updates)  # single request updates/deletes everything at once
+            report.append({
+                "store_name": name,
+                "kept_key": keep_key,
+                "removed_key": remove_key,
+                "sales_repointed": merged_sales,
+            })
 
     return jsonify({"merged": report, "duplicates_fixed": len(report)})
 
