@@ -1378,6 +1378,23 @@ def debug_machines():
         "count": len(raw) if isinstance(raw, dict) else (0 if raw is None else "not a dict - see raw_machines_node")
     })
 
+@app.route("/debug/resellers")
+def debug_resellers():
+    raw = fb_get("resellers") or {}
+    # group by store_name to surface duplicates clearly
+    by_name = {}
+    for key, val in raw.items():
+        if not val:
+            continue
+        name = (val.get("store_name") or "").strip()
+        by_name.setdefault(name, []).append({"firebase_key": key, **val})
+    duplicates = {name: entries for name, entries in by_name.items() if len(entries) > 1}
+    return jsonify({
+        "total_resellers": len(raw),
+        "duplicate_names": duplicates,
+        "duplicate_count": len(duplicates)
+    })
+
 @app.route("/machines")
 @login_required
 def machines_page():
