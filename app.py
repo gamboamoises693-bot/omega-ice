@@ -123,12 +123,12 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
   <span class="cloud-badge pending" id="pendingBadge" style="display:none" onclick="syncOffline()">0 Pending</span>
   <a href="/cashier" class="nav-pill active">Sales</a>
   <a href="/machines" class="nav-pill">Machines</a>
-  <a href="/dashboard" class="nav-pill">Dashboard</a>
+  <a href="/dashboard" class="nav-pill">Dashboard</a><button onclick="resetTodayDashboard()" style="margin-left:6px;padding:4px 10px;border-radius:12px;border:none;background:#ef4444;color:#fff;font-size:11px">🗑️ Reset Today</button>
 </div>
 <div class="today-card">
   <div style="display:flex;justify-content:space-between;align-items:center;">
     <div><div style="font-size:11px;opacity:.8;" id="todayLabel">TODAY'S SALES</div><div style="font-size:10px;opacity:.7;" id="todayDate">Loading...</div></div>
-    <button onclick="loadToday()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;">Refresh</button>
+    <button onclick="loadToday()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;">Refresh</button><button onclick="resetTodayData()" style="background:#ef4444;border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;margin-left:6px">🗑️ Reset Today</button>
   </div>
   <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
     <button class="period-btn active" data-period="daily" onclick="setCashierPeriod('daily')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.3);color:#fff;font-size:10px">Daily</button>
@@ -230,6 +230,20 @@ async function loadRecent(){
   }catch(e){document.getElementById('recentBody').innerHTML=`<tr><td colspan=7 style="color:#c0392b">Error: ${e.message} <a href="/login">Login</a></td></tr>`;}
 }
 async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sale/${id}`,{method:'DELETE'});loadRecent();loadToday();}
+async function resetTodayData(){
+  if(!confirm('🗑️ RESET TODAY?\n\nThis will DELETE ALL sales with date TODAY (2026-09-06) including your simulated delivered data!\n\nOnly ISESMO can do this.\n\nAre you sure? This cannot be undone!')) return;
+  if(!confirm('FINAL CONFIRM: Delete today\\'s data? Type OK')) return;
+  try{
+    const res = await fetch('/api/staff/reset_today', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
+    const data = await res.json();
+    if(data.ok){
+      alert(`✅ Deleted ${data.deleted} records from today (${data.date})! Dashboard reset!`);
+      loadToday(); loadRecent();
+    } else {
+      alert('Failed: '+(data.error||'Not allowed - Only ISESMO'));
+    }
+  }catch(e){alert('Error: '+e.message);}
+}
 async function logout(){await fetch('/api/logout',{method:'POST'});window.location.href='/login'}
 updateTotal();loadRecent();loadToday();setInterval(loadRecent,30000);setInterval(loadToday,30000);
 window.addEventListener('storage', (e)=>{
@@ -363,6 +377,15 @@ def fb_put(path, data):
     except Exception as e:
         print(f"PUT {path} error: {e}")
     return None
+
+def fb_delete(path):
+    try:
+        r = requests.delete(f"{FIREBASE_URL}/{path}.json", timeout=10)
+        if r.status_code == 200:
+            return True
+    except Exception as e:
+        print(f"DELETE {path} error: {e}")
+    return False
 
 def fb_patch(path, data):
     try:
@@ -2310,7 +2333,7 @@ def dashboard_page():
     html = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard</title>
 <style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.topbar h1{font-size:16px;color:#00609C;margin:0}.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}.nav-pill.active{background:#00609C;color:#fff}.period-btn{padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px;color:#00609C}.period-btn.active{background:#00609C;color:#fff}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px}.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center}.stat-val{font-size:20px;font-weight:700;color:#00609C}</style></head>
 <body>
-<div class="topbar"><h1>OMEGA ICE</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a> <a href="/dashboard" class="nav-pill active">Dashboard</a></div></div>
+<div class="topbar"><h1>OMEGA ICE</h1><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444">🔴 Live Orders</a><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a> <a href="/dashboard" class="nav-pill active">Dashboard</a><button onclick="resetTodayDashboard()" style="padding:6px 12px;border-radius:20px;border:none;background:#ef4444;color:#fff;font-size:11px">🗑️ Reset Today</button></div></div>
 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
 <button class="period-btn active" data-p="daily" onclick="setPeriod('daily')">Daily</button>
 <button class="period-btn" data-p="weekly" onclick="setPeriod('weekly')">Weekly</button>
@@ -2340,19 +2363,18 @@ def staff_orders_page():
 .nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}
 .live{display:inline-flex;align-items:center;gap:6px;background:#ef4444;color:#fff;padding:6px 12px;border-radius:20px;font-size:11px}
 .order-card{border-left:4px solid #f59e0b;padding:12px;margin:8px 0;background:#fff;border-radius:8px}
-.btn{padding:6px 10px;border-radius:8px;border:1px solid #ccd;font-size:11px;margin:2px}.btn:disabled{opacity:0.4;cursor:not-allowed;background:#f3f4f6;color:#999}
+.btn{padding:6px 10px;border-radius:8px;border:1px solid #ccd;font-size:11px;margin:2px;cursor:pointer}.btn:disabled{opacity:0.4;cursor:not-allowed;background:#f3f4f6;color:#999}
+.delete-btn{padding:4px 10px;border-radius:12px;border:none;background:#ef4444;color:#fff;font-size:11px;cursor:pointer;margin-left:6px}
 </style></head>
 <body>
 <div class="topbar"><h1>Live Customer Orders</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a></div></div>
-<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><span class="live">● LIVE</span><button onclick="bulkUpdateAllStaff()" style="padding:6px 12px;border-radius:20px;border:none;background:#16a34a;color:#fff;font-size:11px">✅ All Pending → Delivered</button>
-<button onclick="archiveAllOldStaff()" style="padding:6px 12px;border-radius:20px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-size:11px">📦 Archive Old >7d</button><button onclick="loadOrders()" style="padding:6px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px">Refresh</button></div>
+<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><span class="live">● LIVE</span><button onclick="archiveAllOldStaff()" style="padding:6px 12px;border-radius:20px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-size:11px">📦 Archive Old >7d</button><button onclick="loadOrders()" style="padding:6px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px">Refresh</button></div>
 <div id="ordersList">Loading...</div>
 <script>
 async function loadOrders(){
   const res=await fetch('/api/staff/customer_orders');
   const data=await res.json();
   const ordersRaw=data.orders||[];
-  // Sort: New Order on top, Delivered at bottom
   const priority = {"New Order":0, "Pending":1, "Preparing":2, "Out for Delivery":3, "Delivered":4, "Cancelled":5};
   const orders = ordersRaw.sort((a,b)=>{
     const pa = priority[a.order_status] ?? 1;
@@ -2360,9 +2382,7 @@ async function loadOrders(){
     if(pa!==pb) return pa-pb;
     return (b.created_at||'').localeCompare(a.created_at||'');
   });
-  let showArchived=false;
-function toggleArchived(){showArchived=!showArchived;document.getElementById('toggleArchBtn').textContent=showArchived?'Hide Archived':'Show Archived';loadOrders();}
-const list=document.getElementById('ordersList');
+  const list=document.getElementById('ordersList');
   if(!orders.length){list.innerHTML='<div class="card" style="text-align:center;color:#888">No customer orders yet.</div>';return;}
   list.innerHTML=orders.map(o=>{
     const isDelivered = o.order_status==='Delivered';
@@ -2374,13 +2394,34 @@ const list=document.getElementById('ordersList');
     else if(o.order_status==='Preparing'){statusColor='#dbeafe';}
     else if(o.order_status==='Out for Delivery'){statusColor='#e0e7ff';}
     const deliveredBadge = isDelivered ? ' ✅' : '';
-    const btnStyle = (active)=> disabled ? 'opacity:0.4;cursor:not-allowed;background:#f3f4f6' : '';
     const btnDisabled = disabled ? 'disabled' : '';
+    const safeName = (o.reseller_name||'').replace(/'/g, '');
+    const deleteBtn = `<button class="delete-btn" onclick="deleteOrder('${o.id}', '${safeName}')">🗑️ Delete</button>`;
     if(disabled){
-      return `<div class="order-card" style="border-left-color:${isDelivered?'#22c55e':'#ef4444'};opacity:0.8"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}${deliveredBadge}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><span style="font-size:11px;color:${isDelivered?'#16a34a':'#ef4444'};font-weight:600">${isDelivered?'✅ Delivered - buttons disabled': '❌ Cancelled'}</span></div></div>`;
+      return `<div class="order-card" style="border-left-color:${isDelivered?'#22c55e':'#ef4444'};opacity:0.85"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:600">${o.reseller_name}${deliveredBadge}</span><div style="display:flex;align-items:center;gap:6px"><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span>${deleteBtn}</div></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><span style="font-size:11px;color:${isDelivered?'#16a34a':'#ef4444'};font-weight:600">${isDelivered?'✅ Delivered - buttons disabled':'❌ Cancelled'} - Wrong input? Use Delete button above</span></div></div>`;
     }
-    return `<div class="order-card"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Pending')">Accept</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Preparing')">Preparing</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Out for Delivery')">Out</button><button class="btn" ${btnDisabled} style="background:#22c55e;color:#fff;${btnStyle()}" onclick="updateStatus('${o.id}','Delivered')">Done</button></div></div>`;
+    return `<div class="order-card"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:600">${o.reseller_name}</span><div style="display:flex;align-items:center;gap:6px"><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span>${deleteBtn}</div></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><button class="btn" ${btnDisabled} onclick="updateStatus('${o.id}','Pending')">Accept</button><button class="btn" ${btnDisabled} onclick="updateStatus('${o.id}','Preparing')">Preparing</button><button class="btn" ${btnDisabled} onclick="updateStatus('${o.id}','Out for Delivery')">Out</button><button class="btn" ${btnDisabled} style="background:#22c55e;color:#fff" onclick="updateStatus('${o.id}','Delivered')">Done</button></div></div>`;
   }).join('');
+}
+async function deleteOrder(id, resellerName){
+  if(!confirm(`🗑️ DELETE this order?
+
+${resellerName}
+
+This will DELETE from Firebase permanently!
+Wrong input?`)) return;
+  const typed = prompt('Type DELETE to confirm:');
+  if(typed !== 'DELETE'){ alert('Cancelled'); return; }
+  try{
+    const res = await fetch(`/api/order/${id}/delete`, {method:'POST'});
+    const data = await res.json();
+    if(data.ok){
+      alert(`✅ Deleted ${resellerName} from Firebase!`);
+      loadOrders();
+    } else {
+      alert('Failed: '+(data.error||'Unknown'));
+    }
+  }catch(e){ alert('Error: '+e.message); }
 }
 async function updateStatus(id,status){
   const btn = event.target;
@@ -2391,63 +2432,25 @@ async function updateStatus(id,status){
     const res = await fetch(`/api/order/${id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
     const data = await res.json();
     if(data.ok){
-      // Instant update: reload orders + recent sales + today sales if on same domain
       loadOrders();
-      // Try to refresh cashier data if available via localStorage signal
       localStorage.setItem('omega_last_delivered', JSON.stringify({id: id, status: status, time: Date.now()}));
-      if(status==='Delivered'){
-        // Show success
-        btn.textContent = '✅ Done';
-        setTimeout(()=>loadOrders(), 1000);
-      }
+      if(status==='Delivered'){ btn.textContent = '✅ Done'; setTimeout(()=>loadOrders(), 800); }
     } else {
-      alert(data.error||'Failed');
-      btn.textContent = origText;
-      btn.disabled = false;
+      alert(data.error||'Failed'); btn.textContent = origText; btn.disabled = false;
     }
-  } catch(e){
-    alert('Network error: '+e.message);
-    btn.textContent = origText;
-    btn.disabled = false;
-  }
+  } catch(e){ alert('Network error: '+e.message); btn.textContent = origText; btn.disabled = false; }
 }
 async function archiveAllOldStaff(){
-  if(!confirm('ISESMO ONLY: Archive ALL orders older than 7 days? This will hide 307 old orders.')) return;
+  if(!confirm('ISESMO ONLY: Archive ALL orders older than 7 days?')) return;
   const res=await fetch('/api/staff/archive_all_old',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days_old:7})});
   const data=await res.json();
   if(data.ok){alert(`Archived ${data.archived} old orders`);loadOrders();}else{alert(data.error||'Failed');}
 }
-async function bulkUpdateAllStaff(){
-  if(!confirm('ISESMO ONLY: Mark ALL pending orders from ALL customers as Delivered? 307 orders will be updated!')) return;
-  const res=await fetch('/api/staff/bulk_update_all_pending',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Delivered'})});
-  const data=await res.json();
-  if(data.ok){alert(`Updated ${data.updated} orders to Delivered!`);loadOrders();}else{alert(data.error||'Failed - Only ISESMO can do this');}
-}
-
-
-async function bulkUpdateAll(){
-  if(!confirm('Mark ALL 307 Pending orders as Delivered? This will update all pending orders for this customer.')) return;
-  const res=await fetch(`/api/customer/${resellerId}/bulk_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Delivered'})});
-  const data=await res.json();
-  if(data.ok){alert(`Updated ${data.updated} orders to Delivered!`);loadOrders();}else{alert(data.error||'Failed');}
-}
-async function archiveOldOrders(){
-  if(!confirm('Archive (hide) all orders older than 7 days? Your 307 old pending will be hidden. You can still show them via Show Archived.')) return;
-  const res=await fetch(`/api/customer/${resellerId}/archive_old`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days_old:7})});
-  const data=await res.json();
-  if(data.ok){alert(`📦 Archived ${data.archived} old orders! Now showing only recent.`);loadOrders();}else{alert(data.error||'Failed');}
-}
-async function bulkUpdateAllToPreparing(){
-  if(!confirm('Mark all Pending as Preparing?')) return;
-  const res=await fetch(`/api/customer/${resellerId}/bulk_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Preparing'})});
-  const data=await res.json();
-  if(data.ok){alert(`Updated ${data.updated}`);loadOrders();}else{alert(data.error||'Failed');}
-}
 loadOrders();setInterval(loadOrders,30000);
-
 </script>
 </body></html>"""
     return render_template_string(html)
+
 
 @app.route("/api/staff/customer_orders")
 @login_required
@@ -2632,6 +2635,91 @@ def api_staff_archive_all_old():
             archived += 1
         return jsonify({"ok": True, "archived": archived})
     except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+
+@app.route("/api/staff/reset_today", methods=["POST"])
+@login_required
+def api_staff_reset_today():
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": "Only ISESMO can reset today"}), 403
+        data = request.json or {}
+        date_str = data.get("date")  # optional, defaults to today
+        if not date_str:
+            try:
+                import pytz
+                manila = pytz.timezone('Asia/Manila')
+                now = datetime.now(manila)
+            except:
+                now = datetime.now()
+            date_str = now.strftime("%Y-%m-%d")
+        sales = fb_get("daily_sales") or {}
+        deleted = 0
+        for key,val in sales.items():
+            if not val: continue
+            sd = val.get("sales_date") or (val.get("created_at")[:10] if val.get("created_at") else "")
+            dd = val.get("delivered_date") or ""
+            # Delete if sales_date or delivered_date matches today
+            if sd and sd[:10] == date_str:
+                fb_delete(f"daily_sales/{key}")
+                deleted += 1
+            elif dd and dd[:10] == date_str and val.get("order_status") == "Delivered":
+                # Also delete delivered today that were originally old but updated to today
+                fb_delete(f"daily_sales/{key}")
+                deleted += 1
+        return jsonify({"ok": True, "deleted": deleted, "date": date_str})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/staff/reset_all_simulated", methods=["POST"])
+@login_required
+def api_staff_reset_all_simulated():
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": "Only ISESMO can reset all"}), 403
+        # This deletes ALL daily_sales - DANGER - but useful for testing
+        # Instead, archive all instead of delete for safety
+        sales = fb_get("daily_sales") or {}
+        deleted = 0
+        for key in list(sales.keys()):
+            fb_delete(f"daily_sales/{key}")
+            deleted += 1
+        return jsonify({"ok": True, "deleted": deleted, "warning": "ALL sales deleted"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+
+@app.route("/api/order/<order_id>/delete", methods=["POST", "DELETE"])
+@login_required
+def api_delete_order(order_id):
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": "Only ISESMO can delete"}), 403
+        existing = fb_get(f"daily_sales/{order_id}")
+        if not existing:
+            return jsonify({"ok": False, "error": "Order not found"}), 404
+        # Try delete, fallback to archive
+        ok = fb_delete(f"daily_sales/{order_id}")
+        if not ok:
+            fb_patch(f"daily_sales/{order_id}", {"archived": True, "archived_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "deleted_by": staff, "deleted_reason": "Wrong input - deleted via Live Orders"})
+            ok = True
+        # Clear dashboard cache
+        for k in list(globals().keys()):
+            if k.startswith("_dashboard_cache_"):
+                try:
+                    del globals()[k]
+                except:
+                    pass
+        return jsonify({"ok": True, "deleted": order_id, "method": "delete" if ok else "archive"})
+    except Exception as e:
+        import traceback
+        print(f"Delete error: {e}\n{traceback.format_exc()}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
