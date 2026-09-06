@@ -119,6 +119,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 <div class="topbar"><h1>OMEGA PURIFIED ICE</h1><div style="display:flex;align-items:center;gap:10px"><span class="staff">{{ staff_name }}</span><button class="logout" onclick="logout()">Logout</button></div></div>
 <div class="one-row">
   <span class="cloud-badge online" id="onlineBadge">● Online</span>
+  <a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444;position:relative">🔴 Live Orders <span id="liveOrdersCount" style="background:#fff;color:#ff4444;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;display:none">0</span></a>
   <span class="cloud-badge pending" id="pendingBadge" style="display:none" onclick="syncOffline()">0 Pending</span>
   <a href="/cashier" class="nav-pill active">Sales</a>
   <a href="/machines" class="nav-pill">Machines</a>
@@ -155,7 +156,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 <button class="save-btn" id="cancelEditBtn" style="display:none;background:#999;margin-top:6px" onclick="cancelEdit()">Cancel edit</button>
 <p class="status" id="statusMsg"></p>
 </div>
-<div class="card"><label style="font-weight:600;margin-bottom:8px;display:block">Recent sales - Status included</label>
+<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><label style="font-weight:600;display:block">Recent sales - Status included</label><button onclick="loadRecent();loadToday();" style="padding:6px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px">🔄 Refresh (30s auto)</button></div>
 <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
 <span style="font-size:10px;background:#dcfce7;color:#166534;padding:3px 8px;border-radius:10px">Delivered = Real Sales</span>
 <span style="font-size:10px;background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:10px">Pending = Not yet counted</span>
@@ -174,6 +175,26 @@ async function saveSale(){const qty=parseInt(document.getElementById('qtyInput')
 async function editSale(id){const res=await fetch(`/api/sale/${id}`);const data=await res.json();if(!data.ok)return alert('Cannot edit');const s=data.sale;editingSaleId=id;resellerInput.value=s.reseller_name;selectedReseller=s.reseller_id?{id:s.reseller_id,name:s.reseller_name}:null;document.getElementById('qtyInput').value=s.quantity;setMode(s.mode);setPayment(s.payment);setKg(s.kg_size);document.getElementById('saveBtn').textContent='Update';document.getElementById('cancelEditBtn').style.display='block';window.scrollTo({top:0,behavior:'smooth'})}
 function cancelEdit(){editingSaleId=null;resellerInput.value='';selectedReseller=null;document.getElementById('qtyInput').value=1;document.getElementById('saveBtn').textContent='Save sale';document.getElementById('cancelEditBtn').style.display='none';updateTotal()}
 function setCashierPeriod(p){cashierPeriod=p;document.querySelectorAll('.today-card .period-btn').forEach(b=>{const is=b.dataset.period===p;b.style.background=is?'rgba(255,255,255,.3)':'transparent';});loadToday();}
+async function fetchLiveOrdersCount(){
+  try{
+    const res = await fetch('/api/staff/customer_orders');
+    const data = await res.json();
+    const orders = data.orders||[];
+    // Count New Orders + Pending + Preparing + Out for Delivery (not Delivered/Cancelled)
+    const active = orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
+    const badge = document.getElementById('liveOrdersCount');
+    if(badge){
+      if(active>0){
+        badge.textContent = active;
+        badge.style.display = 'inline';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+  }catch(e){}
+}
+setInterval(fetchLiveOrdersCount, 30000);
+fetchLiveOrdersCount();
 async function loadToday(){
   try{
     const res=await fetch('/api/sales/dashboard?period='+cashierPeriod);
@@ -211,6 +232,26 @@ async function loadRecent(){
 async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sale/${id}`,{method:'DELETE'});loadRecent();loadToday();}
 async function logout(){await fetch('/api/logout',{method:'POST'});window.location.href='/login'}
 updateTotal();loadRecent();loadToday();setInterval(loadRecent,30000);setInterval(loadToday,30000);
+window.addEventListener('storage', (e)=>{
+  if(e.key==='omega_last_delivered'){
+    console.log('Detected delivery from orders page, refreshing sales...');
+    setTimeout(()=>{loadRecent();loadToday();}, 500);
+  }
+});
+// Also check every 5 sec for last delivered signal (for same-tab)
+setInterval(()=>{
+  const last = localStorage.getItem('omega_last_delivered');
+  if(last){
+    try{
+      const d = JSON.parse(last);
+      if(Date.now() - d.time < 35000){ // If delivered within last 35 sec
+        loadRecent();loadToday();
+        localStorage.removeItem('omega_last_delivered');
+      }
+    }catch{}
+  }
+}, 5000);
+
 </script>
 </body></html>
 """
@@ -2269,7 +2310,7 @@ def dashboard_page():
     html = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard</title>
 <style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.topbar h1{font-size:16px;color:#00609C;margin:0}.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}.nav-pill.active{background:#00609C;color:#fff}.period-btn{padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px;color:#00609C}.period-btn.active{background:#00609C;color:#fff}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px}.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center}.stat-val{font-size:20px;font-weight:700;color:#00609C}</style></head>
 <body>
-<div class="topbar"><h1>OMEGA ICE</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a> <a href="/dashboard" class="nav-pill active">Dashboard</a></div></div>
+<div class="topbar"><h1>OMEGA PURIFIED ICE</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a> <a href="/dashboard" class="nav-pill active">Dashboard</a></div></div>
 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
 <button class="period-btn active" data-p="daily" onclick="setPeriod('daily')">Daily</button>
 <button class="period-btn" data-p="weekly" onclick="setPeriod('weekly')">Weekly</button>
@@ -2341,7 +2382,35 @@ const list=document.getElementById('ordersList');
     return `<div class="order-card"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Pending')">Accept</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Preparing')">Preparing</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Out for Delivery')">Out</button><button class="btn" ${btnDisabled} style="background:#22c55e;color:#fff;${btnStyle()}" onclick="updateStatus('${o.id}','Delivered')">Done</button></div></div>`;
   }).join('');
 }
-async function updateStatus(id,status){await fetch(`/api/order/${id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});loadOrders();}
+async function updateStatus(id,status){
+  const btn = event.target;
+  const origText = btn.textContent;
+  btn.textContent = '...';
+  btn.disabled = true;
+  try{
+    const res = await fetch(`/api/order/${id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+    const data = await res.json();
+    if(data.ok){
+      // Instant update: reload orders + recent sales + today sales if on same domain
+      loadOrders();
+      // Try to refresh cashier data if available via localStorage signal
+      localStorage.setItem('omega_last_delivered', JSON.stringify({id: id, status: status, time: Date.now()}));
+      if(status==='Delivered'){
+        // Show success
+        btn.textContent = '✅ Done';
+        setTimeout(()=>loadOrders(), 1000);
+      }
+    } else {
+      alert(data.error||'Failed');
+      btn.textContent = origText;
+      btn.disabled = false;
+    }
+  } catch(e){
+    alert('Network error: '+e.message);
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
+}
 async function archiveAllOldStaff(){
   if(!confirm('ISESMO ONLY: Archive ALL orders older than 7 days? This will hide 307 old orders.')) return;
   const res=await fetch('/api/staff/archive_all_old',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days_old:7})});
