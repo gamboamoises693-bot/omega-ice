@@ -1622,12 +1622,19 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 </style></head>
 <body>
 <div class="topbar"><div><h1 id="storeName">My Orders</h1><div style="font-size:11px;color:#666" id="storeMeta"></div></div><div style="display:flex;gap:6px"><span class="live">● LIVE</span><a href="/customer/logout" class="btn">Logout</a></div></div>
-<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;font-weight:600">Summary</span><a href="/customer/{{ reseller_id }}/order" class="btn btn-primary">+ New Order</a></div><div class="stat-grid"><div><div class="stat-val" id="totalKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div><div><div class="stat-val" id="totalPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div><div><div class="stat-val" id="totalOrders">0</div><div class="stat-lbl">ORDERS</div></div></div><div id="statusCounts" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;font-size:10px"></div></div>
+<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;font-weight:600">Summary</span><a href="/customer/{{ reseller_id }}/order" class="btn btn-primary">+ New Order</a></div><div class="stat-grid"><div><div class="stat-val" id="totalKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div><div><div class="stat-val" id="totalPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div><div><div class="stat-val" id="totalOrders">0</div><div class="stat-lbl">ORDERS</div></div></div><div id="statusCounts" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;font-size:10px"></div>
+<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+<button onclick="bulkUpdateAll()" style="padding:8px 12px;border-radius:20px;border:none;background:#16a34a;color:#fff;font-size:11px;font-weight:600">✅ Mark all Pending as Delivered</button>
+<button onclick="archiveOldOrders()" style="padding:8px 12px;border-radius:20px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-size:11px">📦 Archive Old (Hide 307)</button>
+<button onclick="toggleArchived()" id="toggleArchBtn" style="padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#666;font-size:11px">Show Archived</button>
+<button onclick="bulkUpdateAllToPreparing()" style="padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">Mark as Preparing</button>
+</div>
+</div>
 <div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">Real-time Orders</div><div id="ordersList">Loading...</div></div>
 <script>
 const resellerId="{{ reseller_id }}";
 async function loadOrders(){
-  const res=await fetch(`/api/customer/${resellerId}/orders`);
+  const res=await fetch(`/api/customer/${resellerId}/orders?show_archived=${showArchived?1:0}`);
   const data=await res.json();
   const orders=data.orders||[];
   const stats=data.stats||{};
@@ -1638,11 +1645,33 @@ async function loadOrders(){
   document.getElementById('storeMeta').textContent=`Balance: ₱${stats.credit_balance||0} | ${new Date().toLocaleTimeString()}`;
   const counts=stats.status_counts||{};
   document.getElementById('statusCounts').innerHTML=Object.entries(counts).map(([k,v])=>`<span class="status-pill status-${k.toLowerCase().replace(/ /g,'-')}">${k}: ${v}</span>`).join('');
-  const list=document.getElementById('ordersList');
+  let showArchived=false;
+function toggleArchived(){showArchived=!showArchived;document.getElementById('toggleArchBtn').textContent=showArchived?'Hide Archived':'Show Archived';loadOrders();}
+const list=document.getElementById('ordersList');
   if(!orders.length){list.innerHTML='<div style="text-align:center;color:#888;padding:20px">No orders yet. Tap + New Order</div>';return;}
   list.innerHTML=orders.map(o=>`<div class="order-card"><div style="display:flex;justify-content:space-between"><span style="font-size:11px;color:#888">${o.sales_date||''}</span><span class="status-pill status-${(o.order_status||'pending').toLowerCase().replace(/ /g,'-')}">${o.order_status||'Pending'}</span></div><div style="font-size:13px;margin-top:4px">${o.quantity}x ${o.kg_size} • ${o.mode} • ₱${o.total_sales}</div></div>`).join('');
 }
+
+async function bulkUpdateAll(){
+  if(!confirm('Mark ALL 307 Pending orders as Delivered? This will update all pending orders for this customer.')) return;
+  const res=await fetch(`/api/customer/${resellerId}/bulk_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Delivered'})});
+  const data=await res.json();
+  if(data.ok){alert(`Updated ${data.updated} orders to Delivered!`);loadOrders();}else{alert(data.error||'Failed');}
+}
+async function archiveOldOrders(){
+  if(!confirm('Archive (hide) all orders older than 7 days? Your 307 old pending will be hidden. You can still show them via Show Archived.')) return;
+  const res=await fetch(`/api/customer/${resellerId}/archive_old`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days_old:7})});
+  const data=await res.json();
+  if(data.ok){alert(`📦 Archived ${data.archived} old orders! Now showing only recent.`);loadOrders();}else{alert(data.error||'Failed');}
+}
+async function bulkUpdateAllToPreparing(){
+  if(!confirm('Mark all Pending as Preparing?')) return;
+  const res=await fetch(`/api/customer/${resellerId}/bulk_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Preparing'})});
+  const data=await res.json();
+  if(data.ok){alert(`Updated ${data.updated}`);loadOrders();}else{alert(data.error||'Failed');}
+}
 loadOrders();setInterval(loadOrders,3000);
+
 </script>
 </body></html>
 """
@@ -2199,19 +2228,55 @@ def staff_orders_page():
 </style></head>
 <body>
 <div class="topbar"><h1>Live Customer Orders</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a></div></div>
-<div style="display:flex;gap:8px;margin-bottom:12px"><span class="live">● LIVE</span><button onclick="loadOrders()" style="padding:6px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px">Refresh</button></div>
+<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><span class="live">● LIVE</span><button onclick="bulkUpdateAllStaff()" style="padding:6px 12px;border-radius:20px;border:none;background:#16a34a;color:#fff;font-size:11px">✅ All Pending → Delivered</button>
+<button onclick="archiveAllOldStaff()" style="padding:6px 12px;border-radius:20px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-size:11px">📦 Archive Old >7d</button><button onclick="loadOrders()" style="padding:6px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px">Refresh</button></div>
 <div id="ordersList">Loading...</div>
 <script>
 async function loadOrders(){
   const res=await fetch('/api/staff/customer_orders');
   const data=await res.json();
   const orders=data.orders||[];
-  const list=document.getElementById('ordersList');
+  let showArchived=false;
+function toggleArchived(){showArchived=!showArchived;document.getElementById('toggleArchBtn').textContent=showArchived?'Hide Archived':'Show Archived';loadOrders();}
+const list=document.getElementById('ordersList');
   if(!orders.length){list.innerHTML='<div class="card" style="text-align:center;color:#888">No customer orders yet.</div>';return;}
   list.innerHTML=orders.map(o=>`<div class="order-card"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}</span><span style="font-size:10px;background:#fef3c7;padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><button class="btn" onclick="updateStatus('${o.id}','Pending')">Accept</button><button class="btn" onclick="updateStatus('${o.id}','Preparing')">Preparing</button><button class="btn" onclick="updateStatus('${o.id}','Out for Delivery')">Out</button><button class="btn" onclick="updateStatus('${o.id}','Delivered')">Done</button></div></div>`).join('');
 }
 async function updateStatus(id,status){await fetch(`/api/order/${id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});loadOrders();}
+async function archiveAllOldStaff(){
+  if(!confirm('ISESMO ONLY: Archive ALL orders older than 7 days? This will hide 307 old orders.')) return;
+  const res=await fetch('/api/staff/archive_all_old',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days_old:7})});
+  const data=await res.json();
+  if(data.ok){alert(`Archived ${data.archived} old orders`);loadOrders();}else{alert(data.error||'Failed');}
+}
+async function bulkUpdateAllStaff(){
+  if(!confirm('ISESMO ONLY: Mark ALL pending orders from ALL customers as Delivered? 307 orders will be updated!')) return;
+  const res=await fetch('/api/staff/bulk_update_all_pending',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Delivered'})});
+  const data=await res.json();
+  if(data.ok){alert(`Updated ${data.updated} orders to Delivered!`);loadOrders();}else{alert(data.error||'Failed - Only ISESMO can do this');}
+}
+
+
+async function bulkUpdateAll(){
+  if(!confirm('Mark ALL 307 Pending orders as Delivered? This will update all pending orders for this customer.')) return;
+  const res=await fetch(`/api/customer/${resellerId}/bulk_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Delivered'})});
+  const data=await res.json();
+  if(data.ok){alert(`Updated ${data.updated} orders to Delivered!`);loadOrders();}else{alert(data.error||'Failed');}
+}
+async function archiveOldOrders(){
+  if(!confirm('Archive (hide) all orders older than 7 days? Your 307 old pending will be hidden. You can still show them via Show Archived.')) return;
+  const res=await fetch(`/api/customer/${resellerId}/archive_old`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days_old:7})});
+  const data=await res.json();
+  if(data.ok){alert(`📦 Archived ${data.archived} old orders! Now showing only recent.`);loadOrders();}else{alert(data.error||'Failed');}
+}
+async function bulkUpdateAllToPreparing(){
+  if(!confirm('Mark all Pending as Preparing?')) return;
+  const res=await fetch(`/api/customer/${resellerId}/bulk_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Preparing'})});
+  const data=await res.json();
+  if(data.ok){alert(`Updated ${data.updated}`);loadOrders();}else{alert(data.error||'Failed');}
+}
 loadOrders();setInterval(loadOrders,3000);
+
 </script>
 </body></html>"""
     return render_template_string(html)
@@ -2235,6 +2300,140 @@ def api_staff_customer_orders():
 def health():
     return jsonify({"ok": True, "version": "v28-otp-isesmo-only"})
 
+
+
+
+@app.route("/api/customer/<reseller_id>/bulk_update", methods=["POST"])
+def api_customer_bulk_update(reseller_id):
+    try:
+        data = request.json or {}
+        new_status = data.get("status", "Delivered").strip()
+        from_status = data.get("from_status", "Pending").strip()
+        if new_status not in ["Pending","Preparing","Out for Delivery","Delivered","Cancelled","New Order"]:
+            return jsonify({"ok": False, "error": "Invalid status"}), 400
+        # Security: only owner or staff can bulk update
+        if session.get("customer_id") and session.get("customer_id") != reseller_id:
+            return jsonify({"ok": False, "error": "Not allowed"}), 403
+        if not session.get("customer_id") and not session.get("staff_name"):
+            return jsonify({"ok": False, "error": "Login required"}), 401
+        
+        reseller = fb_get(f"resellers/{reseller_id}") or {}
+        if not reseller and not session.get("staff_name"):
+            return jsonify({"ok": False, "error": "Reseller not found"}), 404
+        
+        sales = fb_get("daily_sales") or {}
+        updated = 0
+        target_name = (reseller.get("store_name") or "").strip().lower() if reseller else ""
+        for key,val in sales.items():
+            if not val: continue
+            rid = val.get("reseller_id")
+            rname = (val.get("reseller_name") or "").strip().lower()
+            # Match by id or name
+            if rid != reseller_id and rname != target_name and target_name:
+                continue
+            if not target_name and rid != reseller_id:
+                continue
+            current_status = val.get("order_status") or "Pending"
+            if from_status != "ALL" and current_status != from_status:
+                continue
+            fb_patch(f"daily_sales/{key}", {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("customer_name") or session.get("staff_name") or "Bulk Update"})
+            updated += 1
+        return jsonify({"ok": True, "updated": updated, "from": from_status, "to": new_status})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/staff/bulk_update_all_pending", methods=["POST"])
+@login_required
+def api_staff_bulk_update_all():
+    try:
+        data = request.json or {}
+        new_status = data.get("status", "Delivered")
+        from_status = data.get("from_status", "Pending")
+        # Only ISESMO can bulk update all
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": "Only ISESMO can bulk update all"}), 403
+        sales = fb_get("daily_sales") or {}
+        updated = 0
+        for key,val in sales.items():
+            if not val: continue
+            current = val.get("order_status") or "Pending"
+            if from_status != "ALL" and current != from_status:
+                continue
+            fb_patch(f"daily_sales/{key}", {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")})
+            updated += 1
+        return jsonify({"ok": True, "updated": updated})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+
+@app.route("/api/customer/<reseller_id>/archive_old", methods=["POST"])
+def api_customer_archive_old(reseller_id):
+    try:
+        data = request.json or {}
+        days_old = int(data.get("days_old", 7))  # archive orders older than 7 days
+        # Security
+        if session.get("customer_id") and session.get("customer_id") != reseller_id:
+            return jsonify({"ok": False, "error": "Not allowed"}), 403
+        if not session.get("customer_id") and not session.get("staff_name"):
+            return jsonify({"ok": False, "error": "Login required"}), 401
+        
+        reseller = fb_get(f"resellers/{reseller_id}") or {}
+        sales = fb_get("daily_sales") or {}
+        archived = 0
+        cutoff = datetime.now() - timedelta(days=days_old)
+        target_name = (reseller.get("store_name") or "").strip().lower() if reseller else ""
+        for key,val in sales.items():
+            if not val: continue
+            rid = val.get("reseller_id")
+            rname = (val.get("reseller_name") or "").strip().lower()
+            if rid != reseller_id and rname != target_name and target_name:
+                continue
+            # Check date
+            sd = val.get("sales_date") or (val.get("created_at")[:10] if val.get("created_at") else "")
+            try:
+                sale_date = datetime.strptime(sd[:10], "%Y-%m-%d")
+                if sale_date >= cutoff:
+                    continue  # Keep recent
+            except:
+                pass
+            # Already archived?
+            if val.get("archived"):
+                continue
+            fb_patch(f"daily_sales/{key}", {"archived": True, "archived_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+            archived += 1
+        return jsonify({"ok": True, "archived": archived, "cutoff_days": days_old})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/staff/archive_all_old", methods=["POST"])
+@login_required
+def api_staff_archive_all_old():
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": "Only ISESMO can archive all"}), 403
+        data = request.json or {}
+        days_old = int(data.get("days_old", 7))
+        sales = fb_get("daily_sales") or {}
+        cutoff = datetime.now() - timedelta(days=days_old)
+        archived = 0
+        for key,val in sales.items():
+            if not val: continue
+            if val.get("archived"): continue
+            sd = val.get("sales_date") or (val.get("created_at")[:10] if val.get("created_at") else "")
+            try:
+                sale_date = datetime.strptime(sd[:10], "%Y-%m-%d")
+                if sale_date >= cutoff:
+                    continue
+            except:
+                continue
+            fb_patch(f"daily_sales/{key}", {"archived": True, "archived_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+            archived += 1
+        return jsonify({"ok": True, "archived": archived})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 if __name__ == "__main__":
