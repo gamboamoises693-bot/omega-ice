@@ -45,7 +45,35 @@ def login_required(v):
     w.__name__=v.__name__
     return w
 
-LOGIN_HTML = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Login</title><style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}.card{background:#fff;border-radius:16px;padding:28px 24px;width:100%;max-width:340px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.06)}h1{font-size:20px;color:#00609C;margin:0 0 4px}.dots{font-size:28px;letter-spacing:8px;margin:12px 0;color:#222}.msg{font-size:12px;color:#888;min-height:18px;margin-bottom:16px}.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}.keypad button{padding:16px 0;font-size:20px;border-radius:10px;border:none;background:#f2f2f2}.keypad button.clear{background:#e5433d;color:#fff}.keypad button.back{background:#999;color:#fff}</style></head><body><div class="card"><h1>OMEGA PURIFIED ICE</h1><p>STAFF LOGIN v9.0 INSTANT FIXED</p><div class="dots" id="dots">o o o o</div><p class="msg" id="msg">Enter PIN</p><div class="keypad"><button onclick="addDigit('1')">1</button><button onclick="addDigit('2')">2</button><button onclick="addDigit('3')">3</button><button onclick="addDigit('4')">4</button><button onclick="addDigit('5')">5</button><button onclick="addDigit('6')">6</button><button onclick="addDigit('7')">7</button><button onclick="addDigit('8')">8</button><button onclick="addDigit('9')">9</button><button class="clear" onclick="clearPin()">C</button><button onclick="addDigit('0')">0</button><button class="back" onclick="backspace()"><</button></div></div><script>let pin="";function updateDots(){let out="";for(let i=0;i<4;i++)out+=(i<pin.length?"*":"o")+" ";document.getElementById('dots').innerText=out.trim()}function addDigit(d){if(pin.length<4){pin+=d;updateDots();if(pin.length==4)setTimeout(doLogin,300)}}function backspace(){pin=pin.slice(0,-1);updateDots()}function clearPin(){pin="";updateDots();document.getElementById('msg').textContent="Enter PIN"}async function doLogin(){document.getElementById('msg').textContent="Checking...";try{const res=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});const d=await res.json();if(d.ok)window.location.href='/cashier';else{document.getElementById('msg').textContent=d.error||'Wrong PIN';setTimeout(clearPin,1000)}}catch(e){document.getElementById('msg').textContent='Network error - retry';setTimeout(clearPin,1000)}}<\/script></body></html>"""
+LOGIN_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><title>Login v9</title>
+<style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}.card{background:#fff;border-radius:16px;padding:28px 24px;width:100%;max-width:340px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.06)}h1{font-size:20px;color:#00609C;margin:0 0 4px}.dots{font-size:28px;letter-spacing:8px;margin:12px 0;color:#222;min-height:36px}.msg{font-size:12px;color:#888;min-height:18px;margin-bottom:16px}.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}.keypad button{padding:20px 0;font-size:24px;border-radius:12px;border:none;background:#f0f0f0;cursor:pointer;touch-action:manipulation}.keypad button:active{background:#ddd;transform:scale(0.97)}.keypad button.clear{background:#e5433d;color:#fff}.keypad button.back{background:#999;color:#fff}</style>
+</head><body>
+<div class="card"><h1>OMEGA PURIFIED ICE</h1><p>STAFF LOGIN v9.0 INSTANT FIXED</p><div class="dots" id="dots">o o o o</div><p class="msg" id="msg">Tap PIN: 0712</p>
+<div class="keypad">
+<button type="button" onclick="addDigit('1')">1</button>
+<button type="button" onclick="addDigit('2')">2</button>
+<button type="button" onclick="addDigit('3')">3</button>
+<button type="button" onclick="addDigit('4')">4</button>
+<button type="button" onclick="addDigit('5')">5</button>
+<button type="button" onclick="addDigit('6')">6</button>
+<button type="button" onclick="addDigit('7')">7</button>
+<button type="button" onclick="addDigit('8')">8</button>
+<button type="button" onclick="addDigit('9')">9</button>
+<button type="button" class="clear" onclick="clearPin()">C</button>
+<button type="button" onclick="addDigit('0')">0</button>
+<button type="button" class="back" onclick="backspace()">&lt;</button>
+</div></div>
+<script>
+let pin="";
+function updateDots(){let out="";for(let i=0;i<4;i++)out+=(i<pin.length?"*":"o")+" ";document.getElementById("dots").innerText=out.trim()}
+function addDigit(d){if(pin.length<4){pin+=d;updateDots();if(pin.length==4)setTimeout(doLogin,200)}}
+function backspace(){pin=pin.slice(0,-1);updateDots()}
+function clearPin(){pin="";updateDots();document.getElementById("msg").textContent="Tap PIN: 0712"}
+async function doLogin(){document.getElementById("msg").textContent="Checking "+pin+"...";try{const res=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pin})});const data=await res.json();if(data.ok){document.getElementById("msg").textContent="OK "+data.name+"! Loading...";window.location.href="/cashier"}else{document.getElementById("msg").textContent=data.error||"Wrong PIN";setTimeout(clearPin,1200)}}catch(e){document.getElementById("msg").textContent="Network error - retry "+e.message;setTimeout(clearPin,1500)}}
+</script>
+</body></html>
+"""
 
 CASHIER_HTML = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cashier v9.0</title>
