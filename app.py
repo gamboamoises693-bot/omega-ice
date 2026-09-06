@@ -1395,6 +1395,77 @@ def debug_resellers():
         "duplicate_count": len(duplicates)
     })
 
+
+@app.route("/debug/fix_reseller_duplicates")
+def fix_reseller_duplicates():
+    """
+    One-time cleanup: the migration script created a second, sparse
+    reseller entry (keyed by old numeric SQLite id) for every reseller
+    that already existed in Firebase (keyed by a real push-id, with
+    full address/contact/GPS data).
+
+    This keeps the RICH entry (push-id key, more fields filled in),
+    re-points any daily_sales that reference the SPARSE entry's key
+    over to the rich entry's key, merges credit_balance if needed,
+    then deletes the sparse duplicate.
+
+    Safe to run more than once - if there are no more duplicates,
+    it does nothing.
+    """
+    resellers = fb_get("resellers") or {}
+    sales = fb_get("daily_sales") or {}
+
+    by_name = {}
+    for key, val in resellers.items():
+        if not val:
+            continue
+        name = (val.get("store_name") or "").strip()
+        by_name.setdefault(name, []).append((key, val))
+
+    report = []
+
+    for name, entries in by_name.items():
+        if len(entries) < 2:
+            continue
+
+        # Prefer the entry with a real Firebase push-key (starts with "-")
+        # and more populated fields as the one to KEEP.
+        def richness(entry):
+            key, val = entry
+            score = 1 if key.startswith("-") else 0
+            score += sum(1 for f in ("address", "contact_no", "owner_name", "latitude") if val.get(f))
+            return score
+
+        entries_sorted = sorted(entries, key=richness, reverse=True)
+        keep_key, keep_val = entries_sorted[0]
+        remove_entries = entries_sorted[1:]
+
+        merged_sales = 0
+        for remove_key, remove_val in remove_entries:
+            # re-point any sales referencing the sparse entry
+            for sale_id, sale in sales.items():
+                if sale and str(sale.get("reseller_id")) == str(remove_key):
+                    fb_patch(f"daily_sales/{sale_id}", {"reseller_id": keep_key})
+                    merged_sales += 1
+
+            # merge credit balance if the removed entry had one
+            remove_bal = remove_val.get("credit_balance") or 0
+            if remove_bal:
+                keep_bal = keep_val.get("credit_balance") or 0
+                fb_patch(f"resellers/{keep_key}", {"credit_balance": keep_bal + remove_bal})
+
+            # delete the sparse duplicate
+            requests.delete(f"{FIREBASE_URL}/resellers/{remove_key}.json", timeout=10)
+
+            report.append({
+                "store_name": name,
+                "kept_key": keep_key,
+                "removed_key": remove_key,
+                "sales_repointed": merged_sales,
+            })
+
+    return jsonify({"merged": report, "duplicates_fixed": len(report)})
+
 @app.route("/machines")
 @login_required
 def machines_page():
