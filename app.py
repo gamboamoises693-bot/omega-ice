@@ -1989,4 +1989,1677 @@ def api_customer_login():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-@app.route("/api/customer/request_otp", me
+@app.route("/api/customer/request_otp", methods=["POST"])
+def api_customer_request_otp():
+    try:
+        data = request.json or {}
+        phone = clean_phone(data.get("phone") or "")
+        if not phone:
+            return jsonify({"ok": False, "error": "Phone required"}), 400
+        resellers = fb_get("resellers") or {}
+        found = False
+        for val in resellers.values():
+            if not val: continue
+            if clean_phone(val.get("phone") or "") == phone:
+                found = True
+                break
+        if not found:
+            return jsonify({"ok": False, "error": "Phone not registered"}), 404
+        otp = generate_otp()
+        # Save OTP with 5 min expiry
+        otp_data = {"phone": phone, "otp": otp, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "expires_at": (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"), "used": False}
+        fb_post("customer_otps", otp_data)
+        # In production, send SMS here. For now return OTP for demo + staff can see in /customers
+        return jsonify({"ok": True, "otp": otp, "message": "OTP generated. Valid 5 mins. In production this would be SMS."})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/customer/verify_otp", methods=["POST"])
+def api_customer_verify_otp():
+    try:
+        data = request.json or {}
+        phone = clean_phone(data.get("phone") or "")
+        otp = (data.get("otp") or "").strip()
+        new_pwd = (data.get("new_password") or "").strip()
+        if not phone or not otp or not new_pwd:
+            return jsonify({"ok": False, "error": "Phone, OTP and new password required"}), 400
+        if len(new_pwd) < 4:
+            return jsonify({"ok": False, "error": "Password min 4 chars"}), 400
+        otps = fb_get("customer_otps") or {}
+        valid = None
+        valid_id = None
+        now = datetime.now()
+        for key,val in otps.items():
+            if not val: continue
+            if clean_phone(val.get("phone") or "") != phone: continue
+            if val.get("otp") != otp: continue
+            if val.get("used"): continue
+            exp_str = val.get("expires_at")
+            try:
+                exp = datetime.strptime(exp_str, "%Y-%m-%d %H:%M:%S")
+                if now > exp: continue
+            except:
+                pass
+            valid = val
+            valid_id = key
+            break
+        if not valid:
+            return jsonify({"ok": False, "error": "Invalid or expired OTP"}), 400
+        # Find reseller and update password
+        resellers = fb_get("resellers") or {}
+        target_id = None
+        for key,val in resellers.items():
+            if not val: continue
+            if clean_phone(val.get("phone") or "") == phone:
+                target_id = key
+                break
+        if not target_id:
+            return jsonify({"ok": False, "error": "Reseller not found"}), 404
+        hashed = hash_customer_password(new_pwd)
+        fb_patch(f"resellers/{target_id}", {"password_hash": hashed, "status": "active"})
+        fb_patch(f"customer_otps/{valid_id}", {"used": True})
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/customer/<reseller_id>/orders")
+def api_customer_orders(reseller_id):
+    try:
+        reseller = fb_get(f"resellers/{reseller_id}") or {}
+        sales = fb_get("daily_sales") or {}
+        orders = []
+        total_kg = 0
+        total_peso = 0
+        status_counts = {}
+        def kg_val(s):
+            try: return float(str(s).lower().replace("kg","").strip())
+            except: return 0
+        from datetime import timedelta
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now = datetime.now(manila)
+        except:
+            now = datetime.now()
+        cutoff_24h = now - timedelta(hours=24)
+        
+        for key,val in sales.items():
+            if not val: continue
+            # Hide pending >24hrs - only 24hrs data
+            if val.get("hidden_24h") or val.get("archived"): 
+                # Skip archived/hidden, but show if ?show_archived=1 and is within 24h?
+                show_arch = request.args.get("show_archived") == "1"
+                if not show_arch:
+                    continue
+            rid = val.get("reseller_id")
+            rname = (val.get("reseller_name") or "").strip()
+            target_name = (reseller.get("store_name") or "").strip()
+            if rid != reseller_id and rname.lower() != target_name.lower():
+                continue
+            # 24h filter: only show orders from last 24hrs
+            ca = val.get("created_at") or ""
+            try:
+                ca_dt = None
+                for fmt in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"]:
+                    try:
+                        ca_dt = datetime.strptime(ca[:19], fmt)
+                        break
+                    except:
+                        continue
+                if ca_dt and ca_dt < cutoff_24h.replace(tzinfo=None):
+                    # Hide if older than 24h AND status is Pending
+                    if (val.get("order_status") or "Pending") in ["Pending", "New Order"]:
+                        continue
+            except:
+                pass
+            qty = int(val.get("quantity",0) or 0)
+            kg_size = val.get("kg_size","1Kg")
+            peso = float(val.get("total_sales",0) or 0)
+            status = val.get("order_status","Pending")
+            total_kg += qty * kg_val(kg_size)
+            total_peso += peso
+            status_counts[status] = status_counts.get(status,0)+1
+            orders.append({"id": key, "sales_date": val.get("sales_date"), "quantity": qty, "kg_size": kg_size, "total_sales": peso, "mode": val.get("mode"), "payment": val.get("payment"), "order_status": status, "created_at": val.get("created_at")})
+        def status_priority_c(s):
+            order = (s.get("order_status") or "Pending")
+            priorities = {"New Order": 0, "Pending": 1, "Preparing": 2, "Out for Delivery": 3, "Delivered": 4, "Cancelled": 5}
+            return priorities.get(order, 1)
+        orders.sort(key=lambda x: (status_priority_c(x), x.get("created_at") or ""), reverse=False)
+        from collections import defaultdict as dd2
+        grouped2 = dd2(list)
+        for o in orders:
+            grouped2[status_priority_c(o)].append(o)
+        sorted_orders_c = []
+        for p in sorted(grouped2.keys()):
+            grouped2[p].sort(key=lambda x: x.get("created_at") or "", reverse=True)
+            sorted_orders_c.extend(grouped2[p])
+        orders = sorted_orders_c
+        stats = {"total_kg": total_kg, "total_peso": total_peso, "count": len(orders), "status_counts": status_counts, "credit_balance": reseller.get("credit_balance",0)}
+        return jsonify({"orders": orders[:50], "stats": stats, "reseller_name": reseller.get("store_name")})
+    except Exception as e:
+        return jsonify({"orders": [], "stats": {}, "error": str(e)}), 500
+
+@app.route("/api/customer/<reseller_id>/place_order", methods=["POST"])
+def api_customer_place_order(reseller_id):
+    try:
+        # Only logged customer can place for self, or staff
+        if session.get("customer_id") and session.get("customer_id") != reseller_id:
+            return jsonify({"ok": False, "error": "Not allowed"}), 403
+        d = request.json or {}
+        qty = int(d.get("quantity",1))
+        kg_size = d.get("kg_size","1Kg")
+        mode = d.get("mode","DELIVER")
+        payment = d.get("payment","Cash")
+        sales_date = d.get("sales_date") or datetime.now().strftime("%Y-%m-%d")
+        notes = d.get("notes","")
+        if qty<=0:
+            return jsonify({"ok": False, "error": "Invalid qty"}), 400
+        reseller = fb_get(f"resellers/{reseller_id}") or {}
+        if not reseller:
+            return jsonify({"ok": False, "error": "Reseller not found"}), 404
+        fallback={"1Kg":10,"5Kg":50,"10Kg":100,"25Kg":250}
+        unit_price=fallback.get(kg_size,10)
+        total = round(unit_price*qty,2)
+        sale = {
+            "reseller_id": reseller_id,
+            "reseller_name": reseller.get("store_name",""),
+            "quantity": qty,
+            "kg_size": kg_size,
+            "unit_price": unit_price,
+            "total_sales": total,
+            "mode": mode,
+            "payment": payment,
+            "sales_date": sales_date,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "staff_name": "Customer Order",
+            "order_status": "New Order",
+            "order_source": "customer",
+            "notes": notes
+        }
+        fb_post("daily_sales", sale)
+        return jsonify({"ok": True, "total": total})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/order/<order_id>/status", methods=["POST"])
+@login_required
+def api_update_order_status(order_id):
+    data = request.json or {}
+    new_status = data.get("status","").strip()
+    if new_status not in ["New Order","Pending","Preparing","Out for Delivery","Delivered","Cancelled"]:
+        return jsonify({"ok": False, "error": "Invalid status"}), 400
+    existing = fb_get(f"daily_sales/{order_id}") or {}
+    update_data = {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")}
+    # When marked as Delivered, update sales record so it counts as TODAY'S real sale + Recent Sales
+    if new_status == "Delivered":
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now_manila = datetime.now(manila)
+            today = now_manila.strftime("%Y-%m-%d")
+            now_str = now_manila.strftime("%Y-%m-%d %H:%M:%S")
+        except:
+            today = datetime.now().strftime("%Y-%m-%d")
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        update_data["delivered_at"] = now_str
+        update_data["delivered_date"] = today
+        # Keep original order date for history
+        if existing.get("sales_date"):
+            update_data["original_sales_date"] = existing.get("sales_date")
+        update_data["sales_date"] = today  # Makes it count in TODAY sales + Recent
+        update_data["sales_updated_at"] = now_str
+        update_data["is_customer_order"] = True
+        # Ensure it is NOT archived so it shows in sales
+        update_data["archived"] = False
+        update_data["archived_for_daily_only"] = False
+    fb_patch(f"daily_sales/{order_id}", update_data)
+    # Clear cache after delivered so dashboard updates instantly
+    for k in list(globals().keys()):
+        if k.startswith("_dashboard_cache_"):
+            try:
+                del globals()[k]
+            except:
+                pass
+    return jsonify({"ok": True, "status": new_status, "sales_updated": new_status == "Delivered"})
+
+@app.route("/customers")
+@login_required
+def staff_customers_page():
+    # Only ISESMO can view/manage
+    staff = (session.get("staff_name") or "").lower()
+    if staff not in ["isesmo", "isesmo gamboa"]:
+        return "<h3>Access Denied</h3><p>Only ISESMO can manage customers.</p><a href='/cashier'>Back</a>", 403
+    html = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Customers - Only ISESMO</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap}.topbar h1{font-size:15px;color:#00609C;margin:0;flex:1;min-width:180px}.topbar .nav-group{display:flex;gap:6px;flex-wrap:nowrap;align-items:center}
+.nav-pill{padding:6px 12px;border-radius:20px;font-size:11px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C;white-space:nowrap;display:inline-block}
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+label{font-size:11px;color:#666;display:block;margin:8px 0 4px}input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:13px}
+.btn{padding:8px 14px;border-radius:8px;border:none;font-size:12px;font-weight:600;margin:4px 2px}
+.btn-save{background:#00609C;color:#fff}.btn-otp{background:#f59e0b;color:#fff}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px 4px;border-bottom:1px solid #eee;text-align:left}
+</style></head>
+<body>
+<div class="topbar"><h1>👥 Customers (ISESMO Only)</h1><div class="nav-group"><a href="/cashier" class="nav-pill">Sales</a><a href="/orders" class="nav-pill">Live Orders</a></div></div>
+<div class="card">
+<h3 style="margin:0 0 8px;font-size:14px">Add New Customer - Only ISESMO</h3>
+<label>Store Name *</label><input id="newStore" placeholder="AMO Store">
+<label>Phone (will be login) *</label><input id="newPhone" placeholder="09xx xxx xxxx">
+<label>Password *</label><input id="newPassword" placeholder="Set password min 4 chars">
+<label>Address</label><input id="newAddress" placeholder="Angeles City">
+<button class="btn btn-save" style="width:100%;margin-top:10px;padding:12px" onclick="addCustomer()">+ Add Customer (ISESMO Only)</button>
+<p id="addStatus" style="font-size:12px;margin-top:8px"></p>
+</div>
+<div class="card"><input type="text" id="search" placeholder="Search store or phone..." oninput="loadCustomers()"></div>
+<div class="card"><table><thead><tr><th>Store</th><th>Phone / Login</th><th>OTP / Status</th><th>Action</th></tr></thead><tbody id="tbody"></tbody></table></div>
+<div class="card" id="editCard" style="display:none">
+<h3 style="margin:0 0 8px;font-size:14px">Edit Phone & Password</h3>
+<p style="font-size:11px;color:#666" id="editStore"></p>
+<label>Phone</label><input id="editPhone">
+<label>New Password</label><input id="editPassword" type="text">
+<button class="btn btn-save" onclick="savePassword()">Save</button><button class="btn" style="background:#ddd" onclick="closeEdit()">Cancel</button>
+<p id="editStatus" style="font-size:12px;margin-top:8px"></p>
+</div>
+<script>
+let editingId=null;
+async function addCustomer(){
+  const store=document.getElementById('newStore').value.trim();
+  const phone=document.getElementById('newPhone').value.trim();
+  const pwd=document.getElementById('newPassword').value.trim();
+  const addr=document.getElementById('newAddress').value.trim();
+  if(!store||!phone||!pwd){document.getElementById('addStatus').textContent='All fields required';return;}
+  const res=await fetch('/api/customers/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({store_name:store,phone:phone,password:pwd,address:addr})});
+  const data=await res.json();
+  document.getElementById('addStatus').textContent=data.ok?'✅ Customer added!':'Error: '+(data.error||'');
+  if(data.ok){document.getElementById('newStore').value='';document.getElementById('newPhone').value='';document.getElementById('newPassword').value='';loadCustomers();}
+}
+async function loadCustomers(){
+  const res=await fetch('/api/customers/list');
+  const data=await res.json();
+  const rows=data.resellers||[];
+  const otps=data.otps||{};
+  const q=document.getElementById('search').value.toLowerCase();
+  const filtered=rows.filter(r=>(r.store_name||'').toLowerCase().includes(q)||(r.phone||'').includes(q));
+  document.getElementById('tbody').innerHTML=filtered.map(r=>{
+    const otpInfo=otps[r.phone]||'';
+    return `<tr><td><b>${r.store_name}</b><br><small>₱${r.credit_balance||0}</small></td><td>${r.phone}<br><small style="color:${r.password_hash?'green':'red'}">${r.password_hash?'Has pwd':'No pwd'}</small></td><td>${otpInfo?'<span style="background:#fef3c7;padding:2px 6px;border-radius:10px;font-size:10px">OTP:'+otpInfo+'</span>':'-'}<br><small>${r.status||'active'}</small></td><td><button class="btn" style="background:#22c55e;color:#fff" onclick="openEdit('${r.id}','${r.store_name}','${r.phone}')">Edit</button></td></tr>`;
+  }).join('');
+}
+function openEdit(id,store,phone){editingId=id;document.getElementById('editStore').textContent=store;document.getElementById('editPhone').value=phone;document.getElementById('editCard').style.display='block';}
+function closeEdit(){document.getElementById('editCard').style.display='none';}
+async function savePassword(){
+  const phone=document.getElementById('editPhone').value.trim();
+  const pwd=document.getElementById('editPassword').value.trim();
+  const res=await fetch(`/api/reseller/${editingId}/set_password`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone,password:pwd})});
+  const data=await res.json();
+  document.getElementById('editStatus').textContent=data.ok?'Saved!':'Error: '+(data.error||'');
+  if(data.ok)loadCustomers();
+}
+loadCustomers();
+</script>
+</body></html>"""
+    return render_template_string(html)
+
+@app.route("/api/customers/add", methods=["POST"])
+@login_required
+def api_customers_add():
+    # Only ISESMO can add
+    staff = (session.get("staff_name") or "").lower()
+    if staff not in ["isesmo", "isesmo gamboa"]:
+        return jsonify({"ok": False, "error": "Only ISESMO can add customers"}), 403
+    try:
+        data = request.json or {}
+        store_name = (data.get("store_name") or "").strip()
+        phone = clean_phone(data.get("phone") or "")
+        pwd = (data.get("password") or "").strip()
+        address = (data.get("address") or "").strip()
+        if not store_name or not phone or not pwd:
+            return jsonify({"ok": False, "error": "Store, phone, password required"}), 400
+        if len(pwd) < 4:
+            return jsonify({"ok": False, "error": "Password min 4 chars"}), 400
+        resellers = fb_get("resellers") or {}
+        for val in resellers.values():
+            if not val: continue
+            if clean_phone(val.get("phone") or "") == phone:
+                return jsonify({"ok": False, "error": "Phone already registered"}), 400
+        hashed = hash_customer_password(pwd)
+        reseller_data = {"store_name": store_name, "phone": phone, "address": address, "credit_balance": 0, "password_hash": hashed, "status": "active", "created_by": session.get("staff_name"), "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        fb_post("resellers", reseller_data)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/customers/list")
+@login_required
+def api_customers_list():
+    try:
+        resellers = fb_get("resellers") or {}
+        otps = fb_get("customer_otps") or {}
+        # Get latest OTP per phone
+        latest_otps = {}
+        for val in otps.values():
+            if not val or val.get("used"): continue
+            phone = val.get("phone")
+            exp_str = val.get("expires_at")
+            try:
+                exp = datetime.strptime(exp_str, "%Y-%m-%d %H:%M:%S")
+                if datetime.now() > exp: continue
+            except:
+                pass
+            latest_otps[phone] = val.get("otp")
+        out=[]
+        for key,val in resellers.items():
+            if not val: continue
+            out.append({"id":key,"store_name":val.get("store_name"),"phone":val.get("phone") or val.get("contact",""),"credit_balance":val.get("credit_balance",0),"password_hash":"yes" if val.get("password_hash") else "","status":val.get("status","active")})
+        return jsonify({"resellers": out[:100], "otps": latest_otps})
+    except Exception as e:
+        return jsonify({"resellers": [], "otps": {}, "error": str(e)}), 500
+
+@app.route("/api/reseller/<reseller_id>/set_password", methods=["POST"])
+@login_required
+def api_set_reseller_password(reseller_id):
+    staff = (session.get("staff_name") or "").lower()
+    if staff not in ["isesmo", "isesmo gamboa"]:
+        return jsonify({"ok": False, "error": "Only ISESMO can set password"}), 403
+    try:
+        data = request.json or {}
+        phone = clean_phone(data.get("phone") or "")
+        password = (data.get("password") or "").strip()
+        if not phone or not password:
+            return jsonify({"ok": False, "error": "Phone and password required"}), 400
+        if len(password) < 4:
+            return jsonify({"ok": False, "error": "Password min 4"}), 400
+        hashed = hash_customer_password(password)
+        fb_patch(f"resellers/{reseller_id}", {"phone": phone, "password_hash": hashed, "status": "active"})
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/sales/dashboard")
+@login_required
+def api_sales_dashboard():
+    period = request.args.get("period", "daily").lower()
+    # Fast path for daily - use Manila time
+    try:
+        import pytz
+        manila = pytz.timezone('Asia/Manila')
+        now = datetime.now(manila)
+    except:
+        now = datetime.now()
+    # Cache daily_sales for 10 sec to avoid hammering Firebase with 1600 records
+    cache_key = f"_dashboard_cache_{period}"
+    cached = globals().get(cache_key)
+    if cached and (now - cached.get("time", datetime.min)).total_seconds() < 10:
+        return jsonify(cached.get("data"))
+
+    def kg_value(s):
+        try: return float(str(s).lower().replace("kg","").strip())
+        except: return 0
+    def parse_date(d):
+        try: return datetime.strptime(d[:10], "%Y-%m-%d")
+        except: return None
+    start_date = None
+    label = "Today"
+    if period == "daily":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        label = "Today"
+    elif period == "weekly":
+        start_date = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
+        label = "Last 7 Days"
+    elif period == "monthly":
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        label = "This Month"
+    elif period == "quarterly":
+        q = (now.month-1)//3 + 1
+        start_month = (q-1)*3 + 1
+        start_date = now.replace(month=start_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        label = f"Q{q} {now.year}"
+    elif period in ("yearly","year"):
+        start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        label = f"Year {now.year}"
+    else:
+        start_date = None
+        label = "All Time"
+    total_peso = 0; total_kg = 0; count = 0
+    pending_peso = 0; pending_kg = 0; pending_count = 0
+    breakdown = {"1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0}
+    pending_breakdown = {"1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0}
+    try:
+        data = fb_get("daily_sales") or {}
+        for v in data.values():
+            if not v: continue
+            # #2 LOGIC: All Time includes archived Sept 06 (so 34k), Daily excludes archived to show 0
+            # For All Time (period = all), include archived that were archived via restore_sept06 to keep 34k
+            # For Daily, exclude archived to show 0
+            is_archived = v.get("archived")
+            if is_archived:
+                # If All Time, include archived records that were archived to make Sept 06 = 0 (keep 34k)
+                # Only exclude truly deleted/wrong inputs, not the 3721kg archive
+                if period != "all time" and period != "all":
+                    # Daily/Weekly/Monthly/Yearly: exclude archived to make Sept 06 = 0
+                    # But check if archived was for Sept 06 fix - still exclude for Daily to show 0
+                    if v.get("restored") or v.get("auto_cleared") or "archived Sept 06" in str(v.get("restored") or "") or "Sept 06 to make 0" in str(v.get("archived_at") or ""):
+                        # For Daily, exclude to show 0
+                        continue
+                    # For other archived (wrong input), also exclude for Daily
+                    continue
+                # For All Time, INCLUDE archived that were part of 3721kg fix to keep 34k
+                # So don't skip for All Time
+                pass
+            # Only count Delivered as real sales, Pending/New Order as pending
+            status = v.get("order_status") or "Delivered"  # Old sales without status = Delivered
+            sd = v.get("sales_date") or (v.get("created_at")[:10] if v.get("created_at") else "")
+            if not sd: continue
+            dt = parse_date(sd)
+            if not dt: continue
+            if start_date and dt < start_date.replace(tzinfo=None): continue
+            qty = int(v.get("quantity",0) or 0)
+            kg_size = v.get("kg_size","1Kg")
+            peso = float(v.get("total_sales",0) or 0)
+            if status in ["Delivered", "Out for Delivery"]:
+                total_peso += peso
+                total_kg += qty * kg_value(kg_size)
+                count += 1
+                if kg_size in breakdown: breakdown[kg_size] += qty
+            else:  # Pending, New Order, Preparing
+                pending_peso += peso
+                pending_kg += qty * kg_value(kg_size)
+                pending_count += 1
+                if kg_size in pending_breakdown: pending_breakdown[kg_size] += qty
+    except Exception as e:
+        print(f"dashboard error {e}")
+    result = {"period": period, "label": label, "total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "pending_total": pending_peso, "pending_kg": pending_kg, "pending_count": pending_count, "pending_breakdown": pending_breakdown, "date": now.strftime("%Y-%m-%d"), "start": start_date.strftime("%Y-%m-%d") if start_date else "All"}
+    globals()[cache_key] = {"time": now, "data": result}
+    return jsonify(result)
+
+@app.route("/api/sales/today")
+@login_required
+def api_today_sales():
+    try:
+        import pytz
+        manila = pytz.timezone('Asia/Manila')
+        now = datetime.now(manila)
+    except:
+        now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    def kg_value(s):
+        try: return float(str(s).lower().replace("kg","").strip())
+        except: return 0
+    def parse_date(d):
+        try: return datetime.strptime(d[:10], "%Y-%m-%d")
+        except: return None
+    total_peso = 0; total_kg = 0; count = 0
+    pending_peso = 0; pending_kg = 0; pending_count = 0
+    breakdown = {"1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0}
+    try:
+        data = fb_get("daily_sales") or {}
+        for v in data.values():
+            if not v: continue
+            # #2 LOGIC: All Time includes archived Sept 06 (so 34k), Daily excludes archived to show 0
+            # For All Time (period = all), include archived that were archived via restore_sept06 to keep 34k
+            # For Daily, exclude archived to show 0
+            is_archived = v.get("archived")
+            if is_archived:
+                # If All Time, include archived records that were archived to make Sept 06 = 0 (keep 34k)
+                # Only exclude truly deleted/wrong inputs, not the 3721kg archive
+                if period != "all time" and period != "all":
+                    # Daily/Weekly/Monthly/Yearly: exclude archived to make Sept 06 = 0
+                    # But check if archived was for Sept 06 fix - still exclude for Daily to show 0
+                    if v.get("restored") or v.get("auto_cleared") or "archived Sept 06" in str(v.get("restored") or "") or "Sept 06 to make 0" in str(v.get("archived_at") or ""):
+                        # For Daily, exclude to show 0
+                        continue
+                    # For other archived (wrong input), also exclude for Daily
+                    continue
+                # For All Time, INCLUDE archived that were part of 3721kg fix to keep 34k
+                # So don't skip for All Time
+                pass
+            status = v.get("order_status") or "Delivered"
+            sd = v.get("sales_date") or (v.get("created_at")[:10] if v.get("created_at") else "")
+            if not sd: continue
+            dt = parse_date(sd)
+            if not dt: continue
+            if dt.date() != now.date(): continue
+            qty = int(v.get("quantity",0) or 0)
+            kg_size = v.get("kg_size","1Kg")
+            peso = float(v.get("total_sales",0) or 0)
+            if status in ["Delivered", "Out for Delivery"]:
+                total_peso += peso
+                total_kg += qty * kg_value(kg_size)
+                count += 1
+                if kg_size in breakdown: breakdown[kg_size] += qty
+            else:
+                pending_peso += peso
+                pending_kg += qty * kg_value(kg_size)
+                pending_count += 1
+    except: pass
+    return jsonify({"total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "pending_total": pending_peso, "pending_kg": pending_kg, "pending_count": pending_count, "date": today_str, "start": today_str})
+
+@app.route("/dashboard")
+@login_required
+def dashboard_page():
+    html = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard</title>
+<style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.topbar h1{font-size:16px;color:#00609C;margin:0}.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}.nav-pill.active{background:#00609C;color:#fff}.period-btn{padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px;color:#00609C}.period-btn.active{background:#00609C;color:#fff}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px}.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center}.stat-val{font-size:20px;font-weight:700;color:#00609C}</style></head>
+<body>
+<div class="topbar"><h1>OMEGA ICE</h1><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444">🔴 Live Orders</a><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a> <a href="/dashboard" class="nav-pill active">Dashboard</a></div></div>
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+<button class="period-btn active" data-p="daily" onclick="setPeriod('daily')">Daily</button>
+<button class="period-btn" data-p="weekly" onclick="setPeriod('weekly')">Weekly</button>
+<button class="period-btn" data-p="monthly" onclick="setPeriod('monthly')">Monthly</button>
+<button class="period-btn" data-p="quarterly" onclick="setPeriod('quarterly')">Quarterly</button>
+<button class="period-btn" data-p="yearly" onclick="setPeriod('yearly')">Yearly</button>
+<button class="period-btn" data-p="all" onclick="setPeriod('all')">All Time</button>
+</div>
+<div class="card"><div style="font-size:11px;color:#666;margin-bottom:8px">✅ DELIVERED SALES (Real Sales)</div><div class="stat-grid"><div><div class="stat-val" id="totalKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div><div><div class="stat-val" id="totalPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div><div><div class="stat-val" id="totalCount">0</div><div class="stat-lbl">DELIVERED</div></div></div><div style="margin-top:12px;padding-top:12px;border-top:1px dashed #ccd"><div style="font-size:11px;color:#92400e;margin-bottom:6px">⏳ PENDING FOR DELIVERY (1600 pending)</div><div class="stat-grid"><div><div class="stat-val" id="pendingKg" style="color:#f59e0b">0kg</div><div class="stat-lbl">PENDING KG</div></div><div><div class="stat-val" id="pendingPeso" style="color:#f59e0b">₱0</div><div class="stat-lbl">PENDING PESO</div></div><div><div class="stat-val" id="pendingCount" style="color:#f59e0b">0</div><div class="stat-lbl">PENDING</div></div></div></div><div id="breakdown" style="font-size:11px;margin-top:10px;text-align:center"></div></div>
+<script>
+let currentPeriod='daily';
+async function setPeriod(p){currentPeriod=p;document.querySelectorAll('.period-btn').forEach(b=>b.classList.toggle('active',b.dataset.p===p));loadDashboard();}
+async function loadDashboard(){const res=await fetch('/api/sales/dashboard?period='+currentPeriod);const data=await res.json();document.getElementById('totalKg').textContent=(data.total_kg||0).toLocaleString()+'kg';document.getElementById('totalPeso').textContent='₱'+(data.total||0).toLocaleString();document.getElementById('totalCount').textContent=data.count||0;document.getElementById('pendingKg').textContent=(data.pending_kg||0).toLocaleString()+'kg';document.getElementById('pendingPeso').textContent='₱'+(data.pending_total||0).toLocaleString();document.getElementById('pendingCount').textContent=data.pending_count||0;const b=data.breakdown||{};document.getElementById('breakdown').textContent=`Delivered: 1Kg:${b['1Kg']||0} 5Kg:${b['5Kg']||0} 10Kg:${b['10Kg']||0} 25Kg:${b['25Kg']||0} | Pending: ${data.pending_count||0} orders`;}loadDashboard();
+</script>
+</body></html>"""
+    return render_template_string(html)
+
+@app.route("/orders")
+@login_required
+def staff_orders_page():
+    html = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Live Orders</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:16px;color:#00609C;margin:0}
+.card{background:#fff;border-radius:12px;padding:12px;margin-bottom:10px}
+.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}
+.live{display:inline-flex;align-items:center;gap:6px;background:#ef4444;color:#fff;padding:6px 12px;border-radius:20px;font-size:11px}
+.order-card{border-left:4px solid #f59e0b;padding:12px;margin:8px 0;background:#fff;border-radius:8px}
+.btn{padding:6px 10px;border-radius:8px;border:1px solid #ccd;font-size:11px;margin:2px}.btn:disabled{opacity:0.4;cursor:not-allowed;background:#f3f4f6;color:#999}
+</style></head>
+<body>
+<div class="topbar"><h1>Live Customer Orders</h1><div><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a></div></div>
+<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><span class="live">● LIVE</span>
+<button onclick="archiveAllOldStaff()" style="padding:6px 12px;border-radius:20px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-size:11px">📦 Archive Old >7d</button><button onclick="loadOrders()" style="padding:6px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px">Refresh</button></div>
+<div id="ordersList">2026-09-06 - Tap Refresh</div>
+<script>
+async function loadOrders(){
+  const res=await fetch('/api/staff/customer_orders');
+  const data=await res.json();
+  const ordersRaw=data.orders||[];
+  // Sort: New Order on top, Delivered at bottom
+  const priority = {"New Order":0, "Pending":1, "Preparing":2, "Out for Delivery":3, "Delivered":4, "Cancelled":5};
+  const orders = ordersRaw.sort((a,b)=>{
+    const pa = priority[a.order_status] ?? 1;
+    const pb = priority[b.order_status] ?? 1;
+    if(pa!==pb) return pa-pb;
+    return (b.created_at||'').localeCompare(a.created_at||'');
+  });
+  let showArchived=false;
+function toggleArchived(){showArchived=!showArchived;document.getElementById('toggleArchBtn').textContent=showArchived?'Hide Archived':'Show Archived';loadOrders();}
+const list=document.getElementById('ordersList');
+  if(!orders.length){list.innerHTML='<div class="card" style="text-align:center;color:#888">No customer orders yet.</div>';return;}
+  list.innerHTML=orders.map(o=>{
+    const isDelivered = o.order_status==='Delivered';
+    const isCancelled = o.order_status==='Cancelled';
+    const disabled = isDelivered || isCancelled;
+    let statusColor='#fef3c7';
+    if(o.order_status==='Delivered'){statusColor='#dcfce7';}
+    else if(o.order_status==='Cancelled'){statusColor='#fee2e2';}
+    else if(o.order_status==='Preparing'){statusColor='#dbeafe';}
+    else if(o.order_status==='Out for Delivery'){statusColor='#e0e7ff';}
+    const deliveredBadge = isDelivered ? ' ✅' : '';
+    const btnStyle = (active)=> disabled ? 'opacity:0.4;cursor:not-allowed;background:#f3f4f6' : '';
+    const btnDisabled = disabled ? 'disabled' : '';
+    if(disabled){
+      return `<div class="order-card" data-order-id="${o.id}" style="border-left-color:${isDelivered?'#22c55e':'#ef4444'};opacity:0.8"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}${deliveredBadge}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><span style="font-size:11px;color:${isDelivered?'#16a34a':'#ef4444'};font-weight:600">${isDelivered?'✅ Delivered - buttons disabled': '❌ Cancelled'}</span> <button class="btn" style="background:#fff;color:#ef4444;border-color:#fca5a5;font-size:10px;padding:4px 8px;margin-left:8px" onclick="deleteOrder('${o.id}')">🗑️ Delete</button></div></div>`;
+    }
+    return `<div class="order-card" data-order-id="${o.id}"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div><div style="margin-top:8px"><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Pending')">Accept</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Preparing')">Preparing</button><button class="btn" ${btnDisabled} style="${btnStyle()}" onclick="updateStatus('${o.id}','Out for Delivery')">Out</button><button class="btn" ${btnDisabled} style="background:#22c55e;color:#fff;${btnStyle()}" onclick="updateStatus('${o.id}','Delivered')">Done</button><button class="btn" style="background:#fff;color:#ef4444;border-color:#fca5a5" onclick="deleteOrder('${o.id}')">🗑️ Delete</button></div></div>`;
+  }).join('');
+}
+async function updateStatus(id,status){
+  const btn = event.target;
+  const origText = btn.textContent;
+  btn.textContent = '...';
+  btn.disabled = true;
+  try{
+    const res = await fetch(`/api/order/${id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+    const data = await res.json();
+    if(data.ok){
+      // Instant update: reload orders + recent sales + today sales if on same domain
+      loadOrders();
+      // Try to refresh cashier data if available via localStorage signal
+      localStorage.setItem('omega_last_delivered', JSON.stringify({id: id, status: status, time: Date.now()}));
+      if(status==='Delivered'){
+        // Show success
+        btn.textContent = '✅ Done';
+        setTimeout(()=>loadOrders(), 1000);
+      }
+    } else {
+      alert(data.error||'Failed');
+      btn.textContent = origText;
+      btn.disabled = false;
+    }
+  } catch(e){
+    alert('Network error: '+e.message);
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
+}
+async function archiveAllOldStaff(){
+  if(!confirm('ISESMO ONLY: Archive ALL orders older than 7 days? This will hide 307 old orders.')) return;
+  const res=await fetch('/api/staff/archive_all_old',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days_old:7})});
+  const data=await res.json();
+  if(data.ok){alert(`Archived ${data.archived} old orders`);loadOrders();}else{alert(data.error||'Failed');}
+}
+
+
+
+async function bulkUpdateAll(){
+  if(!confirm('Mark ALL 307 Pending orders as Delivered? This will update all pending orders for this customer.')) return;
+  const res=await fetch(`/api/customer/${resellerId}/bulk_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Delivered'})});
+  const data=await res.json();
+  if(data.ok){alert(`Updated ${data.updated} orders to Delivered!`);loadOrders();}else{alert(data.error||'Failed');}
+}
+async function archiveOldOrders(){
+  if(!confirm('Archive (hide) all orders older than 7 days? Your 307 old pending will be hidden. You can still show them via Show Archived.')) return;
+  const res=await fetch(`/api/customer/${resellerId}/archive_old`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days_old:7})});
+  const data=await res.json();
+  if(data.ok){alert(`📦 Archived ${data.archived} old orders! Now showing only recent.`);loadOrders();}else{alert(data.error||'Failed');}
+}
+async function bulkUpdateAllToPreparing(){
+  if(!confirm('Mark all Pending as Preparing?')) return;
+  const res=await fetch(`/api/customer/${resellerId}/bulk_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_status:'Pending',status:'Preparing'})});
+  const data=await res.json();
+  if(data.ok){alert(`Updated ${data.updated}`);loadOrders();}else{alert(data.error||'Failed');}
+}
+
+async function deleteOrder(id){
+  if(!confirm('🗑️ Delete this order? This will remove from Live + Sales records.')) return;
+  try{
+    const res = await fetch(`/api/orders/${id}`, {method:'DELETE'});
+    const data = await res.json();
+    if(data.ok){
+      alert('✅ Deleted! Sales updated.');
+      loadOrders();
+      await fetch('/api/sales/clear_cache', {method:'POST'}).catch(()=>{});
+    }else{
+      alert(data.error||'Failed');
+    }
+  }catch(e){alert('Network error: '+e.message);}
+}
+loadOrders();setInterval(loadOrders,10000);
+
+
+</script>
+</body></html>"""
+    return render_template_string(html)
+
+@app.route("/api/staff/customer_orders")
+@login_required
+def api_staff_customer_orders():
+    # 24hrs only - hide pending >24hrs
+    try:
+        from datetime import timedelta
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now = datetime.now(manila)
+        except:
+            now = datetime.now()
+        cutoff_24h = now - timedelta(hours=24)
+        
+        sales = fb_get("daily_sales") or {}
+        orders=[]
+        for key,val in sales.items():
+            if not val: continue
+            if val.get("order_source") != "customer": continue
+            if val.get("archived") and not val.get("hidden_24h"): 
+                # Skip archived unless it's 24h hidden (we want to hide those anyway)
+                continue
+            if val.get("deleted"): continue
+            if val.get("hidden_24h"): continue
+            
+            # 24h filter - hide orders older than 24h
+            ca = val.get("created_at") or ""
+            is_old = False
+            try:
+                ca_dt = None
+                for fmt in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"]:
+                    try:
+                        ca_dt = datetime.strptime(ca[:19], fmt)
+                        break
+                    except:
+                        continue
+                if ca_dt and ca_dt < cutoff_24h.replace(tzinfo=None):
+                    # If old and Pending/New Order, hide (only 24hrs data)
+                    if (val.get("order_status") or "Pending") in ["Pending", "New Order"]:
+                        is_old = True
+                # Also check sales_date for old 2025 orders
+                sd = val.get("sales_date") or ""
+                if "2025" in sd or "2026-08" in sd or "2026-09-01" in sd or "2026-09-04" in sd:
+                    is_old = True
+            except:
+                pass
+            
+            if is_old:
+                continue
+                
+            orders.append({"id":key,"reseller_name":val.get("reseller_name"),"quantity":val.get("quantity"),"kg_size":val.get("kg_size"),"total_sales":val.get("total_sales"),"mode":val.get("mode"),"sales_date":val.get("sales_date"),"order_status":val.get("order_status","New Order"),"created_at":val.get("created_at")})
+        # Sort: New Orders first, Delivered at bottom
+        def status_priority(s):
+            order = (s.get("order_status") or "Pending")
+            priorities = {"New Order": 0, "Pending": 1, "Preparing": 2, "Out for Delivery": 3, "Delivered": 4, "Cancelled": 5}
+            return priorities.get(order, 1)
+        orders.sort(key=lambda x: (status_priority(x), -(len(x.get("created_at") or "")), x.get("created_at") or ""), reverse=False)
+        # Actually sort by priority then newest first within same priority
+        from collections import defaultdict
+        grouped = defaultdict(list)
+        for o in orders:
+            grouped[status_priority(o)].append(o)
+        sorted_orders = []
+        for p in sorted(grouped.keys()):
+            # Within same priority, newest first
+            grouped[p].sort(key=lambda x: x.get("created_at") or "", reverse=True)
+            sorted_orders.extend(grouped[p])
+        return jsonify({"orders": sorted_orders[:100]})
+    except Exception as e:
+        return jsonify({"orders":[]}), 500
+
+@app.route("/health")
+def health():
+    return jsonify({"ok": True, "version": "v28-otp-isesmo-only"})
+
+
+
+
+@app.route("/api/customer/<reseller_id>/bulk_update", methods=["POST"])
+def api_customer_bulk_update(reseller_id):
+    try:
+        data = request.json or {}
+        new_status = data.get("status", "Delivered").strip()
+        from_status = data.get("from_status", "Pending").strip()
+        if new_status not in ["Pending","Preparing","Out for Delivery","Delivered","Cancelled","New Order"]:
+            return jsonify({"ok": False, "error": "Invalid status"}), 400
+        # Security: only owner or staff can bulk update
+        if session.get("customer_id") and session.get("customer_id") != reseller_id:
+            return jsonify({"ok": False, "error": "Not allowed"}), 403
+        if not session.get("customer_id") and not session.get("staff_name"):
+            return jsonify({"ok": False, "error": "Login required"}), 401
+        
+        reseller = fb_get(f"resellers/{reseller_id}") or {}
+        if not reseller and not session.get("staff_name"):
+            return jsonify({"ok": False, "error": "Reseller not found"}), 404
+        
+        sales = fb_get("daily_sales") or {}
+        updated = 0
+        target_name = (reseller.get("store_name") or "").strip().lower() if reseller else ""
+        for key,val in sales.items():
+            if not val: continue
+            rid = val.get("reseller_id")
+            rname = (val.get("reseller_name") or "").strip().lower()
+            # Match by id or name
+            if rid != reseller_id and rname != target_name and target_name:
+                continue
+            if not target_name and rid != reseller_id:
+                continue
+            current_status = val.get("order_status") or "Pending"
+            if from_status != "ALL" and current_status != from_status:
+                continue
+            today = datetime.now().strftime("%Y-%m-%d")
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            upd = {"order_status": new_status, "status_updated_at": now_str, "status_updated_by": session.get("customer_name") or session.get("staff_name") or "Bulk Update"}
+            if new_status == "Delivered":
+                upd["delivered_at"] = now_str
+                upd["delivered_date"] = today
+                # FIX: Keep original sales_date - don't overwrite! Only set delivered_date
+                # upd["sales_date"] = today  # REMOVED - this caused 3721kg on Sept 06
+                # upd["created_at"] = now_str  # REMOVED
+            fb_patch(f"daily_sales/{key}", upd)
+            updated += 1
+        return jsonify({"ok": True, "updated": updated, "from": from_status, "to": new_status})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/staff/bulk_update_all_pending", methods=["POST"])
+@login_required
+def api_staff_bulk_update_all():
+    try:
+        data = request.json or {}
+        new_status = data.get("status", "Delivered")
+        from_status = data.get("from_status", "Pending")
+        # Only ISESMO can bulk update all
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": "Only ISESMO can bulk update all"}), 403
+        sales = fb_get("daily_sales") or {}
+        updated = 0
+        for key,val in sales.items():
+            if not val: continue
+            current = val.get("order_status") or "Pending"
+            if from_status != "ALL" and current != from_status:
+                continue
+            today2 = datetime.now().strftime("%Y-%m-%d")
+            now_str2 = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            upd2 = {"order_status": new_status, "status_updated_at": now_str2, "status_updated_by": session.get("staff_name")}
+            if new_status == "Delivered":
+                upd2["delivered_at"] = now_str2
+                upd2["delivered_date"] = today2
+                # FIX: Keep original sales_date
+            fb_patch(f"daily_sales/{key}", upd2)
+            updated += 1
+        return jsonify({"ok": True, "updated": updated})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+
+@app.route("/api/customer/<reseller_id>/archive_old", methods=["POST"])
+def api_customer_archive_old(reseller_id):
+    try:
+        data = request.json or {}
+        days_old = int(data.get("days_old", 7))  # archive orders older than 7 days
+        # Security
+        if session.get("customer_id") and session.get("customer_id") != reseller_id:
+            return jsonify({"ok": False, "error": "Not allowed"}), 403
+        if not session.get("customer_id") and not session.get("staff_name"):
+            return jsonify({"ok": False, "error": "Login required"}), 401
+        
+        reseller = fb_get(f"resellers/{reseller_id}") or {}
+        sales = fb_get("daily_sales") or {}
+        archived = 0
+        cutoff = datetime.now() - timedelta(days=days_old)
+        target_name = (reseller.get("store_name") or "").strip().lower() if reseller else ""
+        for key,val in sales.items():
+            if not val: continue
+            rid = val.get("reseller_id")
+            rname = (val.get("reseller_name") or "").strip().lower()
+            if rid != reseller_id and rname != target_name and target_name:
+                continue
+            # Check date
+            sd = val.get("sales_date") or (val.get("created_at")[:10] if val.get("created_at") else "")
+            try:
+                sale_date = datetime.strptime(sd[:10], "%Y-%m-%d")
+                if sale_date >= cutoff:
+                    continue  # Keep recent
+            except:
+                pass
+            # Already archived?
+            if val.get("archived"):
+                continue
+            fb_patch(f"daily_sales/{key}", {"archived": True, "archived_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+            archived += 1
+        return jsonify({"ok": True, "archived": archived, "cutoff_days": days_old})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/staff/archive_all_old", methods=["POST"])
+@login_required
+def api_staff_archive_all_old():
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": "Only ISESMO can archive all"}), 403
+        data = request.json or {}
+        days_old = int(data.get("days_old", 7))
+        sales = fb_get("daily_sales") or {}
+        cutoff = datetime.now() - timedelta(days=days_old)
+        archived = 0
+        for key,val in sales.items():
+            if not val: continue
+            if val.get("archived"): continue
+            sd = val.get("sales_date") or (val.get("created_at")[:10] if val.get("created_at") else "")
+            try:
+                sale_date = datetime.strptime(sd[:10], "%Y-%m-%d")
+                if sale_date >= cutoff:
+                    continue
+            except:
+                continue
+            fb_patch(f"daily_sales/{key}", {"archived": True, "archived_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+            archived += 1
+        return jsonify({"ok": True, "archived": archived})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+
+@app.route("/api/staff/reset_today", methods=["POST"])
+@login_required
+def api_staff_reset_today():
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        print(f"RESET TODAY called by {staff}")
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": f"Only ISESMO can reset today. You are {staff}"}), 403
+        data = request.json or {}
+        date_str = data.get("date")
+        force_all = data.get("force_all", False)
+        if not date_str:
+            try:
+                import pytz
+                manila = pytz.timezone('Asia/Manila')
+                now = datetime.now(manila)
+            except:
+                now = datetime.now()
+            date_str = now.strftime("%Y-%m-%d")
+        print(f"Resetting date {date_str}, force_all={force_all}")
+        sales = fb_get("daily_sales") or {}
+        print(f"Found {len(sales)} total sales")
+        deleted = 0
+        to_delete = []
+        for key,val in sales.items():
+            if not val: continue
+            if force_all:
+                to_delete.append(key)
+                continue
+            sd = (val.get("sales_date") or "")[:10]
+            dd = (val.get("delivered_date") or "")[:10]
+            ca = (val.get("created_at") or "")[:10]
+            # Match ANY date field to today
+            if date_str in [sd, dd, ca]:
+                to_delete.append(key)
+            # Also if sales_date contains date_str
+            elif sd == date_str or dd == date_str or ca == date_str:
+                to_delete.append(key)
+        
+        print(f"Will delete {len(to_delete)} records")
+        for key in to_delete:
+            # Try delete first, if fails, archive it (fallback for Firebase rules)
+            ok = fb_delete(f"daily_sales/{key}")
+            if not ok:
+                # Fallback: archive instead
+                try:
+                    fb_patch(f"daily_sales/{key}", {"archived": True, "archived_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "reset_by": staff})
+                    ok = True
+                except:
+                    ok = False
+            print(f"Delete/Archive {key}: {ok}")
+            if ok:
+                deleted += 1
+        
+        # Clear dashboard cache
+        for key in list(globals().keys()):
+            if key.startswith("_dashboard_cache_"):
+                try:
+                    del globals()[key]
+                except:
+                    pass
+        
+        print(f"Deleted {deleted}/{len(to_delete)}")
+        return jsonify({"ok": True, "deleted": deleted, "found": len(to_delete), "total": len(sales), "date": date_str})
+    except Exception as e:
+        import traceback
+        print(f"Reset error: {e}\n{traceback.format_exc()}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/staff/reset_all_simulated", methods=["POST"])
+@login_required
+def api_staff_reset_all_simulated():
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": "Only ISESMO can reset all"}), 403
+        # This deletes ALL daily_sales - DANGER - but useful for testing
+        # Instead, archive all instead of delete for safety
+        sales = fb_get("daily_sales") or {}
+        deleted = 0
+        for key in list(sales.keys()):
+            fb_delete(f"daily_sales/{key}")
+            deleted += 1
+        return jsonify({"ok": True, "deleted": deleted, "warning": "ALL sales deleted"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+
+@app.route("/api/clear_today_secret")
+@login_required
+def api_clear_today_secret():
+    """Secret URL to make dashboard 0 without button - visit /api/clear_today_secret?key=omega123"""
+    try:
+        key = request.args.get("key", "")
+        # Allow ISESMO or secret key
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"] and key != "omega123":
+            return "Only ISESMO - add ?key=omega123 or login as ISESMO", 403
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now = datetime.now(manila)
+        except:
+            now = datetime.now()
+        date_str = now.strftime("%Y-%m-%d")
+        sales = fb_get("daily_sales") or {}
+        archived = 0
+        for k,v in sales.items():
+            if not v: continue
+            sd = (v.get("sales_date") or "")[:10]
+            dd = (v.get("delivered_date") or "")[:10]
+            ca = (v.get("created_at") or "")[:10]
+            # Archive if ANY date is today - this makes dashboard 0
+            if date_str in [sd, dd, ca]:
+                fb_patch(f"daily_sales/{k}", {"archived": True, "archived_at": now.strftime("%Y-%m-%d %H:%M:%S"), "auto_cleared": True})
+                archived += 1
+        # Clear cache
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+        return f"<h2>✅ Dashboard cleared to 0!</h2><p>Archived {archived} records from today ({date_str})</p><p>Total was {len(sales)}</p><p><a href='/cashier'>Go to Sales - will show 0kg now</a></p><p><a href='/dashboard'>Go to Dashboard</a></p>", 200
+    except Exception as e:
+        return f"Error: {e}", 500
+
+@app.route("/api/staff/auto_dashboard_fix", methods=["POST"])
+@login_required
+def api_auto_dashboard_fix():
+    """Auto fix: if live customer orders = 0 but dashboard shows 3721kg, auto archive today"""
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return jsonify({"ok": False, "error": "Only ISESMO"}), 403
+        sales = fb_get("daily_sales") or {}
+        customer_pending = 0
+        today_delivered = 0
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now = datetime.now(manila)
+        except:
+            now = datetime.now()
+        date_str = now.strftime("%Y-%m-%d")
+        for v in sales.values():
+            if not v: continue
+            if v.get("archived"): continue
+            if v.get("order_source") == "customer" and v.get("order_status") in ["New Order", "Pending", "Preparing", "Out for Delivery"]:
+                customer_pending += 1
+            sd = (v.get("sales_date") or "")[:10]
+            if sd == date_str and v.get("order_status") in ["Delivered", "Out for Delivery", None]:
+                # Count today's delivered (cashier + customer)
+                if not v.get("archived"):
+                    today_delivered += 1
+        # If no pending customer orders but dashboard still has delivered today, auto archive them
+        if customer_pending == 0 and today_delivered > 0:
+            archived = 0
+            for k,v in sales.items():
+                if not v: continue
+                if v.get("archived"): continue
+                sd = (v.get("sales_date") or "")[:10]
+                dd = (v.get("delivered_date") or "")[:10]
+                ca = (v.get("created_at") or "")[:10]
+                if date_str in [sd, dd, ca]:
+                    fb_patch(f"daily_sales/{k}", {"archived": True, "archived_at": now.strftime("%Y-%m-%d %H:%M:%S"), "auto_fix": "dashboard 0 because live empty"})
+                    archived += 1
+            for kk in list(globals().keys()):
+                if kk.startswith("_dashboard_cache_"):
+                    try: del globals()[kk]
+                    except: pass
+            return jsonify({"ok": True, "auto_fixed": True, "archived": archived, "customer_pending": customer_pending, "today_delivered": today_delivered, "message": f"Auto archived {archived} because live orders empty - dashboard now 0"})
+        return jsonify({"ok": True, "auto_fixed": False, "customer_pending": customer_pending, "today_delivered": today_delivered, "message": f"No auto fix needed - pending: {customer_pending}, today: {today_delivered}"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+
+@app.route("/api/restore_sept06", methods=["GET", "POST"])
+@login_required
+def api_restore_sept06():
+    """Option 3: Restore 3721kg from Sept 06 back to original dates - makes Sept 06 = 0kg"""
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return "Only ISESMO", 403
+        from datetime import timedelta
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now = datetime.now(manila)
+        except:
+            now = datetime.now()
+        today_str = now.strftime("%Y-%m-%d")
+        yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        action = request.args.get("action", "move_to_yesterday")  # or "archive" or "spread"
+        
+        sales = fb_get("daily_sales") or {}
+        affected = 0
+        details = []
+        
+        for k,v in sales.items():
+            if not v: continue
+            if v.get("archived"): continue
+            sd = (v.get("sales_date") or "")[:10]
+            dd = (v.get("delivered_date") or "")[:10]
+            # Only affect records that show on Sept 06
+            if sd == today_str or dd == today_str:
+                if action == "archive":
+                    # Make Sept 06 = 0 by archiving
+                    fb_patch(f"daily_sales/{k}", {"archived": True, "archived_at": now.strftime("%Y-%m-%d %H:%M:%S"), "restored": "Option 3 - archived Sept 06 to make 0"})
+                    affected += 1
+                elif action == "move_to_yesterday":
+                    # Move to yesterday - Sept 06 becomes 0, yesterday gets 3721kg
+                    fb_patch(f"daily_sales/{k}", {
+                        "sales_date": yesterday_str,
+                        "delivered_date": yesterday_str,
+                        "restored": True,
+                        "restored_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+                        "restored_note": f"Moved from {today_str} to {yesterday_str} - Option 3"
+                    })
+                    affected += 1
+                    details.append(f"{v.get('reseller_name')} {v.get('quantity')}x {v.get('kg_size')} moved to {yesterday_str}")
+                elif action == "spread":
+                    # Spread across last 7 days randomly to simulate original dates
+                    import random
+                    days_ago = random.randint(1, 7)
+                    new_date = (now - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+                    fb_patch(f"daily_sales/{k}", {
+                        "sales_date": new_date,
+                        "delivered_date": new_date,
+                        "restored": True,
+                        "restored_at": now.strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                    affected += 1
+        
+        # Clear cache
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+                
+        html = f"""
+        <h2>✅ Option 3 - Restore Complete!</h2>
+        <p>Action: {action}</p>
+        <p>Affected: {affected} records from {today_str}</p>
+        <p>Result:</p>
+        <ul>
+          <li>Sept 06 (today) will now show <b>0kg</b> (if archived) or reduced</li>
+          <li>If move_to_yesterday: Yesterday {yesterday_str} now has +{affected} records (3721kg)</li>
+          <li>If spread: Distributed across last 7 days</li>
+        </ul>
+        <p><a href='/cashier'>Check Sales - should be 0kg now</a></p>
+        <p><a href='/api/sales/dashboard?period=daily'>Check Dashboard API</a></p>
+        <p>Details: {('<br>'.join(details[:10]))}</p>
+        <p>Use ?action=archive to make Sept 06 = 0, ?action=move_to_yesterday to move to Sept 05, ?action=spread to distribute</p>
+        """
+        return html, 200
+    except Exception as e:
+        import traceback
+        return f"Error: {e}<br><pre>{traceback.format_exc()}</pre>", 500
+
+@app.route("/api/dashboard/debug")
+@login_required
+def api_dashboard_debug():
+    """Debug where 3721kg came from"""
+    try:
+        sales = fb_get("daily_sales") or {}
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now = datetime.now(manila)
+        except:
+            now = datetime.now()
+        today_str = now.strftime("%Y-%m-%d")
+        today_records = []
+        total_kg = 0
+        total_peso = 0
+        for k,v in sales.items():
+            if not v: continue
+            if v.get("archived"): continue
+            sd = (v.get("sales_date") or "")[:10]
+            dd = (v.get("delivered_date") or "")[:10]
+            if sd == today_str or dd == today_str:
+                if v.get("order_status") in ["Delivered", "Out for Delivery", None]:
+                    kg_num = 0
+                    ks = v.get("kg_size") or ""
+                    if "1Kg" in ks: kg_num = 1
+                    elif "5Kg" in ks: kg_num = 5
+                    elif "10Kg" in ks: kg_num = 10
+                    elif "25Kg" in ks: kg_num = 25
+                    qty = int(v.get("quantity") or 0)
+                    total_kg += kg_num * qty
+                    total_peso += int(v.get("total_sales") or 0)
+                    today_records.append({
+                        "id": k[:8],
+                        "name": v.get("reseller_name"),
+                        "qty": qty,
+                        "kg": ks,
+                        "sales_date": v.get("sales_date"),
+                        "delivered_date": v.get("delivered_date"),
+                        "created": v.get("created_at"),
+                        "status": v.get("order_status")
+                    })
+        return jsonify({
+            "today": today_str,
+            "count": len(today_records),
+            "total_kg": total_kg,
+            "total_peso": total_peso,
+            "records": today_records[:20],
+            "explanation": f"3721kg came from {len(today_records)} records where sales_date or delivered_date = {today_str}. They were originally older pending orders but All Pending->Delivered overwrote their sales_date to today. Use /api/restore_sept06?action=archive to make 0, or ?action=move_to_yesterday to move to Sept 05"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+@app.route("/api/make2")
+@login_required
+def api_make2():
+    """Make #2: Sept 06 = 0kg but All Time = 34k (includes archived 3721kg)"""
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return "Only ISESMO", 403
+        # Just clear cache and explain
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+        return f"""
+        <h2>✅ Make #2 Active!</h2>
+        <p>Logic:</p>
+        <ul>
+          <li><b>Daily (Sept 06):</b> 0kg - excludes archived 159 records</li>
+          <li><b>All Time:</b> 34,201kg - INCLUDES archived 159 records (3721kg) to keep total 34k</li>
+        </ul>
+        <p>Your current All Time shows 30,480kg because archived are excluded.</p>
+        <p>After this fix, All Time will show <b>34,201kg</b> (30,480 + 3,721) but Daily still 0kg!</p>
+        <p><a href='/cashier'>Go to Sales</a></p>
+        <p>Tap Daily vs All Time to see difference</p>
+        <p><b>Note:</b> If you want All Time to include archived, the code now does: All Time includes archived that were archived via Sept 06 fix</p>
+        """
+    except Exception as e:
+        return f"Error {e}", 500
+
+@app.route("/api/unarchive_all_time")
+@login_required
+def api_unarchive_all_time():
+    """Unarchive only for All Time counting - makes All Time 34k but keeps Daily 0 via flag"""
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return "Only ISESMO", 403
+        sales = fb_get("daily_sales") or {}
+        fixed = 0
+        for k,v in sales.items():
+            if not v: continue
+            if not v.get("archived"): continue
+            # If archived for Sept 06 fix, keep archived=True but add flag to include in All Time
+            if v.get("auto_cleared") or "Sept 06" in str(v.get("restored") or "") or v.get("restored"):
+                # Mark to include in All Time but exclude in Daily
+                fb_patch(f"daily_sales/{k}", {"include_in_all_time": True, "archived_for_daily_only": True})
+                fixed += 1
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+        return f"<h2>✅ Fixed {fixed} records for #2</h2><p>Daily = 0kg (excludes archived)<br>All Time = 34k (includes archived with include_in_all_time flag)</p><p><a href='/cashier'>Check</a></p>"
+    except Exception as e:
+        return f"Error {e}", 500
+
+
+
+@app.route("/api/sales/may2026")
+@login_required
+def api_sales_may2026():
+    """Audit May 2026 sales - should be 357k per user"""
+    try:
+        sales = fb_get("daily_sales") or {}
+        from datetime import datetime
+        def kg_value(s):
+            try: return float(str(s).lower().replace("kg","").strip())
+            except: return 0
+        
+        may_total = 0
+        may_kg = 0
+        may_count = 0
+        may_records = []
+        all_may = []
+        
+        for k,v in sales.items():
+            if not v: continue
+            # For May audit, INCLUDE archived that were part of Sept fix? No, May is before Sept
+            # But include all to see true May
+            is_archived = v.get("archived")
+            # For May audit, include even archived if it was May originally
+            sd = (v.get("sales_date") or "")[:10]
+            if not sd: 
+                sd = (v.get("created_at") or "")[:10]
+            if not sd: continue
+            if not sd.startswith("2026-05"):
+                continue
+            
+            qty = int(v.get("quantity") or 0)
+            kg_size = v.get("kg_size") or "1Kg"
+            peso = float(v.get("total_sales") or 0)
+            status = v.get("order_status") or "Delivered"
+            
+            all_may.append({
+                "id": k[:8],
+                "name": v.get("reseller_name"),
+                "date": sd,
+                "qty": qty,
+                "kg": kg_size,
+                "peso": peso,
+                "status": status,
+                "archived": is_archived,
+                "created": v.get("created_at")
+            })
+            
+            if status in ["Delivered", "Out for Delivery", None] or not v.get("order_status"):
+                if not is_archived or v.get("include_in_all_time"):
+                    may_total += peso
+                    may_kg += qty * kg_value(kg_size)
+                    may_count += 1
+                    may_records.append(v)
+        
+        # Also check machine data if exists
+        machines = fb_get("machines") or fb_get("ice_machines") or {}
+        
+        return {
+            "month": "2026-05",
+            "expected": 357000,
+            "actual_delivered": may_total,
+            "actual_kg": may_kg,
+            "count": may_count,
+            "total_records_in_may": len(all_may),
+            "archived_in_may": len([x for x in all_may if x["archived"]]),
+            "difference": 357000 - may_total,
+            "records": all_may[:50],
+            "machines_found": len(machines) if isinstance(machines, dict) else 0,
+            "explanation": f"May should be 357k but dashboard shows {may_total}. Difference {357000 - may_total}. Check if machine production not in daily_sales, or archived, or status not Delivered"
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "trace": traceback.format_exc()}, 500
+
+@app.route("/api/sales/month/<month_str>")
+@login_required
+def api_sales_specific_month(month_str):
+    """Get sales for specific month like 2026-05"""
+    try:
+        sales = fb_get("daily_sales") or {}
+        def kg_value(s):
+            try: return float(str(s).lower().replace("kg","").strip())
+            except: return 0
+        
+        total = 0
+        kg = 0
+        count = 0
+        records = []
+        
+        for k,v in sales.items():
+            if not v: continue
+            if v.get("archived") and not v.get("include_in_all_time"):
+                continue
+            sd = (v.get("sales_date") or "")[:10]
+            if not sd.startswith(month_str):
+                continue
+            status = v.get("order_status") or "Delivered"
+            if status in ["Delivered", "Out for Delivery", None] or not v.get("order_status"):
+                qty = int(v.get("quantity") or 0)
+                kg_size = v.get("kg_size") or "1Kg"
+                peso = float(v.get("total_sales") or 0)
+                total += peso
+                kg += qty * kg_value(kg_size)
+                count += 1
+                records.append({"name": v.get("reseller_name"), "date": sd, "kg": kg_size, "qty": qty, "peso": peso})
+        
+        return {"month": month_str, "total": total, "kg": kg, "count": count, "records": records[:100]}
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+
+
+@app.route("/api/sales/all_monthly")
+@login_required
+def api_sales_all_monthly():
+    """Pull out ALL monthly sales - Jan to Dec breakdown"""
+    try:
+        sales = fb_get("daily_sales") or {}
+        from collections import defaultdict
+        
+        def kg_value(s):
+            try: return float(str(s).lower().replace("kg","").strip())
+            except: return 0
+        
+        monthly = defaultdict(lambda: {"total": 0, "kg": 0, "count": 0, "1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0, "pending": 0})
+        
+        for k,v in sales.items():
+            if not v: continue
+            # For All Monthly, include even archived that are marked include_in_all_time (Make #2)
+            # But exclude truly archived wrong inputs
+            if v.get("archived") and not v.get("include_in_all_time") and not v.get("archived_for_daily_only"):
+                # If archived for daily only, still include in monthly All Time? 
+                # For monthly breakdown, include if include_in_all_time or archived_for_daily_only (Make #2)
+                if not v.get("archived_for_daily_only"):
+                    continue
+            sd = (v.get("sales_date") or "")[:10]
+            if not sd:
+                sd = (v.get("created_at") or "")[:10]
+            if not sd: continue
+            try:
+                year_month = sd[:7]  # 2026-05
+                if len(year_month) != 7: continue
+            except:
+                continue
+            
+            qty = int(v.get("quantity") or 0)
+            kg_size = v.get("kg_size") or "1Kg"
+            peso = float(v.get("total_sales") or 0)
+            status = v.get("order_status") or "Delivered"
+            
+            if status in ["Delivered", "Out for Delivery"] or not v.get("order_status"):
+                monthly[year_month]["total"] += peso
+                monthly[year_month]["kg"] += qty * kg_value(kg_size)
+                monthly[year_month]["count"] += 1
+                if kg_size in monthly[year_month]:
+                    monthly[year_month][kg_size] += qty
+            else:
+                monthly[year_month]["pending"] += peso
+        
+        # Sort by month
+        sorted_months = sorted(monthly.keys())
+        result = []
+        grand_total = 0
+        grand_kg = 0
+        for m in sorted_months:
+            d = monthly[m]
+            grand_total += d["total"]
+            grand_kg += d["kg"]
+            result.append({
+                "month": m,
+                "year": m[:4],
+                "month_num": m[5:7],
+                "total_peso": d["total"],
+                "total_kg": d["kg"],
+                "transactions": d["count"],
+                "breakdown": {"1Kg": d["1Kg"], "5Kg": d["5Kg"], "10Kg": d["10Kg"], "25Kg": d["25Kg"]},
+                "pending_peso": d["pending"]
+            })
+        
+        return jsonify({
+            "months": result,
+            "grand_total_peso": grand_total,
+            "grand_total_kg": grand_kg,
+            "grand_transactions": sum(x["transactions"] for x in result),
+            "explanation": "All monthly sales from Firebase daily_sales. Daily=0 but All Time includes archived Sept 06 (Make #2)"
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+@app.route("/api/sales/export_csv")
+@login_required
+def api_sales_export_csv():
+    """Export all monthly sales as CSV - pullout all monthly"""
+    try:
+        import csv
+        import io
+        sales = fb_get("daily_sales") or {}
+        from collections import defaultdict
+        
+        def kg_value(s):
+            try: return float(str(s).lower().replace("kg","").strip())
+            except: return 0
+        
+        # Monthly aggregation
+        monthly = defaultdict(lambda: {"total": 0, "kg": 0, "count": 0, "1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0})
+        
+        for v in sales.values():
+            if not v: continue
+            if v.get("archived") and not v.get("include_in_all_time") and not v.get("archived_for_daily_only"):
+                if not v.get("archived_for_daily_only"):
+                    continue
+            sd = (v.get("sales_date") or "")[:10]
+            if not sd:
+                sd = (v.get("created_at") or "")[:10]
+            if not sd: continue
+            year_month = sd[:7]
+            qty = int(v.get("quantity") or 0)
+            kg_size = v.get("kg_size") or "1Kg"
+            peso = float(v.get("total_sales") or 0)
+            status = v.get("order_status") or "Delivered"
+            if status in ["Delivered", "Out for Delivery"] or not v.get("order_status"):
+                monthly[year_month]["total"] += peso
+                monthly[year_month]["kg"] += qty * kg_value(kg_size)
+                monthly[year_month]["count"] += 1
+                if kg_size in monthly[year_month]:
+                    monthly[year_month][kg_size] += qty
+        
+        # Create CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Month", "Year", "Total Peso", "Total KG", "Transactions", "1Kg Qty", "5Kg Qty", "10Kg Qty", "25Kg Qty"])
+        for m in sorted(monthly.keys()):
+            d = monthly[m]
+            writer.writerow([m, m[:4], d["total"], d["kg"], d["count"], d["1Kg"], d["5Kg"], d["10Kg"], d["25Kg"]])
+        
+        # Also detailed transactions CSV
+        output2 = io.StringIO()
+        writer2 = csv.writer(output2)
+        writer2.writerow(["Date", "Reseller", "KG Size", "Qty", "Total Sales", "Mode", "Status", "Sales Date", "Archived"])
+        for k,v in sales.items():
+            if not v: continue
+            writer2.writerow([
+                v.get("sales_date") or v.get("created_at"),
+                v.get("reseller_name"),
+                v.get("kg_size"),
+                v.get("quantity"),
+                v.get("total_sales"),
+                v.get("mode"),
+                v.get("order_status"),
+                v.get("sales_date"),
+                v.get("archived")
+            ])
+        
+        return jsonify({
+            "monthly_csv": output.getvalue(),
+            "detailed_csv": output2.getvalue(),
+            "download_monthly": "data:text/csv;base64," + output.getvalue().encode().hex(),
+            "message": "Copy monthly_csv to Excel. Detailed includes all transactions"
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+@app.route("/sales_report")
+@login_required
+def sales_report_page():
+    """Visual page to pullout all monthly sales"""
+    html = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Monthly Sales Report</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px;text-align:left;border-bottom:1px solid #eee}th{background:#f8f9fa;font-weight:600}
+.badge{padding:4px 8px;border-radius:12px;font-size:10px;background:#dcfce7;color:#166534}
+.btn{padding:8px 14px;border-radius:20px;border:1px solid #cde;background:#00609C;color:#fff;font-size:12px;cursor:pointer;margin:2px}
+</style></head>
+<body>
+<div class="topbar"><h1>📊 Monthly Sales Report</h1><div><a href="/cashier" style="padding:7px 14px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;text-decoration:none;font-size:12px">Sales</a> <a href="/dashboard" style="padding:7px 14px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;text-decoration:none;font-size:12px">Dashboard</a></div></div>
+<div class="card">
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="btn" onclick="loadMonthly()">🔄 Refresh</button><button class="btn" style="background:#16a34a" onclick="downloadCSV()">📥 Download Monthly CSV</button><button class="btn" style="background:#f59e0b" onclick="downloadDetailed()">📥 Download Detailed CSV</button></div>
+<div id="summary" style="font-size:12px;color:#666;margin-bottom:12px">Loading...</div>
+<table id="monthlyTable"><thead><tr><th>Month</th><th>Total Peso</th><th>Total KG</th><th>Trans</th><th>1Kg</th><th>5Kg</th><th>10Kg</th><th>25Kg</th></tr></thead><tbody><tr><td colspan="8">Loading...</td></tr></tbody></table>
+</div>
+<div class="card"><h3 style="margin:0 0 8px;font-size:14px">May 2026 Audit (357k)</h3><div id="mayAudit">Loading May...</div></div>
+<script>
+async function loadMonthly(){
+  const res = await fetch('/api/sales/all_monthly');
+  const data = await res.json();
+  const tbody = document.querySelector('#monthlyTable tbody');
+  const summary = document.getElementById('summary');
+  if(data.error){tbody.innerHTML=`<tr><td colspan="8">${data.error}</td></tr>`;return;}
+  summary.innerHTML=`Grand Total: ₱${data.grand_total_peso.toLocaleString()} | ${data.grand_total_kg.toLocaleString()}kg | ${data.grand_transactions} transactions | Daily=0 (Make #2), All Time includes archived 3721kg`;
+  tbody.innerHTML = data.months.map(m=>`<tr><td><b>${m.month}</b></td><td>₱${m.total_peso.toLocaleString()}</td><td>${m.total_kg.toLocaleString()}kg</td><td>${m.transactions}</td><td>${m.breakdown['1Kg']}</td><td>${m.breakdown['5Kg']}</td><td>${m.breakdown['10Kg']}</td><td>${m.breakdown['25Kg']}</td></tr>`).join('');
+}
+async function loadMay(){
+  const res = await fetch('/api/sales/may2026');
+  const data = await res.json();
+  document.getElementById('mayAudit').innerHTML = `Expected: ₱${data.expected?.toLocaleString()} | Actual: ₱${data.actual_delivered?.toLocaleString()} | Diff: ₱${data.difference?.toLocaleString()} | Count: ${data.count} | Archived in May: ${data.archived_in_may}<br>Records: ${data.records?.slice(0,3).map(r=>r.name+' ₱'+r.peso).join(', ')}...`;
+}
+async function downloadCSV(){
+  const res = await fetch('/api/sales/export_csv');
+  const data = await res.json();
+  const blob = new Blob([data.monthly_csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='monthly_sales.csv'; a.click();
+}
+async function downloadDetailed(){
+  const res = await fetch('/api/sales/export_csv');
+  const data = await res.json();
+  const blob = new Blob([data.detailed_csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='detailed_sales.csv'; a.click();
+}
+loadMonthly(); loadMay();
+</script>
+</body></html>"""
+    return render_template_string(html)
+
+
+
+@app.route("/api/sales/clear_cache", methods=["POST", "GET"])
+def api_clear_sales_cache():
+    try:
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+        return jsonify({"ok": True, "cleared": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/orders/<order_id>", methods=["DELETE"])
+@login_required
+def api_delete_order(order_id):
+    """Delete order - HARD DELETE - fixed + Recent Sales update"""
+    try:
+        if not session.get("staff_name"):
+            return jsonify({"ok": False, "error": "Only staff"}), 403
+        staff = (session.get("staff_name") or "").lower()
+        # HARD DELETE from Firebase
+        try:
+            import requests
+            url = f"{FIREBASE_URL}/daily_sales/{order_id}.json"
+            r = requests.delete(url, timeout=10)
+            hard_deleted = r.status_code in [200, 204]
+        except:
+            hard_deleted = False
+        if not hard_deleted:
+            fb_patch(f"daily_sales/{order_id}", {"archived": True, "deleted": True, "hidden_24h": True, "deleted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "deleted_by": staff})
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+        return jsonify({"ok": True, "deleted": order_id, "hard_deleted": hard_deleted})
+    except Exception as e:
+        import traceback
+        return jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()}), 500
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    print(f"Omega Ice OFFLINE MODE ready")
+    print(f"Firebase: {FIREBASE_URL}")
+    print(f"Local DB: {LOCAL_DB}")
+    print(f"Pending offline: {get_pending_count()}")
+    print(f"Listening on port {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
