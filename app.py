@@ -1804,15 +1804,8 @@ label{font-size:12px;color:#666;display:block;margin:12px 0 6px}input{width:100%
 <label>Registered Phone</label><input type="tel" id="phone" placeholder="09xx xxx xxxx">
 <label>Password</label><input type="password" id="password" placeholder="Enter password">
 <button class="btn" onclick="doLogin()">🔐 Login</button>
-<button class="btn btn-otp" onclick="showOTP()">📱 Forgot Password? Get OTP</button>
 <p class="status" id="status"></p>
-
-<div id="otpBox" style="display:none;margin-top:16px;border-top:1px solid #eee;padding-top:16px">
-<label>Enter OTP (sent via SMS to your phone)</label><input type="text" id="otp" placeholder="6-digit OTP" inputmode="numeric" maxlength="6">
-<label>New Password</label><input type="password" id="newPwd" placeholder="New password min 4 chars">
-<button class="btn" style="background:#22c55e" onclick="resetWithOTP()">Reset Password with OTP</button>
-<p style="font-size:10px;color:#888;text-align:center;margin-top:8px">OTP valid for 5 minutes. Contact ISESMO if not received.</p>
-</div>
+<p style="font-size:12px;color:#888;text-align:center;margin-top:14px;border-top:1px solid #eee;padding-top:14px">Forgot your password?<br>Contact ISESMO to have it reset for you.</p>
 </div>
 <script>
 async function doLogin(){
@@ -1825,33 +1818,6 @@ async function doLogin(){
   const data=await res.json();
   if(data.ok){st.textContent='OK! 2026-09-06 - Tap Refresh';window.location.href=`/customer/${data.reseller_id}/dashboard`;}
   else{st.textContent=data.error||'Wrong phone or password';st.className='status err';}
-}
-async function showOTP(){
-  const phone=document.getElementById('phone').value.trim();
-  if(!phone){document.getElementById('status').textContent='Enter phone first';return;}
-  document.getElementById('status').textContent='Sending OTP...';
-  const res=await fetch('/api/customer/request_otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone})});
-  const data=await res.json();
-  if(data.ok){
-    if(data.sms_sent===false){
-      // SMS not configured/failed - fallback shows the code so staff/testing can still proceed
-      document.getElementById('status').innerHTML='⚠️ SMS not sent (' + (data.sms_error||'unknown error') + ').<br>Fallback OTP: <b style="font-size:18px">'+data.otp+'</b><br>Valid 5 mins';
-    }else{
-      document.getElementById('status').innerHTML='✅ OTP sent via SMS to '+phone+'.<br>Check your messages. Valid 5 mins.';
-    }
-    document.getElementById('status').className='status ok';
-    document.getElementById('otpBox').style.display='block';
-  }else{document.getElementById('status').textContent=data.error||'Failed';document.getElementById('status').className='status err';}
-}
-async function resetWithOTP(){
-  const phone=document.getElementById('phone').value.trim();
-  const otp=document.getElementById('otp').value.trim();
-  const newPwd=document.getElementById('newPwd').value.trim();
-  if(!otp||!newPwd){document.getElementById('status').textContent='Enter OTP and new password';return;}
-  const res=await fetch('/api/customer/verify_otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone,otp:otp,new_password:newPwd})});
-  const data=await res.json();
-  if(data.ok){document.getElementById('status').textContent='✅ Password reset! Now login.';document.getElementById('status').className='status ok';document.getElementById('otpBox').style.display='none';}
-  else{document.getElementById('status').textContent=data.error||'Invalid OTP';document.getElementById('status').className='status err';}
 }
 </script>
 </body></html>
