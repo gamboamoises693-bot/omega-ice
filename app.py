@@ -2010,8 +2010,20 @@ label{font-size:12px;color:#666;display:block;margin:10px 0 4px}input,textarea{w
 <label>Date Needed</label><input type="date" id="needDate">
 <label>Size</label><div class="kg-row"><button data-kg="1Kg" class="active" onclick="setKg('1Kg')">1Kg</button><button data-kg="5Kg" onclick="setKg('5Kg')">5Kg</button><button data-kg="10Kg" onclick="setKg('10Kg')">10Kg</button><button data-kg="25Kg" onclick="setKg('25Kg')">25Kg</button></div>
 <label>Quantity</label><input type="number" id="qty" value="10" min="1" oninput="calc()">
+
+<div id="prefSummaryRow" style="display:none;background:#f0f6fc;border:1px solid #cde;border-radius:10px;padding:12px 14px;margin:10px 0;align-items:center;justify-content:space-between">
+  <div style="font-size:13px;color:#333">
+    <span style="color:#888;font-size:11px;display:block;margin-bottom:2px">Delivery &amp; Payment</span>
+    <span id="prefSummaryText" style="font-weight:600"></span>
+  </div>
+  <button type="button" onclick="expandPrefs()" style="background:none;border:none;color:#00609C;font-size:12px;font-weight:700;text-decoration:underline;padding:6px">Change</button>
+</div>
+
+<div id="prefFullRow">
 <label>Delivery</label><div class="toggle-row"><button id="modeDeliver" class="active" onclick="setMode('DELIVER')">Deliver</button><button id="modePickup" onclick="setMode('PICKUP')">Pickup</button></div>
 <label>Payment</label><div class="toggle-row"><button id="payCash" class="active" onclick="setPay('Cash')">Cash</button><button id="payCredit" onclick="setPay('Credit')">Credit</button></div>
+<button type="button" id="prefDoneBtn" onclick="collapsePrefs()" style="display:none;width:100%;padding:10px;margin-top:4px;background:#eef7ff;color:#00609C;border:1px solid #cde;border-radius:10px;font-size:12px;font-weight:600">Use these as my default ✓</button>
+</div>
 <label>Notes</label><textarea id="notes" rows="2" placeholder="Leave at back gate"></textarea>
 <div class="total-row"><span>Total</span><span class="amount" id="totalAmt">₱100</span></div>
 <button class="btn" onclick="placeOrder()">Place Order Live</button>
@@ -2021,15 +2033,38 @@ label{font-size:12px;color:#666;display:block;margin:10px 0 4px}input,textarea{w
 const resellerId="{{ reseller_id }}";
 let kg='1Kg';let mode='DELIVER';let pay='Cash';
 const prices={"1Kg":10,"5Kg":50,"10Kg":100,"25Kg":250};
+const prefKey=`omega_order_pref_${resellerId}`;
 function setKg(k){kg=k;document.querySelectorAll('.kg-row button').forEach(b=>b.classList.toggle('active',b.dataset.kg===k));calc();}
 function setMode(m){mode=m;document.getElementById('modeDeliver').classList.toggle('active',m==='DELIVER');document.getElementById('modePickup').classList.toggle('active',m==='PICKUP');}
 function setPay(p){pay=p;document.getElementById('payCash').classList.toggle('active',p==='Cash');document.getElementById('payCredit').classList.toggle('active',p==='Credit');}
 function calc(){const qty=parseInt(document.getElementById('qty').value)||0;document.getElementById('totalAmt').textContent='₱'+((prices[kg]||10)*qty).toLocaleString();}
+function prefLabel(){return `${mode==='DELIVER'?'🚚 Deliver':'🏪 Pickup'} · ${pay==='Cash'?'💵 Cash':'🧾 Credit'}`;}
+function expandPrefs(){document.getElementById('prefFullRow').style.display='block';document.getElementById('prefSummaryRow').style.display='none';document.getElementById('prefDoneBtn').style.display='block';}
+function collapsePrefs(){
+  try{localStorage.setItem(prefKey,JSON.stringify({mode,pay}));}catch(e){}
+  document.getElementById('prefSummaryText').textContent=prefLabel();
+  document.getElementById('prefFullRow').style.display='none';
+  document.getElementById('prefSummaryRow').style.display='flex';
+}
+(function loadSavedPrefs(){
+  try{
+    const saved=JSON.parse(localStorage.getItem(prefKey)||'null');
+    if(saved && saved.mode && saved.pay){
+      mode=saved.mode;pay=saved.pay;
+      setMode(mode);setPay(pay);
+      document.getElementById('prefSummaryText').textContent=prefLabel();
+      document.getElementById('prefSummaryRow').style.display='flex';
+      document.getElementById('prefFullRow').style.display='none';
+      document.getElementById('prefDoneBtn').style.display='block';
+    }
+  }catch(e){}
+})();
 document.getElementById('needDate').value=new Date().toISOString().slice(0,10);calc();
 async function placeOrder(){
   const qty=parseInt(document.getElementById('qty').value)||0;
   const needDate=document.getElementById('needDate').value;
   const notes=document.getElementById('notes').value;
+  try{localStorage.setItem(prefKey,JSON.stringify({mode,pay}));}catch(e){}
   const res=await fetch(`/api/customer/${resellerId}/place_order`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({quantity:qty,kg_size:kg,mode:mode,payment:pay,sales_date:needDate,notes:notes})});
   const data=await res.json();
   if(data.ok){window.location.href=`/customer/${resellerId}/dashboard`;}else{document.getElementById('status').textContent=data.error||'Failed';}
