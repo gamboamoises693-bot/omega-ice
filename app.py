@@ -52,6 +52,34 @@ def isesmo_only(v):
 def generate_otp():
     return ''.join(random.choices('0123456789', k=6))
 
+SEMAPHORE_API_KEY = os.environ.get("SEMAPHORE_API_KEY", "")
+SEMAPHORE_SENDER_NAME = os.environ.get("SEMAPHORE_SENDER_NAME", "")  # optional, must be pre-approved by Semaphore
+
+def send_sms(phone, message):
+    """Send an SMS via Semaphore. Returns (ok, info_or_error)."""
+    if not SEMAPHORE_API_KEY:
+        return False, "SEMAPHORE_API_KEY not configured"
+    # Semaphore expects PH numbers like 09xxxxxxxxx or 639xxxxxxxxx
+    num = phone.strip()
+    if num.startswith("+"):
+        num = num[1:]
+    payload = {"apikey": SEMAPHORE_API_KEY, "number": num, "message": message}
+    if SEMAPHORE_SENDER_NAME:
+        payload["sendername"] = SEMAPHORE_SENDER_NAME
+    try:
+        r = requests.post("https://api.semaphore.co/api/v4/messages", data=payload, timeout=15)
+        if r.status_code == 200:
+            resp = r.json()
+            # Semaphore returns a list of message objects on success
+            if isinstance(resp, list) and resp and resp[0].get("status") not in (None, "Failed"):
+                return True, resp[0]
+            if isinstance(resp, dict) and resp.get("message"):
+                return False, resp.get("message")
+            return True, resp
+        return False, f"Semaphore HTTP {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return False, str(e)
+
 def clean_phone(phone):
     return re.sub(r'[^0-9+]', '', phone or "")
 
@@ -1780,7 +1808,7 @@ label{font-size:12px;color:#666;display:block;margin:12px 0 6px}input{width:100%
 <p class="status" id="status"></p>
 
 <div id="otpBox" style="display:none;margin-top:16px;border-top:1px solid #eee;padding-top:16px">
-<label>Enter OTP (sent to staff / shown here for demo)</label><input type="text" id="otp" placeholder="6-digit OTP">
+<label>Enter OTP (sent via SMS to your phone)</label><input type="text" id="otp" placeholder="6-digit OTP" inputmode="numeric" maxlength="6">
 <label>New Password</label><input type="password" id="newPwd" placeholder="New password min 4 chars">
 <button class="btn" style="background:#22c55e" onclick="resetWithOTP()">Reset Password with OTP</button>
 <p style="font-size:10px;color:#888;text-align:center;margin-top:8px">OTP valid for 5 minutes. Contact ISESMO if not received.</p>
@@ -1801,10 +1829,16 @@ async function doLogin(){
 async function showOTP(){
   const phone=document.getElementById('phone').value.trim();
   if(!phone){document.getElementById('status').textContent='Enter phone first';return;}
+  document.getElementById('status').textContent='Sending OTP...';
   const res=await fetch('/api/customer/request_otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone})});
   const data=await res.json();
   if(data.ok){
-    document.getElementById('status').innerHTML='✅ OTP: <b style="font-size:18px">'+data.otp+'</b> (Demo: In production this is SMS)<br>Valid 5 mins';
+    if(data.sms_sent===false){
+      // SMS not configured/failed - fallback shows the code so staff/testing can still proceed
+      document.getElementById('status').innerHTML='⚠️ SMS not sent (' + (data.sms_error||'unknown error') + ').<br>Fallback OTP: <b style="font-size:18px">'+data.otp+'</b><br>Valid 5 mins';
+    }else{
+      document.getElementById('status').innerHTML='✅ OTP sent via SMS to '+phone+'.<br>Check your messages. Valid 5 mins.';
+    }
     document.getElementById('status').className='status ok';
     document.getElementById('otpBox').style.display='block';
   }else{document.getElementById('status').textContent=data.error||'Failed';document.getElementById('status').className='status err';}
@@ -2149,8 +2183,17 @@ def api_customer_request_otp():
         # Save OTP with 5 min expiry
         otp_data = {"phone": phone, "otp": otp, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "expires_at": (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"), "used": False}
         fb_post("customer_otps", otp_data)
-        # In production, send SMS here. For now return OTP for demo + staff can see in /customers
-        return jsonify({"ok": True, "otp": otp, "message": "OTP generated. Valid 5 mins. In production this would be SMS."})
+
+        sms_message = f"Omega Ice OTP: {otp}. Valid for 5 minutes. Do not share this code."
+        sent_ok, sms_info = send_sms(phone, sms_message)
+
+        if sent_ok:
+            return jsonify({"ok": True, "message": "OTP sent via SMS. Valid 5 mins."})
+        else:
+            # SMS not configured or failed - fall back to showing OTP so the flow still works,
+            # but flag it clearly so staff know SMS isn't actually going out.
+            return jsonify({"ok": True, "otp": otp, "sms_sent": False, "sms_error": sms_info,
+                             "message": "SMS could not be sent - showing OTP here as fallback. Check SEMAPHORE_API_KEY / SMS credits."})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
