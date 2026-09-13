@@ -220,10 +220,51 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 <p style="font-size:10px;color:#888;margin-top:6px" id="lastSaveTime"></p>
 </div>
 <div class="bottom-spacer"></div>
-<audio id="orderAlarm" preload="auto" loop>
+<div class="card" id="alarmSettingsCard" style="border:2px solid #ff4444;background:#fff5f5">
+<div style="display:flex;justify-content:space-between;align-items:center">
+<label style="font-weight:700;color:#c0392b;font-size:13px">🔊 Live Order Alarm Settings</label>
+<button id="stopAlarmBtn" onclick="stopAlarmForever()" style="display:none;padding:6px 12px;border-radius:20px;border:none;background:#ef4444;color:#fff;font-size:11px;font-weight:600">🔇 Stop Alarm</button>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+  <div>
+    <label style="font-size:10px;color:#666">Alarm Sound</label>
+    <select id="alarmSoundSelect" onchange="saveAlarmSettings()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;font-size:12px">
+      <option value="beep_short">Beep Short (default)</option>
+      <option value="alarm_clock">Alarm Clock - Loud</option>
+      <option value="radar">Radar - Emergency</option>
+      <option value="siren">Siren - Very Loud</option>
+      <option value="chime">Chime - Soft</option>
+      <option value="custom_loud">🔥 LOUD BEEP (Web Audio - Loudest)</option>
+    </select>
+  </div>
+  <div>
+    <label style="font-size:10px;color:#666">Volume</label>
+    <select id="alarmVolumeSelect" onchange="saveAlarmSettings()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;font-size:12px">
+      <option value="0.5">50% - Normal</option>
+      <option value="0.8">80% - Loud</option>
+      <option value="1.0" selected>100% - MAX</option>
+    </select>
+  </div>
+</div>
+<div style="display:flex;gap:6px;margin-top:8px">
+  <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="alarmLoopCheck" checked onchange="saveAlarmSettings()"> Loop until accepted</label>
+  <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="alarmVibrateCheck" checked onchange="saveAlarmSettings()"> Vibrate</label>
+  <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="alarmBgCheck" checked onchange="saveAlarmSettings()"> Background Notif</label>
+</div>
+<div style="margin-top:8px;display:flex;gap:6px">
+  <button onclick="testAlarm()" style="padding:6px 10px;border-radius:8px;border:1px solid #ccc;background:#fff;font-size:11px">🔊 Test Alarm</button>
+  <span style="font-size:9px;color:#888;margin-top:4px" id="alarmStatus">Ready</span>
+</div>
+<div style="font-size:9px;color:#666;margin-top:6px;background:#fff;padding:6px;border-radius:6px">
+💡 <b>Para mag-alarm kahit naka-exit:</b> I-Add to Home Screen mo yung site (Chrome menu > Add to Home Screen) tapos Allow Notification. Kahit naka-close, mag-no-notify pa rin pag may bagong order basta may internet ang tablet.
+</div>
+</div>
+
+<audio id="orderAlarm" preload="auto">
 <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg">
-<source src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" type="audio/ogg">
 </audio>
+<audio id="orderAlarm2" preload="auto"></audio>
+
 
 <div class="card" id="periodSalesCard" style="display:none">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -392,35 +433,188 @@ async function fetchLiveOrdersCount(){
   }catch(e){}
 }
 
+let alarmLoopInterval = null;
+let alarmAudioContext = null;
+
+function getAlarmSettings(){
+  return {
+    sound: document.getElementById('alarmSoundSelect')?.value || localStorage.getItem('omega_alarm_sound') || 'beep_short',
+    volume: parseFloat(document.getElementById('alarmVolumeSelect')?.value || localStorage.getItem('omega_alarm_volume') || '1.0'),
+    loop: document.getElementById('alarmLoopCheck')?.checked ?? (localStorage.getItem('omega_alarm_loop') !== 'false'),
+    vibrate: document.getElementById('alarmVibrateCheck')?.checked ?? (localStorage.getItem('omega_alarm_vibrate') !== 'false'),
+    bg: document.getElementById('alarmBgCheck')?.checked ?? (localStorage.getItem('omega_alarm_bg') !== 'false')
+  };
+}
+
+function saveAlarmSettings(){
+  const s = getAlarmSettings();
+  localStorage.setItem('omega_alarm_sound', s.sound);
+  localStorage.setItem('omega_alarm_volume', String(s.volume));
+  localStorage.setItem('omega_alarm_loop', String(s.loop));
+  localStorage.setItem('omega_alarm_vibrate', String(s.vibrate));
+  localStorage.setItem('omega_alarm_bg', String(s.bg));
+  document.getElementById('alarmStatus').textContent = 'Saved: ' + s.sound + ' @ ' + Math.round(s.volume*100) + '%';
+}
+
+function loadAlarmSettings(){
+  try{
+    const sound = localStorage.getItem('omega_alarm_sound');
+    const vol = localStorage.getItem('omega_alarm_volume');
+    if(sound) document.getElementById('alarmSoundSelect').value = sound;
+    if(vol) document.getElementById('alarmVolumeSelect').value = vol;
+    if(localStorage.getItem('omega_alarm_loop')!==null) document.getElementById('alarmLoopCheck').checked = localStorage.getItem('omega_alarm_loop')==='true';
+    if(localStorage.getItem('omega_alarm_vibrate')!==null) document.getElementById('alarmVibrateCheck').checked = localStorage.getItem('omega_alarm_vibrate')==='true';
+    if(localStorage.getItem('omega_alarm_bg')!==null) document.getElementById('alarmBgCheck').checked = localStorage.getItem('omega_alarm_bg')==='true';
+  }catch{}
+}
+
+function playAlarmSound(settings){
+  const audio = document.getElementById('orderAlarm');
+  const audio2 = document.getElementById('orderAlarm2');
+  const sounds = {
+    'beep_short': 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg',
+    'alarm_clock': 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg',
+    'radar': 'https://actions.google.com/sounds/v1/alarms/spaceship_alarm.ogg',
+    'siren': 'https://actions.google.com/sounds/v1/emergency/beeper_emergency_call.ogg',
+    'chime': 'https://actions.google.com/sounds/v1/cartoon/pop.ogg'
+  };
+  
+  if(settings.sound === 'custom_loud'){
+    // Web Audio API - LOUD beep
+    try{
+      if(!alarmAudioContext) alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = alarmAudioContext;
+      for(let i=0;i<3;i++){
+        setTimeout(()=>{
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type='square';
+          osc.frequency.value=1000;
+          gain.gain.value=settings.volume;
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime+0.5);
+        }, i*600);
+      }
+    }catch(e){ console.log('Web Audio fail',e); }
+  } else {
+    const src = sounds[settings.sound] || sounds['beep_short'];
+    if(audio.src !== src) audio.src = src;
+    audio.volume = settings.volume;
+    audio.currentTime=0;
+    audio.play().catch(()=>{});
+  }
+}
+
 function triggerOrderAlarm(count){
   if(!alarmEnabled) return;
+  const settings = getAlarmSettings();
   try{
-    const audio = document.getElementById('orderAlarm');
-    if(audio){
-      audio.currentTime = 0;
-      audio.play().catch(()=>{});
-      // Stop after 10 seconds
-      setTimeout(()=>{ audio.pause(); audio.currentTime=0; }, 10000);
+    // Show stop button
+    document.getElementById('stopAlarmBtn').style.display='inline-block';
+    document.getElementById('alarmStatus').textContent = '🔴 ALARMING - '+count+' orders!';
+    
+    // Play immediately
+    playAlarmSound(settings);
+    
+    // Vibrate
+    if(settings.vibrate && navigator.vibrate){ navigator.vibrate([1000,200,1000,200,2000]); }
+    
+    // Notification (even in background if PWA)
+    if(settings.bg && Notification && Notification.permission==='granted'){
+      const notif = new Notification('🧊 NEW OMEGA ORDER! 🔴', {
+        body: `${count} new order(s) waiting! Tap to open. Alarm will loop until accepted.`,
+        icon: 'https://cdn-icons-png.flaticon.com/512/2936/2936886.png',
+        requireInteraction: true,
+        vibrate: [1000,200,1000],
+        tag: 'omega-order'
+      });
+      notif.onclick = ()=>{ window.focus(); stopAlarmForever(); window.location.href='/orders'; };
     }
-    // Vibrate phone/tablet
-    if(navigator.vibrate){ navigator.vibrate([500,200,500,200,1000]); }
-    // Show notification if permitted
-    if(Notification && Notification.permission==='granted'){
-      new Notification('🧊 New Omega Order!', {body: `${count} new order(s) waiting!`, icon: '/favicon.ico'});
-    }
+    
     // Flash title
     const originalTitle = document.title;
     let flash = 0;
-    const flashInterval = setInterval(()=>{
-      document.title = flash%2===0 ? '🔴 NEW ORDER! - '+originalTitle : '🔵 '+count+' Orders - '+originalTitle;
+    if(window._flashInterval) clearInterval(window._flashInterval);
+    window._flashInterval = setInterval(()=>{
+      document.title = flash%2===0 ? '🔴 NEW ORDER ('+count+') - ACCEPT NOW!' : '🔵 '+count+' ORDERS WAITING!';
       flash++;
-      if(flash>10){ clearInterval(flashInterval); document.title=originalTitle; }
-    }, 800);
-    // Visual flash on live orders button
+      if(flash>200){ clearInterval(window._flashInterval); document.title=originalTitle; }
+    }, 700);
+    
+    // Visual flash
     const liveBtn = document.querySelector('a[href="/orders"]');
-    if(liveBtn){ liveBtn.classList.add('alarm-active'); setTimeout(()=>liveBtn.classList.remove('alarm-active'),10000); }
+    if(liveBtn){ liveBtn.classList.add('alarm-active'); }
+    
+    // LOOP until accepted if enabled
+    if(settings.loop){
+      if(alarmLoopInterval) clearInterval(alarmLoopInterval);
+      alarmLoopInterval = setInterval(()=>{
+        // Check if still has active orders
+        fetch('/api/staff/customer_orders').then(r=>r.json()).then(data=>{
+          const active = (data.orders||[]).filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
+          if(active===0){
+            stopAlarmForever();
+          } else {
+            playAlarmSound(settings);
+            if(settings.vibrate && navigator.vibrate) navigator.vibrate([1000,200,1000]);
+          }
+        });
+      }, 5000); // beep every 5 sec until accepted
+    } else {
+      setTimeout(()=>stopAlarmForever(), 15000);
+    }
+    
+    // Store last alarm time for background check
+    localStorage.setItem('omega_last_alarm', JSON.stringify({count, time: Date.now()}));
+    
   }catch(e){ console.log('Alarm error',e); }
 }
+
+function stopAlarmForever(){
+  const audio = document.getElementById('orderAlarm');
+  const audio2 = document.getElementById('orderAlarm2');
+  if(audio){ audio.pause(); audio.currentTime=0; }
+  if(audio2){ audio2.pause(); audio2.currentTime=0; }
+  if(alarmLoopInterval){ clearInterval(alarmLoopInterval); alarmLoopInterval=null; }
+  if(window._flashInterval){ clearInterval(window._flashInterval); window._flashInterval=null; }
+  document.title='Omega Purified Ice - Cashier';
+  document.getElementById('stopAlarmBtn').style.display='none';
+  document.getElementById('alarmStatus').textContent='Alarm stopped';
+  const liveBtn = document.querySelector('a[href="/orders"]');
+  if(liveBtn) liveBtn.classList.remove('alarm-active');
+  lastActiveOrders = 0; // reset to avoid immediate re-trigger
+  setTimeout(()=>{ fetchLiveOrdersCount(); }, 2000);
+}
+
+function testAlarm(){
+  triggerOrderAlarm(1);
+  setTimeout(()=>{ 
+    if(confirm('Lakas ba? Gusto mo i-stop na?')) stopAlarmForever();
+  }, 2000);
+}
+
+function stopAlarm(){
+  stopAlarmForever();
+}
+
+// Load settings on start
+document.addEventListener('DOMContentLoaded', ()=>{
+  loadAlarmSettings();
+  if(Notification && Notification.permission==='default'){
+    Notification.requestPermission().then(p=>{
+      document.getElementById('alarmStatus').textContent = 'Notification: '+p;
+    });
+  }
+  // Register service worker for background notification (PWA)
+  if('serviceWorker' in navigator){
+    try{
+      navigator.serviceWorker.register('/sw.js').catch(()=>{});
+    }catch{}
+  }
+});
+
 
 // Request notification permission on load
 document.addEventListener('DOMContentLoaded', ()=>{
@@ -1099,6 +1293,13 @@ def api_recent_sales():
     except:
         now = datetime.now()
     today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
+    # For custom_date daily view, parse it as the target day
+    custom_dt = None
+    if custom_date:
+        try:
+            custom_dt = datetime.strptime(custom_date[:10], "%Y-%m-%d")
+        except:
+            custom_dt = None
     
     data = fb_get("daily_sales")
     sales = []
@@ -1198,7 +1399,7 @@ def api_sales_by_period():
     data = fb_get("daily_sales") or {}
     sales = []
     start_date = None
-    end_date = now
+    end_date = (custom_dt.replace(hour=23, minute=59, second=59) if custom_dt and period=="daily" else now)
     
     # Handle sub-period picker: WW01-WW52, month 01-12, Q1-Q4, year
     target_week = None
@@ -1233,7 +1434,10 @@ def api_sales_by_period():
                 pass
     
     if period == "daily":
-        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if custom_dt:
+            start_date = custom_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
     elif period == "weekly":
         if target_week:
             # For WW, we need to filter by week number, not last 7 days
@@ -1275,7 +1479,7 @@ def api_sales_by_period():
     elif period in ["yearly","year"]:
         if target_year:
             start_date = now.replace(year=target_year, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-            end_date = now.replace(year=target_year, month=12, day=31, hour=23, minute=59, second=59)
+            end_date = (custom_dt.replace(hour=23, minute=59, second=59) if custom_dt and period=="daily" else now).replace(year=target_year, month=12, day=31, hour=23, minute=59, second=59)
         else:
             start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     elif period == "all":
@@ -3157,6 +3361,7 @@ def api_set_reseller_password(reseller_id):
 def api_sales_dashboard():
     period = request.args.get("period", "daily").lower()
     custom_date = request.args.get("date", "").strip()
+    # custom_date can be YYYY-MM-DD for daily filtering
     # Fast path for daily - use Manila time
     try:
         import pytz
@@ -3179,7 +3384,10 @@ def api_sales_dashboard():
     start_date = None
     label = "Today"
     if period == "daily":
-        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if custom_dt:
+            start_date = custom_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
         label = "Today"
     elif period == "weekly":
         start_date = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -3260,6 +3468,13 @@ def api_today_sales():
     except:
         now = datetime.now()
     today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
+    # For custom_date daily view, parse it as the target day
+    custom_dt = None
+    if custom_date:
+        try:
+            custom_dt = datetime.strptime(custom_date[:10], "%Y-%m-%d")
+        except:
+            custom_dt = None
     def kg_value(s):
         try: return float(str(s).lower().replace("kg","").strip())
         except: return 0
@@ -3889,6 +4104,13 @@ def api_restore_sept06():
         except:
             now = datetime.now()
         today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
+    # For custom_date daily view, parse it as the target day
+    custom_dt = None
+    if custom_date:
+        try:
+            custom_dt = datetime.strptime(custom_date[:10], "%Y-%m-%d")
+        except:
+            custom_dt = None
         yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
         
         action = request.args.get("action", "move_to_yesterday")  # or "archive" or "spread"
@@ -3971,6 +4193,13 @@ def api_dashboard_debug():
         except:
             now = datetime.now()
         today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
+    # For custom_date daily view, parse it as the target day
+    custom_dt = None
+    if custom_date:
+        try:
+            custom_dt = datetime.strptime(custom_date[:10], "%Y-%m-%d")
+        except:
+            custom_dt = None
         today_records = []
         total_kg = 0
         total_peso = 0
