@@ -124,11 +124,11 @@ CASHIER_HTML = """<!DOCTYPE html>
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:4px 2px}
 .topbar h1{font-size:15px;color:#00609C;margin:0;font-weight:700}
 .topbar .staff{font-size:12px;color:#555}.topbar .logout{font-size:12px;color:#c0392b;background:#fff;border:1px solid #e0c0c0;padding:6px 10px;border-radius:8px}
-.one-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-.cloud-badge{display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:600}
+.one-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:12px;align-items:stretch}
+.cloud-badge{display:flex;align-items:center;justify-content:center;gap:4px;padding:10px 8px;border-radius:10px;font-size:11px;font-weight:600;min-height:38px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.08)}
 .cloud-badge.online{background:#22c55e;color:#fff}.cloud-badge.offline{background:#ef4444;color:#fff}.cloud-badge.pending{background:#f59e0b;color:#fff;cursor:pointer}
-.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}
-.nav-pill.active{background:#00609C;color:#fff;border-color:#00609C}
+.nav-pill{padding:10px 8px;border-radius:10px;font-size:11px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C;display:flex;align-items:center;justify-content:center;min-height:38px;text-align:center;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.05);transition:all .2s}
+.nav-pill.active{background:#00609C;color:#fff;border-color:#00609C;box-shadow:0 2px 6px rgba(0,96,156,.3)}
 .today-card{padding:12px;background:linear-gradient(135deg,#00609C,#0096D6);color:#fff;border-radius:12px;margin-bottom:12px}
 .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
 label{display:block;font-size:12px;color:#666;margin:10px 0 4px}input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:14px}
@@ -144,6 +144,14 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 .del-btn{background:none;border:none;color:#c0392b;font-size:12px}.edit-btn{background:none;border:none;color:#0096D6;font-size:12px;margin-right:6px;font-weight:bold}
 .save-btn{position:sticky;bottom:20px;z-index:20;box-shadow:0 4px 12px rgba(0,96,156,.3)} /* FIX: sticky save */
 .bottom-spacer{height:90px} /* FIX: spacer */
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;cursor:pointer;transition:all .2s;font-size:14px}
+.icon-btn.edit{color:#00609C;border-color:#cde;background:#eef7ff}
+.icon-btn.edit:hover{background:#00609C;color:#fff}
+.icon-btn.del{color:#ef4444;border-color:#fecaca;background:#fef2f2}
+.icon-btn.del:hover{background:#ef4444;color:#fff}
+.icon-btn:active{transform:scale(.95)}
+.date-input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:13px;margin-top:4px}
+
 .period-sales-table td{font-size:11px}
 @keyframes pulse{0%{transform:scale(1)}50%{transform:scale(1.05)}100%{transform:scale(1)}}
 .alarm-active{animation:pulse 0.5s infinite;background:#ff0000 !important}
@@ -163,13 +171,17 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
     <div><div style="font-size:11px;opacity:.8;" id="todayLabel">TODAY'S SALES</div><div style="font-size:10px;opacity:.7;" id="todayDate">2026-09-06 - Tap Refresh</div></div>
     <button onclick="loadToday()" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;">Refresh</button>
   </div>
-  <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-    <button class="period-btn active" data-period="daily" onclick="setCashierPeriod('daily')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.3);color:#fff;font-size:10px">Daily</button>
-    <button class="period-btn" data-period="weekly" onclick="setCashierPeriod('weekly')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">Weekly</button>
-    <button class="period-btn" data-period="monthly" onclick="setCashierPeriod('monthly')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">Monthly</button>
-    <button class="period-btn" data-period="quarterly" onclick="setCashierPeriod('quarterly')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">Quarterly</button>
-    <button class="period-btn" data-period="yearly" onclick="setCashierPeriod('yearly')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">Year</button>
-    <button class="period-btn" data-period="all" onclick="setCashierPeriod('all')" style="padding:5px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:10px">All Time</button>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:12px">
+    <button class="period-btn active" data-period="daily" onclick="setCashierPeriod('daily')" style="padding:10px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.3);color:#fff;font-size:11px;font-weight:600;min-height:36px">Daily</button>
+    <button class="period-btn" data-period="weekly" onclick="setCashierPeriod('weekly')" style="padding:10px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:11px;font-weight:600;min-height:36px">Weekly</button>
+    <button class="period-btn" data-period="monthly" onclick="setCashierPeriod('monthly')" style="padding:10px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:11px;font-weight:600;min-height:36px">Monthly</button>
+    <button class="period-btn" data-period="quarterly" onclick="setCashierPeriod('quarterly')" style="padding:10px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:11px;font-weight:600;min-height:36px">Quarterly</button>
+    <button class="period-btn" data-period="yearly" onclick="setCashierPeriod('yearly')" style="padding:10px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:11px;font-weight:600;min-height:36px">Year</button>
+    <button class="period-btn" data-period="all" onclick="setCashierPeriod('all')" style="padding:10px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:11px;font-weight:600;min-height:36px">All Time</button>
+  </div>
+  <div id="subPeriodPicker" style="display:none;margin-top:10px;background:rgba(255,255,255,.15);border-radius:10px;padding:10px">
+    <label style="font-size:10px;color:#fff;opacity:.9;margin:0 0 6px;display:block" id="subPeriodLabel">Select Week</label>
+    <select id="subPeriodSelect" onchange="onSubPeriodChange()" style="width:100%;padding:8px;border-radius:8px;border:none;font-size:12px"></select>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;text-align:center;">
     <div><div style="font-size:18px;font-weight:700;" id="todayKg">0kg</div><div style="font-size:9px;opacity:.8;">TOTAL KG</div></div>
@@ -184,6 +196,9 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 <label>Payment</label><div class="toggle-row"><button id="payCash" class="active" onclick="setPayment('Cash')">Cash</button><button id="payCredit" onclick="setPayment('Credit')">Credit</button></div>
 <label>Size</label><div class="kg-row">{% for kg in kg_options %}<button data-kg="{{ kg }}" onclick="setKg('{{ kg }}')" class="{{ 'active' if loop.first else '' }}">{{ kg }}</button>{% endfor %}</div>
 <label>Quantity</label><input type="number" id="qtyInput" value="1" min="1" oninput="updateTotal()">
+<label>Date <span style="font-weight:400;color:#888;font-size:11px">(tap to change)</span></label>
+<input type="date" id="saleDateInput" class="date-input" value="">
+<input type="time" id="saleTimeInput" class="date-input" value="" style="margin-top:6px">
 <label>Total <span style="font-weight:400;color:#888;font-size:11px">(auto-calculated, tap to override)</span></label>
 <input type="number" id="totalAmount" step="0.01" min="0" value="0" oninput="totalManuallyEdited=true" style="width:100%;padding:12px;border-radius:8px;border:1px solid #ccd;font-size:18px;font-weight:700;color:#00609C">
 <button type="button" onclick="totalManuallyEdited=false;updateTotal()" style="background:none;border:none;color:#00609C;font-size:11px;padding:4px 0;text-decoration:underline">Reset to auto price</button>
@@ -222,7 +237,10 @@ async function updateTotal(){if(totalManuallyEdited)return;try{const res=await f
 const resellerInput=document.getElementById('resellerInput');const resultsBox=document.getElementById('resellerResults');
 resellerInput.addEventListener('input',async()=>{selectedReseller=null;const q=resellerInput.value.trim();if(!q){resultsBox.style.display='none';return}const res=await fetch(`/api/resellers?q=${encodeURIComponent(q)}`);const rows=await res.json();if(!rows.length){resultsBox.style.display='none';return}resultsBox.innerHTML=rows.map(r=>`<div class="res-item" data-id="${r.id}" data-name="${r.store_name.replace(/"/g,'&quot;')}">${r.store_name}</div>`).join('');resultsBox.style.display='block';resultsBox.querySelectorAll('.res-item').forEach(el=>{el.addEventListener('click',()=>{pickReseller(el.getAttribute('data-id'),el.getAttribute('data-name'))})})});
 function pickReseller(id,name){selectedReseller={id,name};resellerInput.value=name;resultsBox.style.display='none'}
-async function saveSale(){const qty=parseInt(document.getElementById('qtyInput').value)||0;const name=resellerInput.value.trim();const totalVal=parseFloat(document.getElementById('totalAmount').value);const statusEl=document.getElementById('statusMsg');if(!name||qty<=0){statusEl.textContent='Enter reseller';statusEl.className='status err';return}const payload={reseller_id:selectedReseller?selectedReseller.id:null,reseller_name:name,quantity:qty,kg_size:kg,mode:mode,payment:payment};if(totalManuallyEdited && !isNaN(totalVal)){payload.total_sales=totalVal;}const url=editingSaleId?`/api/sale/${editingSaleId}`:`/api/sale`;const method=editingSaleId?'PUT':'POST';statusEl.textContent='Saving...';const res=await fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(data.ok){
+async function saveSale(){const qty=parseInt(document.getElementById('qtyInput').value)||0;const name=resellerInput.value.trim();const totalVal=parseFloat(document.getElementById('totalAmount').value);const statusEl=document.getElementById('statusMsg');if(!name||qty<=0){statusEl.textContent='Enter reseller';statusEl.className='status err';return}const saleDate = document.getElementById('saleDateInput').value || new Date().toISOString().split('T')[0];
+  const saleTime = document.getElementById('saleTimeInput').value || new Date().toTimeString().slice(0,5);
+  const payload={reseller_id:selectedReseller?selectedReseller.id:null,reseller_name:name,quantity:qty,kg_size:kg,mode:mode,payment:payment,sales_date:saleDate,sale_time:saleTime,created_at:saleDate+'T'+saleTime+':00'};
+  if(totalManuallyEdited && !isNaN(totalVal)){payload.total_sales=totalVal;}const url=editingSaleId?`/api/sale/${editingSaleId}`:`/api/sale`;const method=editingSaleId?'PUT':'POST';statusEl.textContent='Saving...';const res=await fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(data.ok){
     const now = new Date();
     const timeStr = now.toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
     statusEl.textContent=`✅ Saved ₱${data.total} at ${timeStr}`;
@@ -234,8 +252,52 @@ async function saveSale(){const qty=parseInt(document.getElementById('qtyInput')
     if(cashierPeriod==='daily'){loadRecent();} else {loadPeriodSales(cashierPeriod);}
     loadToday();
   }else{statusEl.textContent=data.error||'Error';statusEl.className='status err'}}
-async function editSale(id){const res=await fetch(`/api/sale/${id}`);const data=await res.json();if(!data.ok)return alert(data.error||'Cannot edit');const s=data.sale;editingSaleId=id;resellerInput.value=s.reseller_name;selectedReseller=s.reseller_id?{id:s.reseller_id,name:s.reseller_name}:null;document.getElementById('qtyInput').value=s.quantity;totalManuallyEdited=true;setMode(s.mode);setPayment(s.payment);setKg(s.kg_size);document.getElementById('totalAmount').value=Number(s.total_sales||0).toFixed(2);document.getElementById('saveBtn').textContent='Update';document.getElementById('cancelEditBtn').style.display='block';window.scrollTo({top:0,behavior:'smooth'})}
-function cancelEdit(){editingSaleId=null;resellerInput.value='';selectedReseller=null;document.getElementById('qtyInput').value=1;totalManuallyEdited=false;document.getElementById('saveBtn').textContent='Save sale';document.getElementById('cancelEditBtn').style.display='none';updateTotal()}
+async function editSale(id){
+  const res=await fetch(`/api/sale/${id}`);
+  const data=await res.json();
+  if(!data.ok) return alert(data.error||'Cannot edit');
+  const s=data.sale;
+  editingSaleId=id;
+  resellerInput.value=s.reseller_name;
+  selectedReseller=s.reseller_id?{id:s.reseller_id,name:s.reseller_name}:null;
+  document.getElementById('qtyInput').value=s.quantity;
+  totalManuallyEdited=true;
+  setMode(s.mode);
+  setPayment(s.payment);
+  setKg(s.kg_size);
+  document.getElementById('totalAmount').value=Number(s.total_sales||0).toFixed(2);
+  // FIX: date editable
+  try{
+    const d = s.sales_date || new Date().toISOString().split('T')[0];
+    document.getElementById('saleDateInput').value = d.slice(0,10);
+    if(s.created_at && s.created_at.includes('T')){
+      const t = s.created_at.split('T')[1].slice(0,5);
+      document.getElementById('saleTimeInput').value = t;
+    } else {
+      document.getElementById('saleTimeInput').value = new Date().toTimeString().slice(0,5);
+    }
+  }catch(e){}
+  document.getElementById('saveBtn').textContent='Update Sale';
+  document.getElementById('cancelEditBtn').style.display='block';
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function initDateInputs(){
+  const now = new Date();
+  document.getElementById('saleDateInput').value = now.toISOString().split('T')[0];
+  document.getElementById('saleTimeInput').value = now.toTimeString().slice(0,5);
+}
+
+function cancelEdit(){
+  editingSaleId=null;
+  resellerInput.value='';
+  selectedReseller=null;
+  document.getElementById('qtyInput').value=1;
+  totalManuallyEdited=false;
+  document.getElementById('saveBtn').textContent='Save sale';
+  document.getElementById('cancelEditBtn').style.display='none';
+  initDateInputs();
+  updateTotal();
+}
 let lastActiveOrders = 0;
 let alarmEnabled = true;
 function setCashierPeriod(p){
@@ -277,7 +339,7 @@ async function loadPeriodSales(period){
       const timeStr = r.time_only || (r.created_at ? new Date(r.created_at).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'}) : '');
       const dateTime = `${r.sales_date||''} ${timeStr}`.trim();
       const badge = `<span style="font-size:9px;background:#dcfce7;color:#166534;padding:3px 6px;border-radius:10px">${r.order_status||'Delivered'}</span>`;
-      return `<tr><td style="font-size:10px">${dateTime}<br><small style="color:#888">${r.timestamp||''}</small></td><td>${r.reseller_name}</td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td>${badge}</td></tr>`;
+      return `<tr><td style="font-size:10px">${dateTime}<br><small style="color:#888">${r.timestamp||''}</small></td><td>${r.reseller_name}</td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td>${badge}<br><div style="display:flex;gap:4px;margin-top:4px"><button class="icon-btn edit" style="width:26px;height:26px;font-size:12px" onclick="editSale('${r.id}');" title="Edit">✏️</button><button class="icon-btn del" style="width:26px;height:26px;font-size:12px" onclick="deleteSale('${r.id}')" title="Delete">🗑️</button></div></td></tr>`;
     }).join('');
     summary.textContent = `Total: ${rows.length} trans | ${data.total_kg||0}kg | ₱${(data.total_peso||0).toLocaleString()} | Showing ${period}`;
   }catch(e){
@@ -416,7 +478,7 @@ async function loadRecent(){
         try{ timeDisplay = formatTimestamp(r.created_at); }catch{ timeDisplay = r.created_at; }
       } else if(r.delivered_at){ timeDisplay = r.delivered_at.split('T')[1]?.substring(0,5) || r.delivered_at; }
       const deliveredInfo = `<div style="font-size:9px;color:#666">${timeDisplay}</div>`;
-      return `<tr><td style="font-size:11px">${r.sales_date||''}${deliveredInfo}</td><td>${r.reseller_name}<br><small style="font-size:9px;color:#888">${timeDisplay}</small></td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td>${badge}</td><td><button class="edit-btn" onclick="editSale('${r.id}')">Edit</button><button class="del-btn" onclick="deleteSale('${r.id}')">Del</button></td></tr>`;
+      return `<tr><td style="font-size:11px">${r.sales_date||''}${deliveredInfo}</td><td>${r.reseller_name}<br><small style="font-size:9px;color:#888">${timeDisplay}</small></td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td>${badge}</td><td><div style="display:flex;gap:4px"><button class="icon-btn edit" onclick="editSale('${r.id}')" title="Edit">✏️</button><button class="icon-btn del" onclick="deleteSale('${r.id}')" title="Delete">🗑️</button></div></td></tr>`;
     }).join('');
   }catch(e){document.getElementById('recentBody').innerHTML=`<tr><td colspan=7 style="color:#c0392b">Error: ${e.message} <a href="/login">Login</a></td></tr>`;}
 }
@@ -426,7 +488,101 @@ async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sa
 
 
 async function logout(){await fetch('/api/logout',{method:'POST'});window.location.href='/login'}
-updateTotal();loadRecent();loadToday();setInterval(loadRecent,30000);setInterval(loadToday,30000);
+
+// FIX: Week/Month/Quarter/Year picker logic
+let selectedSubPeriod = null;
+
+function populateSubPeriodPicker(period){
+  const picker = document.getElementById('subPeriodPicker');
+  const select = document.getElementById('subPeriodSelect');
+  const label = document.getElementById('subPeriodLabel');
+  select.innerHTML='';
+  
+  if(period==='weekly'){
+    label.textContent='Select Week (WW01-WW52)';
+    const now = new Date();
+    const currentWeek = getWeekNumber(now);
+    for(let i=1;i<=52;i++){
+      const opt=document.createElement('option');
+      const ww = 'WW'+String(i).padStart(2,'0');
+      opt.value=ww;
+      opt.textContent= ww + (i===currentWeek ? ' (Current)' : '');
+      if(i===currentWeek) opt.selected=true;
+      select.appendChild(opt);
+    }
+    selectedSubPeriod = 'WW'+String(currentWeek).padStart(2,'0');
+    picker.style.display='block';
+  } else if(period==='monthly'){
+    label.textContent='Select Month';
+    const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const nowM = new Date().getMonth();
+    for(let i=0;i<12;i++){
+      const opt=document.createElement('option');
+      opt.value=String(i+1).padStart(2,'0');
+      opt.textContent= months[i] + ' - ' + String(i+1).padStart(2,'0');
+      if(i===nowM) opt.selected=true;
+      select.appendChild(opt);
+    }
+    selectedSubPeriod = String(nowM+1).padStart(2,'0');
+    picker.style.display='block';
+  } else if(period==='quarterly'){
+    label.textContent='Select Quarter';
+    const quarters=['Q1 (Jan-Mar)','Q2 (Apr-Jun)','Q3 (Jul-Sep)','Q4 (Oct-Dec)'];
+    const nowQ = Math.floor(new Date().getMonth()/3);
+    for(let i=0;i<4;i++){
+      const opt=document.createElement('option');
+      opt.value='Q'+(i+1);
+      opt.textContent=quarters[i];
+      if(i===nowQ) opt.selected=true;
+      select.appendChild(opt);
+    }
+    selectedSubPeriod = 'Q'+(nowQ+1);
+    picker.style.display='block';
+  } else if(period==='yearly'){
+    label.textContent='Select Year';
+    const nowY = new Date().getFullYear();
+    for(let y=nowY; y>=2024; y--){
+      const opt=document.createElement('option');
+      opt.value=String(y);
+      opt.textContent=String(y) + (y===nowY?' (Current)':'');
+      if(y===nowY) opt.selected=true;
+      select.appendChild(opt);
+    }
+    selectedSubPeriod = String(nowY);
+    picker.style.display='block';
+  } else {
+    picker.style.display='none';
+    selectedSubPeriod=null;
+  }
+}
+
+function getWeekNumber(d){
+  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+  return Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
+}
+
+function onSubPeriodChange(){
+  const sel=document.getElementById('subPeriodSelect');
+  selectedSubPeriod = sel.value;
+  if(cashierPeriod!=='daily'){
+    loadPeriodSales(cashierPeriod, selectedSubPeriod);
+  }
+}
+
+// Hook into setCashierPeriod to show picker
+const origSetCashier = setCashierPeriod;
+setCashierPeriod = function(p){
+  origSetCashier(p);
+  populateSubPeriodPicker(p);
+  if(p!=='daily' && selectedSubPeriod){
+    setTimeout(()=>loadPeriodSales(p, selectedSubPeriod), 100);
+  }
+}
+
+updateTotal();loadRecent();loadToday();initDateInputs();setInterval(loadRecent,30000);setInterval(loadToday,30000);
 window.addEventListener('storage', (e)=>{
   if(e.key==='omega_last_delivered'){
     console.log('Detected delivery from orders page, refreshing sales...');
@@ -760,8 +916,25 @@ def api_create_sale():
     unit_price = get_price(kg_size, mode)
     total = round(unit_price * qty, 2)
 
+    # Allow custom date from frontend
+    frontend_date = (data.get("sales_date") or "").strip()
+    frontend_created = (data.get("created_at") or "").strip()
+    if frontend_date:
+        try:
+            datetime.strptime(frontend_date[:10], "%Y-%m-%d")
+            sales_date_val = frontend_date[:10]
+        except:
+            sales_date_val = datetime.now().strftime("%Y-%m-%d")
+    else:
+        sales_date_val = datetime.now().strftime("%Y-%m-%d")
+    
+    if frontend_created:
+        created_val = frontend_created
+    else:
+        created_val = datetime.now().isoformat()
+    
     sale = {
-        "sales_date": datetime.now().strftime("%Y-%m-%d"),
+        "sales_date": sales_date_val,
         "reseller_id": reseller_id,
         "reseller_name": reseller_name,
         "quantity": qty,
@@ -774,7 +947,8 @@ def api_create_sale():
         "delivery_mode": mode,
         "notes": notes,
         "staff_name": session.get("staff_name"),
-        "created_at": datetime.now().isoformat()
+        "created_at": created_val,
+        "time_only": (data.get("sale_time") or datetime.now().strftime("%H:%M"))
     }
 
     # Try online
@@ -914,8 +1088,9 @@ def api_recent_sales():
 @app.route("/api/sales/by_period")
 @login_required
 def api_sales_by_period():
-    """FIX #2: Return sales for selected period (monthly/weekly/etc) for cashier screen"""
+    """FIX #2: Return sales for selected period (monthly/weekly/etc) for cashier screen + WW/month pickers"""
     period = request.args.get("period", "monthly").lower()
+    sub = request.args.get("sub", "").strip() or request.args.get("week", "").strip() or request.args.get("month", "").strip() or "" 
     try:
         import pytz
         manila = pytz.timezone('Asia/Manila')
@@ -928,22 +1103,84 @@ def api_sales_by_period():
     start_date = None
     end_date = now
     
+    # Handle sub-period picker: WW01-WW52, month 01-12, Q1-Q4, year
+    target_week = None
+    target_month = None
+    target_quarter = None
+    target_year = None
+    
+    if sub:
+        s = sub.upper()
+        if s.startswith("WW"):
+            try:
+                target_week = int(s.replace("WW",""))
+            except:
+                pass
+        elif s.startswith("Q"):
+            try:
+                target_quarter = int(s.replace("Q",""))
+            except:
+                pass
+        elif s.isdigit() and len(s)==4:  # year
+            try:
+                target_year = int(s)
+            except:
+                pass
+        elif s.isdigit() and 1 <= int(s) <= 12:  # month
+            try:
+                target_month = int(s)
+                if period=="monthly":
+                    # monthly picker overrides month
+                    pass
+            except:
+                pass
+    
     if period == "daily":
         start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
     elif period == "weekly":
-        start_date = (now - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+        if target_week:
+            # For WW, we need to filter by week number, not last 7 days
+            start_date = None  # handled via week check
+        else:
+            start_date = (now - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
     elif period == "monthly":
-        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if target_month:
+            # Specific month of current year (or target_year if provided)
+            y = target_year or now.year
+            start_date = now.replace(year=y, month=target_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+            # end of that month
+            if target_month == 12:
+                end_date = start_date.replace(year=y+1, month=1, day=1) - timedelta(days=1)
+            else:
+                end_date = start_date.replace(month=target_month+1, day=1) - timedelta(days=1)
+            end_date = end_date.replace(hour=23, minute=59, second=59)
+        else:
+            start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     elif period == "quarterly":
-        # last 3 months
-        month = now.month - 2
-        year = now.year
-        if month <=0:
-            month += 12
-            year -=1
-        start_date = now.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+        if target_quarter:
+            # Q1=1-3, Q2=4-6, Q3=7-9, Q4=10-12
+            q_start_month = (target_quarter-1)*3+1
+            y = target_year or now.year
+            start_date = now.replace(year=y, month=q_start_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+            q_end_month = q_start_month+2
+            if q_end_month==12:
+                end_date = start_date.replace(month=12, day=31, hour=23, minute=59, second=59)
+            else:
+                end_date = start_date.replace(month=q_end_month+1, day=1) - timedelta(days=1)
+                end_date = end_date.replace(hour=23, minute=59, second=59)
+        else:
+            month = now.month - 2
+            year = now.year
+            if month <=0:
+                month += 12
+                year -=1
+            start_date = now.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
     elif period in ["yearly","year"]:
-        start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        if target_year:
+            start_date = now.replace(year=target_year, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_date = now.replace(year=target_year, month=12, day=31, hour=23, minute=59, second=59)
+        else:
+            start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     elif period == "all":
         start_date = None
     
@@ -972,11 +1209,29 @@ def api_sales_by_period():
                 check_date = parse_date(ca)
             except:
                 check_date = None
-        if start_date and check_date and check_date < start_date.replace(tzinfo=None):
-            continue
-        # Also ensure not future
-        if check_date and check_date > end_date.replace(tzinfo=None) + timedelta(days=1):
-            continue
+        
+        # WW filter
+        if target_week and period=="weekly":
+            if check_date:
+                # calc week number
+                try:
+                    # iso week
+                    iso_year, iso_week, iso_day = check_date.isocalendar()
+                    if iso_week != target_week:
+                        continue
+                    # Also check year if target_year set else current year
+                    if target_year and iso_year != target_year:
+                        continue
+                except:
+                    continue
+            else:
+                continue
+        else:
+            if start_date and check_date and check_date < start_date.replace(tzinfo=None):
+                continue
+            # Also ensure not future for non-WW
+            if check_date and check_date > end_date.replace(tzinfo=None) + timedelta(days=1):
+                continue
             
         # Build timestamp info
         created = val.get("created_at") or val.get("delivered_at") or ""
@@ -1145,6 +1400,29 @@ def api_update_sale(sale_id):
         unit_price = get_price(kg_size, mode)
         total = round(unit_price * qty, 2)
 
+    # Allow date edit
+    sales_date = (data.get("sales_date") or "").strip()
+    sale_time = (data.get("sale_time") or "").strip()
+    created_at = (data.get("created_at") or "").strip()
+    if sales_date:
+        # validate date
+        try:
+            datetime.strptime(sales_date[:10], "%Y-%m-%d")
+        except:
+            sales_date = None
+    if not sales_date:
+        sales_date = datetime.now().strftime("%Y-%m-%d")
+    
+    if created_at:
+        try:
+            # keep as iso
+            if "T" not in created_at:
+                created_at = sales_date + "T" + (sale_time or "12:00") + ":00"
+        except:
+            created_at = datetime.now().isoformat()
+    else:
+        created_at = datetime.now().isoformat()
+    
     upd = {
         "reseller_id": reseller_id,
         "reseller_name": reseller_name,
@@ -1156,6 +1434,8 @@ def api_update_sale(sale_id):
         "payment": payment,
         "payment_mode": payment,
         "delivery_mode": mode,
+        "sales_date": sales_date,
+        "created_at": created_at,
         "edited_at": datetime.now().isoformat(),
         "edited_by": session.get("staff_name")
     }
