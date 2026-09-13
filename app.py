@@ -219,60 +219,51 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 <p class="status" id="statusMsg"></p>
 <p style="font-size:10px;color:#888;margin-top:6px" id="lastSaveTime"></p>
 </div>
-
-<div style="display:flex;gap:8px;margin:12px 0">
-  <button id="openAlarmSettingsBtn" onclick="openAlarmModal()" style="flex:1;padding:14px;border-radius:12px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:13px">⚙️🔊 Alarm Settings (1 button only)</button>
-  <button id="stopAlarmBtn" onclick="stopAlarmForever()" style="display:none;padding:14px;border-radius:12px;border:none;background:#ef4444;color:#fff;font-weight:700;font-size:13px">🔇 Stop Alarm</button>
+<div class="bottom-spacer"></div>
+<div class="card" id="alarmSettingsCard" style="border:2px solid #ff4444;background:#fff5f5">
+<div style="display:flex;justify-content:space-between;align-items:center">
+<label style="font-weight:700;color:#c0392b;font-size:13px">🔊 Live Order Alarm Settings</label>
+<button id="stopAlarmBtn" onclick="stopAlarmForever()" style="display:none;padding:6px 12px;border-radius:20px;border:none;background:#ef4444;color:#fff;font-size:11px;font-weight:600">🔇 Stop Alarm</button>
 </div>
-
-<div id="alarmModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:99999;align-items:center;justify-content:center;padding:16px">
-  <div style="background:#fff;border-radius:16px;padding:20px;max-width:400px;width:100%;max-height:90vh;overflow-y:auto">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h3 style="margin:0;font-size:16px;color:#c0392b">🔊 Alarm Settings</h3>
-      <button onclick="closeAlarmModal()" style="width:32px;height:32px;border-radius:50%;border:none;background:#f0f0f0;font-size:18px">✕</button>
-    </div>
-    <div style="background:#fff5f5;border:1px solid #fecaca;border-radius:10px;padding:10px;margin-bottom:12px">
-      <div style="font-size:10px;color:#666">Staff: <b id="modalStaffName">Loading...</b></div>
-      <div style="font-size:10px;color:#00609C;margin-top:2px">🎤 omega/yhel = English voice "New ice order!" | isesmo = alarm only</div>
-    </div>
-    <label style="font-size:11px;font-weight:600">Alarm Sound</label>
-    <select id="alarmSoundSelect" onchange="saveAlarmSettings(); previewAlarmSound();" style="width:100%;padding:12px;border-radius:10px;border:2px solid #ddd;font-size:13px;margin:6px 0 12px">
-      <option value="beep_short">🔔 Beep Short</option>
-      <option value="alarm_clock">⏰ Alarm Clock</option>
-      <option value="radar">🚨 Radar</option>
-      <option value="siren">🚒 Siren</option>
-      <option value="custom_loud" selected>🔥 LOUD BEEP</option>
-      <option value="custom_very_loud">💥 SUPER LOUD 5x</option>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+  <div>
+    <label style="font-size:10px;color:#666">Alarm Sound</label>
+    <select id="alarmSoundSelect" onchange="saveAlarmSettings()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;font-size:12px">
+      <option value="beep_short">Beep Short (default)</option>
+      <option value="alarm_clock">Alarm Clock - Loud</option>
+      <option value="radar">Radar - Emergency</option>
+      <option value="siren">Siren - Very Loud</option>
+      <option value="chime">Chime - Soft</option>
+      <option value="custom_loud">🔥 LOUD BEEP (Web Audio - Loudest)</option>
     </select>
-    <label style="font-size:11px;font-weight:600">Volume</label>
-    <select id="alarmVolumeSelect" onchange="saveAlarmSettings()" style="width:100%;padding:12px;border-radius:10px;border:2px solid #ddd;font-size:13px;margin:6px 0 12px">
-      <option value="1.0" selected>100% MAX</option>
-      <option value="0.8">80% Loud</option>
-      <option value="0.5">50% Normal</option>
+  </div>
+  <div>
+    <label style="font-size:10px;color:#666">Volume</label>
+    <select id="alarmVolumeSelect" onchange="saveAlarmSettings()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;font-size:12px">
+      <option value="0.5">50% - Normal</option>
+      <option value="0.8">80% - Loud</option>
+      <option value="1.0" selected>100% - MAX</option>
     </select>
-    <div style="background:#f8f8f8;border-radius:10px;padding:10px;margin-bottom:12px">
-      <label style="font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="alarmLoopCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <b>Loop until accepted</b></label>
-      <label style="font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="alarmVibrateCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <b>Vibrate</b></label>
-      <label style="font-size:11px;display:flex;align-items:center;gap:8px"><input type="checkbox" id="alarmBgCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <b>Background Notif</b></label>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
-      <button onclick="testAlarm()" style="padding:12px;border-radius:10px;border:2px solid #00609C;background:#eef7ff;color:#00609C;font-weight:700;font-size:12px">🔊 Test Alarm</button>
-      <button onclick="testVoice()" style="padding:12px;border-radius:10px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:12px">🗣️ Test Voice</button>
-    </div>
-    <div style="background:#eef7ff;border-radius:8px;padding:8px;font-size:10px;margin-bottom:12px">
-      <div>Status: <span id="alarmStatus" style="font-weight:700">Ready - Tap Test to unlock sound</span></div>
-      <div style="margin-top:4px;color:#666">💡 Tap Test first to unlock audio (browser rule). Then auto-alarm will work.</div>
-    </div>
-    <button onclick="closeAlarmModal()" style="width:100%;padding:14px;border-radius:10px;border:none;background:#00609C;color:#fff;font-weight:700;font-size:14px">✅ Save & Close</button>
   </div>
 </div>
+<div style="display:flex;gap:6px;margin-top:8px">
+  <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="alarmLoopCheck" checked onchange="saveAlarmSettings()"> Loop until accepted</label>
+  <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="alarmVibrateCheck" checked onchange="saveAlarmSettings()"> Vibrate</label>
+  <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="alarmBgCheck" checked onchange="saveAlarmSettings()"> Background Notif</label>
+</div>
+<div style="margin-top:8px;display:flex;gap:6px">
+  <button onclick="testAlarm()" style="padding:6px 10px;border-radius:8px;border:1px solid #ccc;background:#fff;font-size:11px">🔊 Test Alarm</button>
+  <span style="font-size:9px;color:#888;margin-top:4px" id="alarmStatus">Ready</span>
+</div>
+<div style="font-size:9px;color:#666;margin-top:6px;background:#fff;padding:6px;border-radius:6px">
+💡 <b>Para mag-alarm kahit naka-exit:</b> I-Add to Home Screen mo yung site (Chrome menu > Add to Home Screen) tapos Allow Notification. Kahit naka-close, mag-no-notify pa rin pag may bagong order basta may internet ang tablet.
+</div>
+</div>
 
-<audio id="orderAlarm" preload="auto" style="display:none"></audio>
-<audio id="orderAlarm2" preload="auto" style="display:none"></audio>
-<div id="alarmBanner" style="display:none;position:fixed;top:0;left:0;right:0;background:#ef4444;color:#fff;padding:14px;text-align:center;font-weight:700;z-index:99998;animation:blink 1s infinite" onclick="stopAlarmForever()">🔴 NEW ICE ORDER! TAP TO STOP - <span id="bannerCount">1</span> waiting!</div>
-<style>@keyframes blink{0%,100%{opacity:1}50%{opacity:.7}} .alarm-active{animation:blink 0.5s infinite !important; background:#ef4444 !important; color:#fff !important}</style>
-
-<div class="bottom-spacer"></div>
+<audio id="orderAlarm" preload="auto">
+<source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg">
+</audio>
+<audio id="orderAlarm2" preload="auto"></audio>
 
 
 <div class="card" id="periodSalesCard" style="display:none">
@@ -360,439 +351,8 @@ function cancelEdit(){
   initDateInputs();
   updateTotal();
 }
-
-
-
-
-
-let alarmLoopInterval = null;
-let alarmAudioContext = null;
-let audioUnlocked = false;
-let lastAlarmTime = 0;
 let lastActiveOrders = 0;
 let alarmEnabled = true;
-
-function openAlarmModal(){
-  const modal = document.getElementById('alarmModal');
-  if(modal) modal.style.display='flex';
-  const staff = document.querySelector('.staff')?.textContent || 'Unknown';
-  const nameEl = document.getElementById('modalStaffName');
-  if(nameEl) nameEl.textContent = staff;
-  loadAlarmSettings();
-  // Try unlock immediately when opening modal
-  unlockAudio();
-}
-
-function closeAlarmModal(){
-  const modal = document.getElementById('alarmModal');
-  if(modal) modal.style.display='none';
-  saveAlarmSettings();
-}
-
-// TABLET-OPTIMIZED unlock - must be called on user tap
-function unlockAudio(){
-  console.log('Attempting audio unlock...');
-  try{
-    // Create or resume AudioContext
-    if(!alarmAudioContext){
-      alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if(alarmAudioContext.state === 'suspended'){
-      alarmAudioContext.resume().then(()=>{
-        console.log('AudioContext resumed');
-        audioUnlocked = true;
-        const st = document.getElementById('alarmStatus');
-        if(st) st.textContent = '✅ Sound unlocked! Ready for orders.';
-      });
-    } else {
-      audioUnlocked = true;
-    }
-    
-    // For tablets: play a very short silent beep to unlock
-    if(alarmAudioContext){
-      const osc = alarmAudioContext.createOscillator();
-      const gain = alarmAudioContext.createGain();
-      gain.gain.value = 0.001; // almost silent
-      osc.connect(gain);
-      gain.connect(alarmAudioContext.destination);
-      osc.start();
-      osc.stop(alarmAudioContext.currentTime + 0.1);
-    }
-    
-    // Unlock speech
-    if('speechSynthesis' in window){
-      window.speechSynthesis.cancel();
-      // Preload voices
-      const voices = window.speechSynthesis.getVoices();
-      console.log('Voices loaded:', voices.length);
-    }
-    
-  }catch(e){ console.log('Unlock error', e); }
-}
-
-function speakIceOrder(count, orders=[]){
-  console.log('speakIceOrder called', count);
-  if(!('speechSynthesis' in window)){
-    console.log('speechSynthesis not supported');
-    alert('Voice not supported on this tablet');
-    return;
-  }
-  try{
-    window.speechSynthesis.cancel();
-    let msg = count===1 ? 'New ice order! One new order!' : `New ice order! ${count} new orders!`;
-    if(orders && orders.length>0){
-      const n = orders[0].reseller_name || orders[0].customer_name || '';
-      if(n) msg += ` From ${n}.`;
-    }
-    msg += ' Please check live orders!';
-    
-    // Tablet fix: ensure voices loaded
-    let voices = window.speechSynthesis.getVoices();
-    if(voices.length===0){
-      // Wait and retry
-      setTimeout(()=>{
-        voices = window.speechSynthesis.getVoices();
-        doSpeak(msg, voices);
-      }, 500);
-    } else {
-      doSpeak(msg, voices);
-    }
-  }catch(e){ console.log('Voice error', e); alert('Voice error: '+e.message); }
-}
-
-function doSpeak(msg, voices){
-  try{
-    const utter = new SpeechSynthesisUtterance(msg);
-    utter.lang = 'en-US';
-    utter.rate = 1.0;
-    utter.pitch = 1.0;
-    utter.volume = 1.0;
-    // Find English voice
-    const enVoice = voices.find(v=>v.lang.toLowerCase().includes('en-us')) || voices.find(v=>v.lang.toLowerCase().includes('en')) || voices[0];
-    if(enVoice){
-      utter.voice = enVoice;
-      console.log('Using voice:', enVoice.name, enVoice.lang);
-    }
-    utter.onstart = ()=>{ console.log('Voice started'); };
-    utter.onerror = (e)=>{ console.log('Voice error', e); alert('Voice failed: '+e.error); };
-    utter.onend = ()=>{ console.log('Voice ended'); };
-    window.speechSynthesis.speak(utter);
-  }catch(e){ console.log('doSpeak error', e); }
-}
-
-if('speechSynthesis' in window){
-  window.speechSynthesis.onvoiceschanged = ()=>{
-    const v = window.speechSynthesis.getVoices();
-    console.log('Voices changed, now', v.length);
-  };
-}
-
-function testVoice(){
-  console.log('testVoice tapped');
-  unlockAudio();
-  // Small delay to ensure unlock
-  setTimeout(()=>{
-    const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
-    const isIsesmo = staffName.includes('isesmo');
-    if(isIsesmo){
-      alert('ISESMO: alarm only. But testing voice anyway for tablet.');
-    }
-    // Force voice
-    speakIceOrder(1, [{reseller_name:'Test Customer'}]);
-    const st = document.getElementById('alarmStatus');
-    if(st) st.textContent = '🔊 Testing English voice... Listen!';
-    
-    // Also vibrate to confirm button works
-    if(navigator.vibrate) navigator.vibrate([200,100,200]);
-  }, 300);
-}
-
-function getAlarmSettings(){
-  return {
-    sound: document.getElementById('alarmSoundSelect')?.value || localStorage.getItem('omega_alarm_sound') || 'custom_loud',
-    volume: parseFloat(document.getElementById('alarmVolumeSelect')?.value || localStorage.getItem('omega_alarm_volume') || '1.0'),
-    loop: document.getElementById('alarmLoopCheck')?.checked ?? (localStorage.getItem('omega_alarm_loop') !== 'false'),
-    vibrate: document.getElementById('alarmVibrateCheck')?.checked ?? (localStorage.getItem('omega_alarm_vibrate') !== 'false'),
-    bg: document.getElementById('alarmBgCheck')?.checked ?? (localStorage.getItem('omega_alarm_bg') !== 'false')
-  };
-}
-
-function saveAlarmSettings(){
-  const s = getAlarmSettings();
-  localStorage.setItem('omega_alarm_sound', s.sound);
-  localStorage.setItem('omega_alarm_volume', String(s.volume));
-  localStorage.setItem('omega_alarm_loop', String(s.loop));
-  localStorage.setItem('omega_alarm_vibrate', String(s.vibrate));
-  localStorage.setItem('omega_alarm_bg', String(s.bg));
-  const st = document.getElementById('alarmStatus');
-  if(st) st.textContent = 'Saved: ' + s.sound + ' @ ' + Math.round(s.volume*100) + '%';
-}
-
-function loadAlarmSettings(){
-  try{
-    const sound = localStorage.getItem('omega_alarm_sound');
-    const vol = localStorage.getItem('omega_alarm_volume');
-    if(sound && document.getElementById('alarmSoundSelect')) document.getElementById('alarmSoundSelect').value = sound;
-    if(vol && document.getElementById('alarmVolumeSelect')) document.getElementById('alarmVolumeSelect').value = vol;
-    if(localStorage.getItem('omega_alarm_loop')!==null) document.getElementById('alarmLoopCheck').checked = localStorage.getItem('omega_alarm_loop')==='true';
-    if(localStorage.getItem('omega_alarm_vibrate')!==null) document.getElementById('alarmVibrateCheck').checked = localStorage.getItem('omega_alarm_vibrate')==='true';
-    if(localStorage.getItem('omega_alarm_bg')!==null) document.getElementById('alarmBgCheck').checked = localStorage.getItem('omega_alarm_bg')==='true';
-  }catch{}
-}
-
-function previewAlarmSound(){
-  const sel = document.getElementById('alarmSoundSelect')?.value || 'custom_loud';
-  const vol = parseFloat(document.getElementById('alarmVolumeSelect')?.value || '1.0');
-  playAlarmSound({sound: sel, volume: vol});
-}
-
-// TABLET FIX: Always use Web Audio, no HTML audio
-function playAlarmSound(settings){
-  console.log('playAlarmSound', settings.sound, 'vol', settings.volume);
-  lastAlarmTime = Date.now();
-  
-  try{
-    // Ensure AudioContext exists and is running - THIS IS CRITICAL FOR TABLET
-    if(!alarmAudioContext){
-      alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-      console.log('Created AudioContext, state:', alarmAudioContext.state);
-    }
-    if(alarmAudioContext.state === 'suspended'){
-      console.log('Resuming suspended AudioContext...');
-      alarmAudioContext.resume().then(()=>{
-        console.log('Resumed, now playing');
-        doPlayBeep(settings);
-      });
-    } else {
-      doPlayBeep(settings);
-    }
-  }catch(e){ 
-    console.log('playAlarmSound error', e); 
-    alert('Sound error: '+e.message+'. Try tapping Test again.');
-  }
-}
-
-function doPlayBeep(settings){
-  try{
-    const ctx = alarmAudioContext;
-    const vol = settings.volume || 1.0;
-    
-    // Different patterns for tablet
-    let repeats = 3;
-    let freq1 = 1000;
-    let freq2 = 1500;
-    
-    if(settings.sound === 'custom_very_loud'){
-      repeats = 6;
-      freq1 = 1200;
-      freq2 = 1800;
-    } else if(settings.sound === 'siren'){
-      repeats = 8;
-      freq1 = 800;
-      freq2 = 1600;
-    } else if(settings.sound === 'alarm_clock'){
-      repeats = 4;
-      freq1 = 900;
-      freq2 = 900;
-    } else if(settings.sound === 'radar'){
-      repeats = 3;
-      freq1 = 600;
-      freq2 = 1200;
-    }
-    
-    console.log('Playing', repeats, 'beeps');
-    
-    for(let i=0;i<repeats;i++){
-      setTimeout(()=>{
-        try{
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'square'; // Loudest
-          osc.frequency.value = i%2===0 ? freq1 : freq2;
-          gain.gain.setValueAtTime(vol, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime+0.7);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start();
-          osc.stop(ctx.currentTime+0.7);
-          console.log('Beep', i, 'played');
-        }catch(e){ console.log('Beep error', e); }
-      }, i*800);
-    }
-    
-    // Vibrate for tablet
-    if(settings.vibrate && navigator.vibrate){
-      navigator.vibrate([500,200,500,200,1000]);
-    }
-    
-    const st = document.getElementById('alarmStatus');
-    if(st) st.textContent = '🔊 Playing '+settings.sound+' - '+new Date().toLocaleTimeString();
-    
-  }catch(e){ console.log('doPlayBeep error', e); }
-}
-
-function triggerOrderAlarm(count, orders=[]){
-  if(!alarmEnabled) return;
-  const settings = getAlarmSettings();
-  const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
-  const isVoiceAccount = staffName.includes('omega') || staffName.includes('yhel');
-  console.log('TRIGGER ALARM', count, 'voice?', isVoiceAccount);
-  
-  try{
-    const stopBtn = document.getElementById('stopAlarmBtn');
-    if(stopBtn) stopBtn.style.display='inline-block';
-    const banner = document.getElementById('alarmBanner');
-    const bannerCount = document.getElementById('bannerCount');
-    if(banner){ banner.style.display='block'; if(bannerCount) bannerCount.textContent = count; }
-    const statusEl = document.getElementById('alarmStatus');
-    if(statusEl) statusEl.textContent = '🔴 NEW ORDER '+count+' - '+new Date().toLocaleTimeString();
-    
-    // Voice first for omega/yhel
-    if(isVoiceAccount){
-      setTimeout(()=>{ speakIceOrder(count, orders); }, 500);
-    }
-    
-    // Then beep
-    setTimeout(()=>{ playAlarmSound(settings); }, 100);
-    
-    // Title flash
-    let flash=0;
-    if(window._flashInterval) clearInterval(window._flashInterval);
-    window._flashInterval = setInterval(()=>{
-      document.title = flash%2===0 ? '🔴 NEW ORDER ('+count+')!' : '🔵 '+count+' WAITING!';
-      flash++;
-      if(flash>200){ clearInterval(window._flashInterval); document.title='Omega Ice - Cashier'; }
-    }, 700);
-    
-    const liveBtn = document.querySelector('a[href="/orders"]');
-    if(liveBtn) liveBtn.classList.add('alarm-active');
-    
-    // Loop every 5s until every "New Order" has been accepted (status changed
-    // away from "New Order") in the Live Orders UI. Does NOT wait for Delivered.
-    if(alarmLoopInterval) clearInterval(alarmLoopInterval);
-    if(settings.loop){
-      alarmLoopInterval = setInterval(()=>{
-        fetch('/api/staff/customer_orders').then(r=>r.json()).then(data=>{
-          const stillNew = (data.orders||[]).filter(o=>o.order_status==='New Order');
-          if(stillNew.length===0){ stopAlarmForever(); }
-          else {
-            const sLoop = (document.querySelector('.staff')?.textContent || '').toLowerCase();
-            if(sLoop.includes('omega') || sLoop.includes('yhel')) speakIceOrder(stillNew.length, stillNew);
-            playAlarmSound(getAlarmSettings());
-          }
-        });
-      }, 5000);
-    }
-  }catch(e){ console.log(e); }
-}
-
-function stopAlarmForever(){
-  console.log('Stop alarm');
-  if(alarmLoopInterval){ clearInterval(alarmLoopInterval); alarmLoopInterval=null; }
-  if(window._flashInterval){ clearInterval(window._flashInterval); window._flashInterval=null; }
-  document.title='Omega Ice - Cashier';
-  const btn=document.getElementById('stopAlarmBtn');
-  if(btn) btn.style.display='none';
-  const banner=document.getElementById('alarmBanner');
-  if(banner) banner.style.display='none';
-  const st=document.getElementById('alarmStatus');
-  if(st) st.textContent='Stopped - '+new Date().toLocaleTimeString();
-  const liveBtn = document.querySelector('a[href="/orders"]');
-  if(liveBtn) liveBtn.classList.remove('alarm-active');
-  if('speechSynthesis' in window) window.speechSynthesis.cancel();
-  lastActiveOrders=0;
-  setTimeout(()=>{ fetchLiveOrdersCount(); }, 2000);
-}
-
-function testAlarm(){
-  console.log('testAlarm tapped - TABLET MODE');
-  unlockAudio();
-  // For tablet, need immediate audible beep after user tap
-  setTimeout(()=>{
-    const s = getAlarmSettings();
-    console.log('Test with', s);
-    playAlarmSound(s);
-    // Also show visual feedback that button works
-    const btn = document.getElementById('openAlarmSettingsBtn');
-    if(btn){
-      const orig = btn.textContent;
-      btn.textContent = '🔊 Playing...';
-      setTimeout(()=>{ btn.textContent = orig; }, 1000);
-    }
-    if(navigator.vibrate) navigator.vibrate([300,100,300]);
-  }, 200);
-}
-
-function stopAlarm(){ stopAlarmForever(); }
-
-async function fetchLiveOrdersCount(){
-  try{
-    const res = await fetch('/api/staff/customer_orders');
-    const data = await res.json();
-    const orders = data.orders||[];
-    const active = orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
-    // FIX: alarm must key off unaccepted "New Order" items specifically, not just
-    // "not delivered yet". Pending/Preparing/Out for Delivery are already accepted
-    // in the Live Orders UI and should NOT keep the alarm ringing.
-    const newOrders = orders.filter(o=>o.order_status==='New Order');
-    const newOrderCount = newOrders.length;
-    const badge = document.getElementById('liveOrdersCount');
-    if(badge){
-      if(active>0){
-        badge.textContent = active;
-        badge.style.display='inline';
-      } else {
-        badge.style.display='none';
-      }
-    }
-    console.log('Live orders:', active, 'unaccepted new:', newOrderCount, 'loop:', !!alarmLoopInterval);
-    if(newOrderCount>0){
-      // Ring when a fresh unaccepted order shows up, or when the loop isn't
-      // running yet (e.g. page/tab just loaded with unaccepted orders waiting).
-      if(newOrderCount > lastActiveOrders || !alarmLoopInterval){
-        triggerOrderAlarm(newOrderCount, newOrders);
-      }
-    } else if(alarmLoopInterval){
-      // Nothing left unaccepted -> staff already tapped Accept in Live Orders UI
-      stopAlarmForever();
-    }
-    lastActiveOrders = newOrderCount;
-  }catch(e){ console.log('fetch error', e); }
-}
-
-// TABLET: Unlock on ANY tap
-document.addEventListener('click', ()=>{ unlockAudio(); }, {once:false});
-document.addEventListener('touchstart', ()=>{ 
-  console.log('touchstart - unlocking');
-  unlockAudio(); 
-}, {once:false});
-document.addEventListener('touchend', ()=>{ unlockAudio(); }, {once:false});
-
-document.addEventListener('DOMContentLoaded', ()=>{
-  loadAlarmSettings();
-  console.log('DOM loaded, trying unlock');
-  setTimeout(()=>{ 
-    unlockAudio(); 
-    // Preload voices
-    if('speechSynthesis' in window) window.speechSynthesis.getVoices();
-  }, 500);
-  
-  if(Notification && Notification.permission==='default'){ 
-    Notification.requestPermission(); 
-  }
-  
-  // TABLET: Big hint to tap Test first
-  setTimeout(()=>{
-    const st = document.getElementById('alarmStatus');
-    if(st && !audioUnlocked){
-      st.textContent = '⚠️ TAP Test Alarm first to enable sound on tablet!';
-      st.style.color = '#ef4444';
-      st.style.fontWeight = 'bold';
-    }
-  }, 2000);
-});
-
-
 function setCashierPeriod(p){
   cashierPeriod=p;
   document.querySelectorAll('.today-card .period-btn').forEach(b=>{
@@ -850,15 +410,228 @@ function formatTimestamp(iso){
   }catch{ return iso||''; }
 }
 
+async function fetchLiveOrdersCount(){
+  try{
+    const res = await fetch('/api/staff/customer_orders');
+    const data = await res.json();
+    const orders = data.orders||[];
+    const active = orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
+    const badge = document.getElementById('liveOrdersCount');
+    if(badge){
+      if(active>0){
+        badge.textContent = active;
+        badge.style.display = 'inline';
+        // FIX #4: ALARM pag may bagong order
+        if(active > lastActiveOrders && lastActiveOrders>=0){
+          triggerOrderAlarm(active);
+        }
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+    lastActiveOrders = active;
+  }catch(e){}
+}
+
+let alarmLoopInterval = null;
+let alarmAudioContext = null;
+
+function getAlarmSettings(){
+  return {
+    sound: document.getElementById('alarmSoundSelect')?.value || localStorage.getItem('omega_alarm_sound') || 'beep_short',
+    volume: parseFloat(document.getElementById('alarmVolumeSelect')?.value || localStorage.getItem('omega_alarm_volume') || '1.0'),
+    loop: document.getElementById('alarmLoopCheck')?.checked ?? (localStorage.getItem('omega_alarm_loop') !== 'false'),
+    vibrate: document.getElementById('alarmVibrateCheck')?.checked ?? (localStorage.getItem('omega_alarm_vibrate') !== 'false'),
+    bg: document.getElementById('alarmBgCheck')?.checked ?? (localStorage.getItem('omega_alarm_bg') !== 'false')
+  };
+}
+
+function saveAlarmSettings(){
+  const s = getAlarmSettings();
+  localStorage.setItem('omega_alarm_sound', s.sound);
+  localStorage.setItem('omega_alarm_volume', String(s.volume));
+  localStorage.setItem('omega_alarm_loop', String(s.loop));
+  localStorage.setItem('omega_alarm_vibrate', String(s.vibrate));
+  localStorage.setItem('omega_alarm_bg', String(s.bg));
+  document.getElementById('alarmStatus').textContent = 'Saved: ' + s.sound + ' @ ' + Math.round(s.volume*100) + '%';
+}
+
+function loadAlarmSettings(){
+  try{
+    const sound = localStorage.getItem('omega_alarm_sound');
+    const vol = localStorage.getItem('omega_alarm_volume');
+    if(sound) document.getElementById('alarmSoundSelect').value = sound;
+    if(vol) document.getElementById('alarmVolumeSelect').value = vol;
+    if(localStorage.getItem('omega_alarm_loop')!==null) document.getElementById('alarmLoopCheck').checked = localStorage.getItem('omega_alarm_loop')==='true';
+    if(localStorage.getItem('omega_alarm_vibrate')!==null) document.getElementById('alarmVibrateCheck').checked = localStorage.getItem('omega_alarm_vibrate')==='true';
+    if(localStorage.getItem('omega_alarm_bg')!==null) document.getElementById('alarmBgCheck').checked = localStorage.getItem('omega_alarm_bg')==='true';
+  }catch{}
+}
+
+function playAlarmSound(settings){
+  const audio = document.getElementById('orderAlarm');
+  const audio2 = document.getElementById('orderAlarm2');
+  const sounds = {
+    'beep_short': 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg',
+    'alarm_clock': 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg',
+    'radar': 'https://actions.google.com/sounds/v1/alarms/spaceship_alarm.ogg',
+    'siren': 'https://actions.google.com/sounds/v1/emergency/beeper_emergency_call.ogg',
+    'chime': 'https://actions.google.com/sounds/v1/cartoon/pop.ogg'
+  };
+  
+  if(settings.sound === 'custom_loud'){
+    // Web Audio API - LOUD beep
+    try{
+      if(!alarmAudioContext) alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = alarmAudioContext;
+      for(let i=0;i<3;i++){
+        setTimeout(()=>{
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type='square';
+          osc.frequency.value=1000;
+          gain.gain.value=settings.volume;
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime+0.5);
+        }, i*600);
+      }
+    }catch(e){ console.log('Web Audio fail',e); }
+  } else {
+    const src = sounds[settings.sound] || sounds['beep_short'];
+    if(audio.src !== src) audio.src = src;
+    audio.volume = settings.volume;
+    audio.currentTime=0;
+    audio.play().catch(()=>{});
+  }
+}
+
+function triggerOrderAlarm(count){
+  if(!alarmEnabled) return;
+  const settings = getAlarmSettings();
+  try{
+    // Show stop button
+    document.getElementById('stopAlarmBtn').style.display='inline-block';
+    document.getElementById('alarmStatus').textContent = '🔴 ALARMING - '+count+' orders!';
+    
+    // Play immediately
+    playAlarmSound(settings);
+    
+    // Vibrate
+    if(settings.vibrate && navigator.vibrate){ navigator.vibrate([1000,200,1000,200,2000]); }
+    
+    // Notification (even in background if PWA)
+    if(settings.bg && Notification && Notification.permission==='granted'){
+      const notif = new Notification('🧊 NEW OMEGA ORDER! 🔴', {
+        body: `${count} new order(s) waiting! Tap to open. Alarm will loop until accepted.`,
+        icon: 'https://cdn-icons-png.flaticon.com/512/2936/2936886.png',
+        requireInteraction: true,
+        vibrate: [1000,200,1000],
+        tag: 'omega-order'
+      });
+      notif.onclick = ()=>{ window.focus(); stopAlarmForever(); window.location.href='/orders'; };
+    }
+    
+    // Flash title
+    const originalTitle = document.title;
+    let flash = 0;
+    if(window._flashInterval) clearInterval(window._flashInterval);
+    window._flashInterval = setInterval(()=>{
+      document.title = flash%2===0 ? '🔴 NEW ORDER ('+count+') - ACCEPT NOW!' : '🔵 '+count+' ORDERS WAITING!';
+      flash++;
+      if(flash>200){ clearInterval(window._flashInterval); document.title=originalTitle; }
+    }, 700);
+    
+    // Visual flash
+    const liveBtn = document.querySelector('a[href="/orders"]');
+    if(liveBtn){ liveBtn.classList.add('alarm-active'); }
+    
+    // LOOP until accepted if enabled
+    if(settings.loop){
+      if(alarmLoopInterval) clearInterval(alarmLoopInterval);
+      alarmLoopInterval = setInterval(()=>{
+        // Check if still has active orders
+        fetch('/api/staff/customer_orders').then(r=>r.json()).then(data=>{
+          const active = (data.orders||[]).filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
+          if(active===0){
+            stopAlarmForever();
+          } else {
+            playAlarmSound(settings);
+            if(settings.vibrate && navigator.vibrate) navigator.vibrate([1000,200,1000]);
+          }
+        });
+      }, 5000); // beep every 5 sec until accepted
+    } else {
+      setTimeout(()=>stopAlarmForever(), 15000);
+    }
+    
+    // Store last alarm time for background check
+    localStorage.setItem('omega_last_alarm', JSON.stringify({count, time: Date.now()}));
+    
+  }catch(e){ console.log('Alarm error',e); }
+}
+
+function stopAlarmForever(){
+  const audio = document.getElementById('orderAlarm');
+  const audio2 = document.getElementById('orderAlarm2');
+  if(audio){ audio.pause(); audio.currentTime=0; }
+  if(audio2){ audio2.pause(); audio2.currentTime=0; }
+  if(alarmLoopInterval){ clearInterval(alarmLoopInterval); alarmLoopInterval=null; }
+  if(window._flashInterval){ clearInterval(window._flashInterval); window._flashInterval=null; }
+  document.title='Omega Purified Ice - Cashier';
+  document.getElementById('stopAlarmBtn').style.display='none';
+  document.getElementById('alarmStatus').textContent='Alarm stopped';
+  const liveBtn = document.querySelector('a[href="/orders"]');
+  if(liveBtn) liveBtn.classList.remove('alarm-active');
+  lastActiveOrders = 0; // reset to avoid immediate re-trigger
+  setTimeout(()=>{ fetchLiveOrdersCount(); }, 2000);
+}
+
+function testAlarm(){
+  triggerOrderAlarm(1);
+  setTimeout(()=>{ 
+    if(confirm('Lakas ba? Gusto mo i-stop na?')) stopAlarmForever();
+  }, 2000);
+}
+
+function stopAlarm(){
+  stopAlarmForever();
+}
+
+// Load settings on start
+document.addEventListener('DOMContentLoaded', ()=>{
+  loadAlarmSettings();
+  if(Notification && Notification.permission==='default'){
+    Notification.requestPermission().then(p=>{
+      document.getElementById('alarmStatus').textContent = 'Notification: '+p;
+    });
+  }
+  // Register service worker for background notification (PWA)
+  if('serviceWorker' in navigator){
+    try{
+      navigator.serviceWorker.register('/sw.js').catch(()=>{});
+    }catch{}
+  }
+});
 
 
-// NOTE: A second, broken copy of triggerOrderAlarm() and stopAlarm() used to be
-// defined here. In JS, a later `function` declaration silently replaces an
-// earlier one with the same name in the same scope - so THIS was the version
-// that actually ran, not the correct looping/voice one defined above. It also
-// played the <audio id="orderAlarm"> element, which has no `src`, so it was
-// silent on top of not looping. Removed as the root-cause fix for the alarm
-// not looping / not respecting the accept action.
+// Request notification permission on load
+document.addEventListener('DOMContentLoaded', ()=>{
+  if(Notification && Notification.permission==='default'){
+    Notification.requestPermission();
+  }
+  // Enable alarm on first user interaction (browser policy)
+  document.body.addEventListener('click', ()=>{
+    const audio = document.getElementById('orderAlarm');
+    if(audio){ audio.play().then(()=>{audio.pause();}).catch(()=>{}); }
+  }, {once:true});
+});
+
+function stopAlarm(){
+  const audio=document.getElementById('orderAlarm');
+  if(audio){ audio.pause(); audio.currentTime=0; }
+}
 
 setInterval(fetchLiveOrdersCount, 30000);
 fetchLiveOrdersCount();
@@ -1520,6 +1293,13 @@ def api_recent_sales():
     except:
         now = datetime.now()
     today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
+    # For custom_date daily view, parse it as the target day
+    custom_dt = None
+    if custom_date:
+        try:
+            custom_dt = datetime.strptime(custom_date[:10], "%Y-%m-%d")
+        except:
+            custom_dt = None
     
     data = fb_get("daily_sales")
     sales = []
@@ -1619,7 +1399,7 @@ def api_sales_by_period():
     data = fb_get("daily_sales") or {}
     sales = []
     start_date = None
-    end_date = now
+    end_date = (custom_dt.replace(hour=23, minute=59, second=59) if custom_dt and period=="daily" else now)
     
     # Handle sub-period picker: WW01-WW52, month 01-12, Q1-Q4, year
     target_week = None
@@ -1654,7 +1434,10 @@ def api_sales_by_period():
                 pass
     
     if period == "daily":
-        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if custom_dt:
+            start_date = custom_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
     elif period == "weekly":
         if target_week:
             # For WW, we need to filter by week number, not last 7 days
@@ -1696,7 +1479,7 @@ def api_sales_by_period():
     elif period in ["yearly","year"]:
         if target_year:
             start_date = now.replace(year=target_year, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-            end_date = now.replace(year=target_year, month=12, day=31, hour=23, minute=59, second=59)
+            end_date = (custom_dt.replace(hour=23, minute=59, second=59) if custom_dt and period=="daily" else now).replace(year=target_year, month=12, day=31, hour=23, minute=59, second=59)
         else:
             start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     elif period == "all":
@@ -3578,6 +3361,7 @@ def api_set_reseller_password(reseller_id):
 def api_sales_dashboard():
     period = request.args.get("period", "daily").lower()
     custom_date = request.args.get("date", "").strip()
+    # custom_date can be YYYY-MM-DD for daily filtering
     # Fast path for daily - use Manila time
     try:
         import pytz
@@ -3600,7 +3384,10 @@ def api_sales_dashboard():
     start_date = None
     label = "Today"
     if period == "daily":
-        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if custom_dt:
+            start_date = custom_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
         label = "Today"
     elif period == "weekly":
         start_date = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -3681,6 +3468,13 @@ def api_today_sales():
     except:
         now = datetime.now()
     today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
+    # For custom_date daily view, parse it as the target day
+    custom_dt = None
+    if custom_date:
+        try:
+            custom_dt = datetime.strptime(custom_date[:10], "%Y-%m-%d")
+        except:
+            custom_dt = None
     def kg_value(s):
         try: return float(str(s).lower().replace("kg","").strip())
         except: return 0
@@ -4310,6 +4104,13 @@ def api_restore_sept06():
         except:
             now = datetime.now()
         today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
+    # For custom_date daily view, parse it as the target day
+    custom_dt = None
+    if custom_date:
+        try:
+            custom_dt = datetime.strptime(custom_date[:10], "%Y-%m-%d")
+        except:
+            custom_dt = None
         yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
         
         action = request.args.get("action", "move_to_yesterday")  # or "archive" or "spread"
@@ -4392,6 +4193,13 @@ def api_dashboard_debug():
         except:
             now = datetime.now()
         today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
+    # For custom_date daily view, parse it as the target day
+    custom_dt = None
+    if custom_date:
+        try:
+            custom_dt = datetime.strptime(custom_date[:10], "%Y-%m-%d")
+        except:
+            custom_dt = None
         today_records = []
         total_kg = 0
         total_peso = 0
