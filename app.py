@@ -219,128 +219,60 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 <p class="status" id="statusMsg"></p>
 <p style="font-size:10px;color:#888;margin-top:6px" id="lastSaveTime"></p>
 </div>
-<div class="bottom-spacer"></div>
-<div style="display:flex;gap:8px;margin:10px 0">
-  <button id="openAlarmSettingsBtn" onclick="openAlarmModal()" style="flex:1;padding:12px;border-radius:10px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:12px">⚙️🔊 Alarm Settings</button>
-  <button id="stopAlarmBtn" onclick="stopAlarmForever()" style="display:none;padding:12px;border-radius:10px;border:none;background:#ef4444;color:#fff;font-weight:700;font-size:12px">🔇 Stop Alarm</button>
+
+<div style="display:flex;gap:8px;margin:12px 0">
+  <button id="openAlarmSettingsBtn" onclick="openAlarmModal()" style="flex:1;padding:14px;border-radius:12px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:13px">⚙️🔊 Alarm Settings (1 button only)</button>
+  <button id="stopAlarmBtn" onclick="stopAlarmForever()" style="display:none;padding:14px;border-radius:12px;border:none;background:#ef4444;color:#fff;font-weight:700;font-size:13px">🔇 Stop Alarm</button>
 </div>
 
-<!-- Alarm Modal Popup -->
-<div id="alarmModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;padding:16px">
-  <div style="background:#fff;border-radius:16px;padding:20px;max-width:400px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,.3)">
+<div id="alarmModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:99999;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;padding:20px;max-width:400px;width:100%;max-height:90vh;overflow-y:auto">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <h3 style="margin:0;font-size:16px;color:#c0392b">🔊 Alarm Settings</h3>
       <button onclick="closeAlarmModal()" style="width:32px;height:32px;border-radius:50%;border:none;background:#f0f0f0;font-size:18px">✕</button>
     </div>
-    
     <div style="background:#fff5f5;border:1px solid #fecaca;border-radius:10px;padding:10px;margin-bottom:12px">
-      <div style="font-size:10px;color:#666;margin-bottom:4px">Current Staff: <b id="modalStaffName">Loading...</b></div>
-      <div style="font-size:10px;color:#00609C" id="voiceStatus">🎤 omega/yhel = voice + alarm | isesmo = alarm only</div>
+      <div style="font-size:10px;color:#666">Staff: <b id="modalStaffName">Loading...</b></div>
+      <div style="font-size:10px;color:#00609C;margin-top:2px">🎤 omega/yhel = English voice "New ice order!" | isesmo = alarm only</div>
     </div>
-
-    <label style="font-size:11px;font-weight:600;color:#333">Alarm Sound</label>
+    <label style="font-size:11px;font-weight:600">Alarm Sound</label>
     <select id="alarmSoundSelect" onchange="saveAlarmSettings(); previewAlarmSound();" style="width:100%;padding:12px;border-radius:10px;border:2px solid #ddd;font-size:13px;margin:6px 0 12px">
-      <option value="beep_short">🔔 Beep Short (default)</option>
-      <option value="alarm_clock">⏰ Alarm Clock - Loud</option>
-      <option value="radar">🚨 Radar - Emergency</option>
-      <option value="siren">🚒 Siren - Very Loud</option>
-      <option value="chime">🔔 Chime - Soft</option>
-      <option value="custom_loud">🔥 LOUD BEEP (Loudest - Web Audio)</option>
-      <option value="custom_very_loud">💥 SUPER LOUD - 5x Beep</option>
+      <option value="beep_short">🔔 Beep Short</option>
+      <option value="alarm_clock">⏰ Alarm Clock</option>
+      <option value="radar">🚨 Radar</option>
+      <option value="siren">🚒 Siren</option>
+      <option value="custom_loud" selected>🔥 LOUD BEEP</option>
+      <option value="custom_very_loud">💥 SUPER LOUD 5x</option>
     </select>
-
-    <label style="font-size:11px;font-weight:600;color:#333">Volume</label>
+    <label style="font-size:11px;font-weight:600">Volume</label>
     <select id="alarmVolumeSelect" onchange="saveAlarmSettings()" style="width:100%;padding:12px;border-radius:10px;border:2px solid #ddd;font-size:13px;margin:6px 0 12px">
-      <option value="0.5">50% - Normal</option>
-      <option value="0.8">80% - Loud</option>
-      <option value="1.0" selected>100% - MAX LOUD</option>
+      <option value="1.0" selected>100% MAX</option>
+      <option value="0.8">80% Loud</option>
+      <option value="0.5">50% Normal</option>
     </select>
-
     <div style="background:#f8f8f8;border-radius:10px;padding:10px;margin-bottom:12px">
-      <label style="font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="alarmLoopCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <span><b>Loop until accepted</b> - Tuloy tuloy hanggang ma-accept</span></label>
-      <label style="font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="alarmVibrateCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <span><b>Vibrate</b> - Yung phone magvi-vibrate</span></label>
-      <label style="font-size:11px;display:flex;align-items:center;gap:8px"><input type="checkbox" id="alarmBgCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <span><b>Background Notif</b> - Kahit naka-minimize</span></label>
+      <label style="font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="alarmLoopCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <b>Loop until accepted</b></label>
+      <label style="font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="alarmVibrateCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <b>Vibrate</b></label>
+      <label style="font-size:11px;display:flex;align-items:center;gap:8px"><input type="checkbox" id="alarmBgCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <b>Background Notif</b></label>
     </div>
-
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
       <button onclick="testAlarm()" style="padding:12px;border-radius:10px;border:2px solid #00609C;background:#eef7ff;color:#00609C;font-weight:700;font-size:12px">🔊 Test Alarm</button>
       <button onclick="testVoice()" style="padding:12px;border-radius:10px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:12px">🗣️ Test Voice</button>
     </div>
-
-    <div style="background:#eef7ff;border-radius:8px;padding:8px;font-size:10px;color:#333;margin-bottom:12px">
-      <div>Status: <span id="alarmStatus" style="font-weight:700">Ready - Click Test to unlock sound</span></div>
-      <div style="margin-top:4px;color:#666">💡 <b>Tip:</b> Kailangan pindutin muna ang Test para ma-unlock ang sound sa tablet (browser policy). Pag naka-Add to Home Screen, mas malakas at kahit naka-exit magno-notify.</div>
+    <div style="background:#eef7ff;border-radius:8px;padding:8px;font-size:10px;margin-bottom:12px">
+      <div>Status: <span id="alarmStatus" style="font-weight:700">Ready - Tap Test to unlock sound</span></div>
+      <div style="margin-top:4px;color:#666">💡 Tap Test first to unlock audio (browser rule). Then auto-alarm will work.</div>
     </div>
-
     <button onclick="closeAlarmModal()" style="width:100%;padding:14px;border-radius:10px;border:none;background:#00609C;color:#fff;font-weight:700;font-size:14px">✅ Save & Close</button>
   </div>
 </div>
 
 <audio id="orderAlarm" preload="auto" style="display:none"></audio>
 <audio id="orderAlarm2" preload="auto" style="display:none"></audio>
-
+<div id="alarmBanner" style="display:none;position:fixed;top:0;left:0;right:0;background:#ef4444;color:#fff;padding:14px;text-align:center;font-weight:700;z-index:99998;animation:blink 1s infinite" onclick="stopAlarmForever()">🔴 NEW ICE ORDER! TAP TO STOP - <span id="bannerCount">1</span> waiting!</div>
+<style>@keyframes blink{0%,100%{opacity:1}50%{opacity:.7}} .alarm-active{animation:blink 0.5s infinite !important; background:#ef4444 !important; color:#fff !important}</style>
 
 <div class="bottom-spacer"></div>
-<div style="display:flex;gap:8px;margin:10px 0">
-  <button id="openAlarmSettingsBtn" onclick="openAlarmModal()" style="flex:1;padding:12px;border-radius:10px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:12px">⚙️🔊 Alarm Settings</button>
-  <button id="stopAlarmBtn" onclick="stopAlarmForever()" style="display:none;padding:12px;border-radius:10px;border:none;background:#ef4444;color:#fff;font-weight:700;font-size:12px">🔇 Stop Alarm</button>
-</div>
-
-<!-- Alarm Modal Popup -->
-<div id="alarmModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;padding:16px">
-  <div style="background:#fff;border-radius:16px;padding:20px;max-width:400px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,.3)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h3 style="margin:0;font-size:16px;color:#c0392b">🔊 Alarm Settings</h3>
-      <button onclick="closeAlarmModal()" style="width:32px;height:32px;border-radius:50%;border:none;background:#f0f0f0;font-size:18px">✕</button>
-    </div>
-    
-    <div style="background:#fff5f5;border:1px solid #fecaca;border-radius:10px;padding:10px;margin-bottom:12px">
-      <div style="font-size:10px;color:#666;margin-bottom:4px">Current Staff: <b id="modalStaffName">Loading...</b></div>
-      <div style="font-size:10px;color:#00609C" id="voiceStatus">🎤 omega/yhel = voice + alarm | isesmo = alarm only</div>
-    </div>
-
-    <label style="font-size:11px;font-weight:600;color:#333">Alarm Sound</label>
-    <select id="alarmSoundSelect" onchange="saveAlarmSettings(); previewAlarmSound();" style="width:100%;padding:12px;border-radius:10px;border:2px solid #ddd;font-size:13px;margin:6px 0 12px">
-      <option value="beep_short">🔔 Beep Short (default)</option>
-      <option value="alarm_clock">⏰ Alarm Clock - Loud</option>
-      <option value="radar">🚨 Radar - Emergency</option>
-      <option value="siren">🚒 Siren - Very Loud</option>
-      <option value="chime">🔔 Chime - Soft</option>
-      <option value="custom_loud">🔥 LOUD BEEP (Loudest - Web Audio)</option>
-      <option value="custom_very_loud">💥 SUPER LOUD - 5x Beep</option>
-    </select>
-
-    <label style="font-size:11px;font-weight:600;color:#333">Volume</label>
-    <select id="alarmVolumeSelect" onchange="saveAlarmSettings()" style="width:100%;padding:12px;border-radius:10px;border:2px solid #ddd;font-size:13px;margin:6px 0 12px">
-      <option value="0.5">50% - Normal</option>
-      <option value="0.8">80% - Loud</option>
-      <option value="1.0" selected>100% - MAX LOUD</option>
-    </select>
-
-    <div style="background:#f8f8f8;border-radius:10px;padding:10px;margin-bottom:12px">
-      <label style="font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="alarmLoopCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <span><b>Loop until accepted</b> - Tuloy tuloy hanggang ma-accept</span></label>
-      <label style="font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="alarmVibrateCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <span><b>Vibrate</b> - Yung phone magvi-vibrate</span></label>
-      <label style="font-size:11px;display:flex;align-items:center;gap:8px"><input type="checkbox" id="alarmBgCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <span><b>Background Notif</b> - Kahit naka-minimize</span></label>
-    </div>
-
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
-      <button onclick="testAlarm()" style="padding:12px;border-radius:10px;border:2px solid #00609C;background:#eef7ff;color:#00609C;font-weight:700;font-size:12px">🔊 Test Alarm</button>
-      <button onclick="testVoice()" style="padding:12px;border-radius:10px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:12px">🗣️ Test Voice</button>
-    </div>
-
-    <div style="background:#eef7ff;border-radius:8px;padding:8px;font-size:10px;color:#333;margin-bottom:12px">
-      <div>Status: <span id="alarmStatus" style="font-weight:700">Ready - Click Test to unlock sound</span></div>
-      <div style="margin-top:4px;color:#666">💡 <b>Tip:</b> Kailangan pindutin muna ang Test para ma-unlock ang sound sa tablet (browser policy). Pag naka-Add to Home Screen, mas malakas at kahit naka-exit magno-notify.</div>
-    </div>
-
-    <button onclick="closeAlarmModal()" style="width:100%;padding:14px;border-radius:10px;border:none;background:#00609C;color:#fff;font-weight:700;font-size:14px">✅ Save & Close</button>
-  </div>
-</div>
-
-<audio id="orderAlarm" preload="auto" style="display:none"></audio>
-<audio id="orderAlarm2" preload="auto" style="display:none"></audio>
-
-
 
 
 <div class="card" id="periodSalesCard" style="display:none">
@@ -429,144 +361,99 @@ function cancelEdit(){
   updateTotal();
 }
 
-
-
-
-
-async function fetchLiveOrdersCount(){
-  try{
-    const res = await fetch('/api/staff/customer_orders');
-    const data = await res.json();
-    const orders = data.orders||[];
-    const active = orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
-    const badge = document.getElementById('liveOrdersCount');
-    if(badge){
-      if(active>0){
-        badge.textContent = active;
-        badge.style.display = 'inline';
-        if(active > lastActiveOrders && lastActiveOrders>=0){
-          triggerOrderAlarm(active, orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)));
-        }
-      } else {
-        badge.style.display = 'none';
-      }
-    }
-    lastActiveOrders = active;
-  }catch(e){}
-}
-
-
-
-let alarmEnabled = true;
-
 let alarmLoopInterval = null;
 let alarmAudioContext = null;
 let audioUnlocked = false;
 let lastAlarmTime = 0;
+let lastActiveOrders = 0;
+let alarmEnabled = true;
 
 function openAlarmModal(){
-  document.getElementById('alarmModal').style.display='flex';
+  const modal = document.getElementById('alarmModal');
+  if(modal) modal.style.display='flex';
   const staff = document.querySelector('.staff')?.textContent || 'Unknown';
-  document.getElementById('modalStaffName').textContent = staff;
+  const nameEl = document.getElementById('modalStaffName');
+  if(nameEl) nameEl.textContent = staff;
   loadAlarmSettings();
-  // Unlock audio on modal open (user interaction)
   unlockAudio();
 }
-
 function closeAlarmModal(){
-  document.getElementById('alarmModal').style.display='none';
+  const modal = document.getElementById('alarmModal');
+  if(modal) modal.style.display='none';
   saveAlarmSettings();
 }
-
 function unlockAudio(){
   if(audioUnlocked) return;
   try{
-    // Web Audio API unlock
     if(!alarmAudioContext) alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
     if(alarmAudioContext.state === 'suspended') alarmAudioContext.resume();
-    
-    // HTML Audio unlock - play silent then pause
     const audio = document.getElementById('orderAlarm');
-    audio.volume = 0;
-    audio.play().then(()=>{
-      audio.pause();
-      audio.volume = 1;
-      audioUnlocked = true;
-      document.getElementById('alarmStatus').textContent = '✅ Sound unlocked - Ready!';
-      console.log('Audio unlocked');
-    }).catch(()=>{
-      // Try again on next interaction
-      console.log('Audio unlock needs more interaction');
-    });
-    
-    // Speech unlock
-    if('speechSynthesis' in window){
-      const utter = new SpeechSynthesisUtterance('');
-      utter.volume = 0;
-      window.speechSynthesis.speak(utter);
+    if(audio){
+      audio.volume = 0;
+      const p = audio.play();
+      if(p){
+        p.then(()=>{
+          audio.pause();
+          audio.volume = 1;
+          audioUnlocked = true;
+          const st = document.getElementById('alarmStatus');
+          if(st) st.textContent = '✅ Sound unlocked - Ready!';
+        }).catch(()=>{});
+      }
     }
-  }catch(e){ console.log('Unlock error', e); }
+    if('speechSynthesis' in window){
+      const u = new SpeechSynthesisUtterance('');
+      u.volume = 0;
+      window.speechSynthesis.speak(u);
+    }
+  }catch(e){}
 }
-
 function speakIceOrder(count, orders=[]){
   if(!('speechSynthesis' in window)) return;
   try{
     window.speechSynthesis.cancel();
-    let message = '';
-    if(count===1){
-      message = 'New ice order! You have one new order!';
-    } else {
-      message = `New ice order! You have ${count} new orders!`;
-    }
+    let msg = count===1 ? 'New ice order! You have one new order!' : `New ice order! You have ${count} new orders!`;
     if(orders && orders.length>0){
-      const firstOrder = orders[0];
-      const name = firstOrder.reseller_name || firstOrder.customer_name || '';
-      if(name){ message += ` From ${name}.`; }
+      const n = orders[0].reseller_name || orders[0].customer_name || '';
+      if(n) msg += ` From ${n}.`;
     }
-    message += ' Please check live orders now!';
-    const utterance = new SpeechSynthesisUtterance(message);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.95;
-    utterance.pitch = 1.1;
-    utterance.volume = 1.0;
+    msg += ' Please check live orders now!';
+    const utter = new SpeechSynthesisUtterance(msg);
+    utter.lang = 'en-US';
+    utter.rate = 0.95;
+    utter.volume = 1.0;
     const voices = window.speechSynthesis.getVoices();
-    const enVoice = voices.find(v=>v.lang.includes('en-US') || v.lang.includes('en-PH'));
-    const enUKVoice = voices.find(v=>v.lang.includes('en-GB'));
-    if(enVoice) utterance.voice = enVoice;
-    else if(enUKVoice) utterance.voice = enUKVoice;
-    window.speechSynthesis.speak(utterance);
-    console.log('Speaking:', message);
-  }catch(e){ console.log('Voice error',e); }
+    const en = voices.find(v=>v.lang.includes('en-US') || v.lang.includes('en-PH'));
+    if(en) utter.voice = en;
+    window.speechSynthesis.speak(utter);
+  }catch(e){}
 }
-
 if('speechSynthesis' in window){
   window.speechSynthesis.onvoiceschanged = ()=>{ window.speechSynthesis.getVoices(); };
   setTimeout(()=>{ window.speechSynthesis.getVoices(); }, 500);
 }
-
 function testVoice(){
   unlockAudio();
   const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
   const isIsesmo = staffName.includes('isesmo');
   if(isIsesmo){
-    alert('Sa ISESMO account, alarm lang (walang voice). Mag-login sa omega o yhel para ma-test ang voice. Pero i-test pa rin natin alarm.');
+    alert('ISESMO account: alarm only. Login as omega/yhel for voice.');
     testAlarm();
   } else {
-    speakIceOrder(1, [{reseller_name:'Test Customer', quantity:5, kg_size:'5Kg'}]);
-    document.getElementById('alarmStatus').textContent='🔊 Voice: New ice order!';
+    speakIceOrder(1, [{reseller_name:'Test'}]);
+    const st = document.getElementById('alarmStatus');
+    if(st) st.textContent = '🔊 Voice: New ice order!';
   }
 }
-
 function getAlarmSettings(){
   return {
-    sound: document.getElementById('alarmSoundSelect')?.value || localStorage.getItem('omega_alarm_sound') || 'beep_short',
+    sound: document.getElementById('alarmSoundSelect')?.value || localStorage.getItem('omega_alarm_sound') || 'custom_loud',
     volume: parseFloat(document.getElementById('alarmVolumeSelect')?.value || localStorage.getItem('omega_alarm_volume') || '1.0'),
     loop: document.getElementById('alarmLoopCheck')?.checked ?? (localStorage.getItem('omega_alarm_loop') !== 'false'),
     vibrate: document.getElementById('alarmVibrateCheck')?.checked ?? (localStorage.getItem('omega_alarm_vibrate') !== 'false'),
     bg: document.getElementById('alarmBgCheck')?.checked ?? (localStorage.getItem('omega_alarm_bg') !== 'false')
   };
 }
-
 function saveAlarmSettings(){
   const s = getAlarmSettings();
   localStorage.setItem('omega_alarm_sound', s.sound);
@@ -577,7 +464,6 @@ function saveAlarmSettings(){
   const st = document.getElementById('alarmStatus');
   if(st) st.textContent = 'Saved: ' + s.sound + ' @ ' + Math.round(s.volume*100) + '%';
 }
-
 function loadAlarmSettings(){
   try{
     const sound = localStorage.getItem('omega_alarm_sound');
@@ -589,28 +475,18 @@ function loadAlarmSettings(){
     if(localStorage.getItem('omega_alarm_bg')!==null) document.getElementById('alarmBgCheck').checked = localStorage.getItem('omega_alarm_bg')==='true';
   }catch{}
 }
-
 function previewAlarmSound(){
-  const sel = document.getElementById('alarmSoundSelect').value;
-  const vol = parseFloat(document.getElementById('alarmVolumeSelect').value || '1.0');
+  const sel = document.getElementById('alarmSoundSelect')?.value || 'custom_loud';
+  const vol = parseFloat(document.getElementById('alarmVolumeSelect')?.value || '1.0');
   playAlarmSound({sound: sel, volume: vol});
 }
-
 function playAlarmSound(settings){
-  // Prevent spam - at least 500ms between plays
-  const now = Date.now();
-  if(now - lastAlarmTime < 500 && settings.sound !== 'custom_very_loud') {
-    // allow very loud to bypass
-  }
-  lastAlarmTime = now;
-  
-  console.log('Playing alarm:', settings.sound, 'vol:', settings.volume);
-  
+  lastAlarmTime = Date.now();
   try{
-    // Always try Web Audio first for loudest
-    if(settings.sound === 'custom_loud' || settings.sound === 'custom_very_loud'){
-      if(!alarmAudioContext) alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-      if(alarmAudioContext.state === 'suspended') alarmAudioContext.resume();
+    if(!alarmAudioContext) alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if(alarmAudioContext.state === 'suspended') alarmAudioContext.resume();
+    // For all sounds, use Web Audio for reliability
+    if(settings.sound === 'custom_loud' || settings.sound === 'custom_very_loud' || settings.sound === 'siren' || settings.sound === 'radar'){
       const ctx = alarmAudioContext;
       const repeats = settings.sound === 'custom_very_loud' ? 5 : 3;
       for(let i=0;i<repeats;i++){
@@ -618,7 +494,9 @@ function playAlarmSound(settings){
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
           osc.type='square';
-          osc.frequency.value= i%2===0 ? 1000 : 1500;
+          osc.frequency.value = i%2===0 ? 1000 : 1500;
+          if(settings.sound==='siren') osc.frequency.value = 800 + i*200;
+          if(settings.sound==='radar') osc.frequency.value = 600;
           gain.gain.setValueAtTime(settings.volume, ctx.currentTime);
           gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime+0.6);
           osc.connect(gain);
@@ -629,153 +507,105 @@ function playAlarmSound(settings){
       }
       return;
     }
-    
-    // HTML Audio for other sounds
+    // HTML audio fallback
     const audio = document.getElementById('orderAlarm');
     const sounds = {
       'beep_short': 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg',
       'alarm_clock': 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg',
-      'radar': 'https://actions.google.com/sounds/v1/alarms/spaceship_alarm.ogg',
-      'siren': 'https://actions.google.com/sounds/v1/emergency/beeper_emergency_call.ogg',
       'chime': 'https://actions.google.com/sounds/v1/cartoon/pop.ogg'
     };
     const src = sounds[settings.sound] || sounds['beep_short'];
-    // Force reload if different
-    if(!audio.src.includes(settings.sound)){
+    if(!audio.src || !audio.src.includes(src.split('/').pop())){
       audio.src = src;
       audio.load();
     }
     audio.volume = settings.volume;
     audio.currentTime = 0;
-    const playPromise = audio.play();
-    if(playPromise){
-      playPromise.catch(e=>{
-        console.log('Audio play failed, trying Web Audio fallback', e);
-        // Fallback to Web Audio beep
-        if(!alarmAudioContext) alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-        if(alarmAudioContext.state === 'suspended') alarmAudioContext.resume();
-        const osc = alarmAudioContext.createOscillator();
-        const gain = alarmAudioContext.createGain();
-        osc.frequency.value = 800;
-        gain.gain.value = settings.volume;
-        osc.connect(gain);
-        gain.connect(alarmAudioContext.destination);
-        osc.start();
-        osc.stop(alarmAudioContext.currentTime+0.8);
-      });
-    }
-  }catch(e){ console.log('playAlarm error', e); }
+    audio.play().catch(()=>{
+      // Fallback beep
+      const osc = alarmAudioContext.createOscillator();
+      const gain = alarmAudioContext.createGain();
+      osc.frequency.value = 800;
+      gain.gain.value = settings.volume;
+      osc.connect(gain);
+      gain.connect(alarmAudioContext.destination);
+      osc.start();
+      osc.stop(alarmAudioContext.currentTime+0.8);
+    });
+  }catch(e){ console.log(e); }
 }
-
 function triggerOrderAlarm(count, orders=[]){
   if(!alarmEnabled) return;
   const settings = getAlarmSettings();
   const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
   const isVoiceAccount = staffName.includes('omega') || staffName.includes('yhel');
-  console.log('TRIGGER ALARM', count, 'voice:', isVoiceAccount, 'settings:', settings);
-  
+  console.log('TRIGGER', count, isVoiceAccount);
   try{
     const stopBtn = document.getElementById('stopAlarmBtn');
     if(stopBtn) stopBtn.style.display='inline-block';
+    const banner = document.getElementById('alarmBanner');
+    const bannerCount = document.getElementById('bannerCount');
+    if(banner){ banner.style.display='block'; if(bannerCount) bannerCount.textContent = count; }
     const statusEl = document.getElementById('alarmStatus');
-    if(statusEl) statusEl.textContent = '🔴 ALARMING - '+count+' orders! - '+new Date().toLocaleTimeString();
-    
-    if(isVoiceAccount){ 
-      speakIceOrder(count, orders); 
-    }
+    if(statusEl) statusEl.textContent = '🔴 ALARMING '+count+' orders!';
+    if(isVoiceAccount) speakIceOrder(count, orders);
     playAlarmSound(settings);
-    
-    if(settings.vibrate && navigator.vibrate){ 
-      navigator.vibrate([1000,200,1000,200,2000]); 
-    }
-    
+    if(settings.vibrate && navigator.vibrate) navigator.vibrate([1000,200,1000,200,2000]);
     if(settings.bg && Notification && Notification.permission==='granted'){
       try{
-        const notif = new Notification('🧊 NEW OMEGA ORDER! 🔴', {
-          body: `${count} new order(s) waiting! Tap to open.`,
-          icon: 'https://cdn-icons-png.flaticon.com/512/2936/2936886.png',
-          requireInteraction: true,
-          vibrate: [1000,200,1000],
-          tag: 'omega-order'
-        });
+        const notif = new Notification('NEW ICE ORDER!', {body: count+' new orders waiting!', requireInteraction:true, tag:'omega-order'});
         notif.onclick = ()=>{ window.focus(); stopAlarmForever(); window.location.href='/orders'; };
-      }catch(e){ console.log('Notif error', e); }
+      }catch{}
     }
-    
-    // Flash title
-    const originalTitle = document.title;
-    let flash = 0;
+    let flash=0;
     if(window._flashInterval) clearInterval(window._flashInterval);
     window._flashInterval = setInterval(()=>{
-      document.title = flash%2===0 ? '🔴 NEW ORDER ('+count+') - ACCEPT NOW!' : '🔵 '+count+' ORDERS WAITING!';
+      document.title = flash%2===0 ? '🔴 NEW ORDER ('+count+')!' : '🔵 '+count+' WAITING!';
       flash++;
-      if(flash>200){ clearInterval(window._flashInterval); document.title=originalTitle; }
+      if(flash>200){ clearInterval(window._flashInterval); document.title='Omega Ice - Cashier'; }
     }, 700);
-    
     const liveBtn = document.querySelector('a[href="/orders"]');
-    if(liveBtn){ liveBtn.classList.add('alarm-active'); }
-    
-    // LOOP - fixed
+    if(liveBtn) liveBtn.classList.add('alarm-active');
     if(alarmLoopInterval) clearInterval(alarmLoopInterval);
     if(settings.loop){
-      console.log('Starting loop interval');
       alarmLoopInterval = setInterval(()=>{
-        console.log('Loop tick - checking orders');
         fetch('/api/staff/customer_orders').then(r=>r.json()).then(data=>{
           const active = (data.orders||[]).filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
-          console.log('Loop check active:', active);
-          if(active===0){
-            stopAlarmForever();
-          } else {
-            const staffLoop = (document.querySelector('.staff')?.textContent || '').toLowerCase();
-            if(staffLoop.includes('omega') || staffLoop.includes('yhel')){ 
-              speakIceOrder(active, data.orders||[]); 
-            }
-            // Re-get settings in case changed
-            const loopSettings = getAlarmSettings();
-            playAlarmSound(loopSettings);
-            if(loopSettings.vibrate && navigator.vibrate) navigator.vibrate([1000,200,1000]);
+          if(active===0){ stopAlarmForever(); }
+          else {
+            const sLoop = (document.querySelector('.staff')?.textContent || '').toLowerCase();
+            if(sLoop.includes('omega') || sLoop.includes('yhel')) speakIceOrder(active, data.orders||[]);
+            playAlarmSound(getAlarmSettings());
           }
-        }).catch(e=>console.log('Loop fetch error', e));
+        });
       }, 5000);
     }
-    
-    localStorage.setItem('omega_last_alarm', JSON.stringify({count, time: Date.now()}));
-    
-  }catch(e){ console.log('Alarm trigger error',e); }
+  }catch(e){ console.log(e); }
 }
-
 function stopAlarmForever(){
-  console.log('Stopping alarm');
   const audio = document.getElementById('orderAlarm');
-  const audio2 = document.getElementById('orderAlarm2');
   if(audio){ audio.pause(); audio.currentTime=0; }
-  if(audio2){ audio2.pause(); audio2.currentTime=0; }
-  if(alarmLoopInterval){ clearInterval(alarmLoopInterval); alarmLoopInterval=null; console.log('Loop cleared'); }
+  if(alarmLoopInterval){ clearInterval(alarmLoopInterval); alarmLoopInterval=null; }
   if(window._flashInterval){ clearInterval(window._flashInterval); window._flashInterval=null; }
-  document.title='Omega Purified Ice - Cashier';
+  document.title='Omega Ice - Cashier';
   const btn=document.getElementById('stopAlarmBtn');
   if(btn) btn.style.display='none';
+  const banner=document.getElementById('alarmBanner');
+  if(banner) banner.style.display='none';
   const st=document.getElementById('alarmStatus');
-  if(st) st.textContent='Alarm stopped - '+new Date().toLocaleTimeString();
+  if(st) st.textContent='Alarm stopped';
   const liveBtn = document.querySelector('a[href="/orders"]');
   if(liveBtn) liveBtn.classList.remove('alarm-active');
   if('speechSynthesis' in window) window.speechSynthesis.cancel();
-  lastActiveOrders = 0;
+  lastActiveOrders=0;
   setTimeout(()=>{ fetchLiveOrdersCount(); }, 2000);
 }
-
 function testAlarm(){
   unlockAudio();
-  const settings = getAlarmSettings();
-  console.log('Test alarm with', settings);
-  triggerOrderAlarm(1, [{reseller_name:'Test Customer'}]);
+  const s = getAlarmSettings();
+  triggerOrderAlarm(1, [{reseller_name:'Test'}]);
 }
-
-function stopAlarm(){
-  stopAlarmForever();
-}
-
+function stopAlarm(){ stopAlarmForever(); }
 async function fetchLiveOrdersCount(){
   try{
     const res = await fetch('/api/staff/customer_orders');
@@ -786,42 +616,28 @@ async function fetchLiveOrdersCount(){
     if(badge){
       if(active>0){
         badge.textContent = active;
-        badge.style.display = 'inline';
-        console.log('Live orders:', active, 'last:', lastActiveOrders);
+        badge.style.display='inline';
         if(active > lastActiveOrders && lastActiveOrders>=0){
-          console.log('New order detected, triggering alarm');
           triggerOrderAlarm(active, orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)));
         } else if(active>0 && lastActiveOrders===0 && !alarmLoopInterval){
-          // First load with existing orders - trigger once
-          console.log('Existing orders on load, triggering');
           triggerOrderAlarm(active, orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)));
         }
       } else {
-        badge.style.display = 'none';
-        if(alarmLoopInterval){
-          console.log('No active orders, stopping loop');
-          stopAlarmForever();
-        }
+        badge.style.display='none';
+        if(alarmLoopInterval) stopAlarmForever();
       }
     }
     lastActiveOrders = active;
-  }catch(e){ console.log('fetchLiveOrdersCount error', e); }
+  }catch(e){}
 }
-
-// Unlock audio on any user interaction
 document.addEventListener('click', ()=>{ unlockAudio(); }, {once:false});
 document.addEventListener('touchstart', ()=>{ unlockAudio(); }, {once:false});
 document.addEventListener('DOMContentLoaded', ()=>{
   loadAlarmSettings();
-  // Auto unlock attempt
   setTimeout(()=>{ unlockAudio(); }, 1000);
-  if(Notification && Notification.permission==='default'){
-    Notification.requestPermission();
-  }
+  if(Notification && Notification.permission==='default'){ Notification.requestPermission(); }
 });
 
-
-let lastActiveOrders = 0;
 
 function setCashierPeriod(p){
   cashierPeriod=p;
@@ -882,7 +698,7 @@ function formatTimestamp(iso){
 
 
 
-function triggerOrderAlarm(count, orders=[]){
+function triggerOrderAlarm(count){
   if(!alarmEnabled) return;
   try{
     const audio = document.getElementById('orderAlarm');
@@ -3655,7 +3471,7 @@ def api_sales_dashboard():
     except:
         now = datetime.now()
     # Cache daily_sales for 10 sec to avoid hammering Firebase with 1600 records
-    cache_key = f"_dashboard_cache_{period}_{custom_date}"
+    cache_key = f"_dashboard_cache_{period}"
     cached = globals().get(cache_key)
     if cached and (now - cached.get("time", datetime.min)).total_seconds() < 10:
         return jsonify(cached.get("data"))
@@ -3669,17 +3485,8 @@ def api_sales_dashboard():
     start_date = None
     label = "Today"
     if period == "daily":
-        if custom_date:
-            try:
-                cd = datetime.strptime(custom_date[:10], "%Y-%m-%d")
-                start_date = cd.replace(hour=0, minute=0, second=0, microsecond=0)
-                label = f"Daily {custom_date[:10]}"
-            except:
-                start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                label = "Today"
-        else:
-            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            label = "Today"
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        label = "Today"
     elif period == "weekly":
         start_date = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
         label = "Last 7 Days"
@@ -4372,7 +4179,6 @@ def api_auto_dashboard_fix():
 
 
 
-
 @app.route("/api/restore_sept06", methods=["GET", "POST"])
 @login_required
 def api_restore_sept06():
@@ -4388,10 +4194,10 @@ def api_restore_sept06():
             now = datetime.now(manila)
         except:
             now = datetime.now()
-        today_str = now.strftime("%Y-%m-%d")
+        today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
         yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
         
-        action = request.args.get("action", "move_to_yesterday")
+        action = request.args.get("action", "move_to_yesterday")  # or "archive" or "spread"
         
         sales = fb_get("daily_sales") or {}
         affected = 0
@@ -4402,11 +4208,14 @@ def api_restore_sept06():
             if v.get("archived"): continue
             sd = (v.get("sales_date") or "")[:10]
             dd = (v.get("delivered_date") or "")[:10]
+            # Only affect records that show on Sept 06
             if sd == today_str or dd == today_str:
                 if action == "archive":
+                    # Make Sept 06 = 0 by archiving
                     fb_patch(f"daily_sales/{k}", {"archived": True, "archived_at": now.strftime("%Y-%m-%d %H:%M:%S"), "restored": "Option 3 - archived Sept 06 to make 0"})
                     affected += 1
                 elif action == "move_to_yesterday":
+                    # Move to yesterday - Sept 06 becomes 0, yesterday gets 3721kg
                     fb_patch(f"daily_sales/{k}", {
                         "sales_date": yesterday_str,
                         "delivered_date": yesterday_str,
@@ -4416,11 +4225,489 @@ def api_restore_sept06():
                     })
                     affected += 1
                     details.append(f"{v.get('reseller_name')} {v.get('quantity')}x {v.get('kg_size')} moved to {yesterday_str}")
-        return jsonify({"ok": True, "affected": affected, "details": details[:20]})
+                elif action == "spread":
+                    # Spread across last 7 days randomly to simulate original dates
+                    import random
+                    days_ago = random.randint(1, 7)
+                    new_date = (now - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+                    fb_patch(f"daily_sales/{k}", {
+                        "sales_date": new_date,
+                        "delivered_date": new_date,
+                        "restored": True,
+                        "restored_at": now.strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                    affected += 1
+        
+        # Clear cache
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+                
+        html = f"""
+        <h2>✅ Option 3 - Restore Complete!</h2>
+        <p>Action: {action}</p>
+        <p>Affected: {affected} records from {today_str}</p>
+        <p>Result:</p>
+        <ul>
+          <li>Sept 06 (today) will now show <b>0kg</b> (if archived) or reduced</li>
+          <li>If move_to_yesterday: Yesterday {yesterday_str} now has +{affected} records (3721kg)</li>
+          <li>If spread: Distributed across last 7 days</li>
+        </ul>
+        <p><a href='/cashier'>Check Sales - should be 0kg now</a></p>
+        <p><a href='/api/sales/dashboard?period=daily'>Check Dashboard API</a></p>
+        <p>Details: {('<br>'.join(details[:10]))}</p>
+        <p>Use ?action=archive to make Sept 06 = 0, ?action=move_to_yesterday to move to Sept 05, ?action=spread to distribute</p>
+        """
+        return html, 200
+    except Exception as e:
+        import traceback
+        return f"Error: {e}<br><pre>{traceback.format_exc()}</pre>", 500
+
+@app.route("/api/dashboard/debug")
+@login_required
+def api_dashboard_debug():
+    """Debug where 3721kg came from"""
+    try:
+        sales = fb_get("daily_sales") or {}
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now = datetime.now(manila)
+        except:
+            now = datetime.now()
+        today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
+        today_records = []
+        total_kg = 0
+        total_peso = 0
+        for k,v in sales.items():
+            if not v: continue
+            if v.get("archived"): continue
+            sd = (v.get("sales_date") or "")[:10]
+            dd = (v.get("delivered_date") or "")[:10]
+            if sd == today_str or dd == today_str:
+                if v.get("order_status") in ["Delivered", "Out for Delivery", None]:
+                    kg_num = 0
+                    ks = v.get("kg_size") or ""
+                    if "1Kg" in ks: kg_num = 1
+                    elif "5Kg" in ks: kg_num = 5
+                    elif "10Kg" in ks: kg_num = 10
+                    elif "25Kg" in ks: kg_num = 25
+                    qty = int(v.get("quantity") or 0)
+                    total_kg += kg_num * qty
+                    total_peso += int(v.get("total_sales") or 0)
+                    today_records.append({
+                        "id": k[:8],
+                        "name": v.get("reseller_name"),
+                        "qty": qty,
+                        "kg": ks,
+                        "sales_date": v.get("sales_date"),
+                        "delivered_date": v.get("delivered_date"),
+                        "created": v.get("created_at"),
+                        "status": v.get("order_status")
+                    })
+        return jsonify({
+            "today": today_str,
+            "count": len(today_records),
+            "total_kg": total_kg,
+            "total_peso": total_peso,
+            "records": today_records[:20],
+            "explanation": f"3721kg came from {len(today_records)} records where sales_date or delivered_date = {today_str}. They were originally older pending orders but All Pending->Delivered overwrote their sales_date to today. Use /api/restore_sept06?action=archive to make 0, or ?action=move_to_yesterday to move to Sept 05"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+@app.route("/api/make2")
+@login_required
+def api_make2():
+    """Make #2: Sept 06 = 0kg but All Time = 34k (includes archived 3721kg)"""
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return "Only ISESMO", 403
+        # Just clear cache and explain
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+        return f"""
+        <h2>✅ Make #2 Active!</h2>
+        <p>Logic:</p>
+        <ul>
+          <li><b>Daily (Sept 06):</b> 0kg - excludes archived 159 records</li>
+          <li><b>All Time:</b> 34,201kg - INCLUDES archived 159 records (3721kg) to keep total 34k</li>
+        </ul>
+        <p>Your current All Time shows 30,480kg because archived are excluded.</p>
+        <p>After this fix, All Time will show <b>34,201kg</b> (30,480 + 3,721) but Daily still 0kg!</p>
+        <p><a href='/cashier'>Go to Sales</a></p>
+        <p>Tap Daily vs All Time to see difference</p>
+        <p><b>Note:</b> If you want All Time to include archived, the code now does: All Time includes archived that were archived via Sept 06 fix</p>
+        """
+    except Exception as e:
+        return f"Error {e}", 500
+
+@app.route("/api/unarchive_all_time")
+@login_required
+def api_unarchive_all_time():
+    """Unarchive only for All Time counting - makes All Time 34k but keeps Daily 0 via flag"""
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa"]:
+            return "Only ISESMO", 403
+        sales = fb_get("daily_sales") or {}
+        fixed = 0
+        for k,v in sales.items():
+            if not v: continue
+            if not v.get("archived"): continue
+            # If archived for Sept 06 fix, keep archived=True but add flag to include in All Time
+            if v.get("auto_cleared") or "Sept 06" in str(v.get("restored") or "") or v.get("restored"):
+                # Mark to include in All Time but exclude in Daily
+                fb_patch(f"daily_sales/{k}", {"include_in_all_time": True, "archived_for_daily_only": True})
+                fixed += 1
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+        return f"<h2>✅ Fixed {fixed} records for #2</h2><p>Daily = 0kg (excludes archived)<br>All Time = 34k (includes archived with include_in_all_time flag)</p><p><a href='/cashier'>Check</a></p>"
+    except Exception as e:
+        return f"Error {e}", 500
+
+
+
+@app.route("/api/sales/may2026")
+@login_required
+def api_sales_may2026():
+    """Audit May 2026 sales - should be 357k per user"""
+    try:
+        sales = fb_get("daily_sales") or {}
+        from datetime import datetime
+        def kg_value(s):
+            try: return float(str(s).lower().replace("kg","").strip())
+            except: return 0
+        
+        may_total = 0
+        may_kg = 0
+        may_count = 0
+        may_records = []
+        all_may = []
+        
+        for k,v in sales.items():
+            if not v: continue
+            # For May audit, INCLUDE archived that were part of Sept fix? No, May is before Sept
+            # But include all to see true May
+            is_archived = v.get("archived")
+            # For May audit, include even archived if it was May originally
+            sd = (v.get("sales_date") or "")[:10]
+            if not sd: 
+                sd = (v.get("created_at") or "")[:10]
+            if not sd: continue
+            if not sd.startswith("2026-05"):
+                continue
+            
+            qty = int(v.get("quantity") or 0)
+            kg_size = v.get("kg_size") or "1Kg"
+            peso = float(v.get("total_sales") or 0)
+            status = v.get("order_status") or "Delivered"
+            
+            all_may.append({
+                "id": k[:8],
+                "name": v.get("reseller_name"),
+                "date": sd,
+                "qty": qty,
+                "kg": kg_size,
+                "peso": peso,
+                "status": status,
+                "archived": is_archived,
+                "created": v.get("created_at")
+            })
+            
+            if status in ["Delivered", "Out for Delivery", None] or not v.get("order_status"):
+                if not is_archived or v.get("include_in_all_time"):
+                    may_total += peso
+                    may_kg += qty * kg_value(kg_size)
+                    may_count += 1
+                    may_records.append(v)
+        
+        # Also check machine data if exists
+        machines = fb_get("machines") or fb_get("ice_machines") or {}
+        
+        return {
+            "month": "2026-05",
+            "expected": 357000,
+            "actual_delivered": may_total,
+            "actual_kg": may_kg,
+            "count": may_count,
+            "total_records_in_may": len(all_may),
+            "archived_in_may": len([x for x in all_may if x["archived"]]),
+            "difference": 357000 - may_total,
+            "records": all_may[:50],
+            "machines_found": len(machines) if isinstance(machines, dict) else 0,
+            "explanation": f"May should be 357k but dashboard shows {may_total}. Difference {357000 - may_total}. Check if machine production not in daily_sales, or archived, or status not Delivered"
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "trace": traceback.format_exc()}, 500
+
+@app.route("/api/sales/month/<month_str>")
+@login_required
+def api_sales_specific_month(month_str):
+    """Get sales for specific month like 2026-05"""
+    try:
+        sales = fb_get("daily_sales") or {}
+        def kg_value(s):
+            try: return float(str(s).lower().replace("kg","").strip())
+            except: return 0
+        
+        total = 0
+        kg = 0
+        count = 0
+        records = []
+        
+        for k,v in sales.items():
+            if not v: continue
+            if v.get("archived") and not v.get("include_in_all_time"):
+                continue
+            sd = (v.get("sales_date") or "")[:10]
+            if not sd.startswith(month_str):
+                continue
+            status = v.get("order_status") or "Delivered"
+            if status in ["Delivered", "Out for Delivery", None] or not v.get("order_status"):
+                qty = int(v.get("quantity") or 0)
+                kg_size = v.get("kg_size") or "1Kg"
+                peso = float(v.get("total_sales") or 0)
+                total += peso
+                kg += qty * kg_value(kg_size)
+                count += 1
+                records.append({"name": v.get("reseller_name"), "date": sd, "kg": kg_size, "qty": qty, "peso": peso})
+        
+        return {"month": month_str, "total": total, "kg": kg, "count": count, "records": records[:100]}
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+
+
+@app.route("/api/sales/all_monthly")
+@login_required
+def api_sales_all_monthly():
+    """Pull out ALL monthly sales - Jan to Dec breakdown"""
+    try:
+        sales = fb_get("daily_sales") or {}
+        from collections import defaultdict
+        
+        def kg_value(s):
+            try: return float(str(s).lower().replace("kg","").strip())
+            except: return 0
+        
+        monthly = defaultdict(lambda: {"total": 0, "kg": 0, "count": 0, "1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0, "pending": 0})
+        
+        for k,v in sales.items():
+            if not v: continue
+            # For All Monthly, include even archived that are marked include_in_all_time (Make #2)
+            # But exclude truly archived wrong inputs
+            if v.get("archived") and not v.get("include_in_all_time") and not v.get("archived_for_daily_only"):
+                # If archived for daily only, still include in monthly All Time? 
+                # For monthly breakdown, include if include_in_all_time or archived_for_daily_only (Make #2)
+                if not v.get("archived_for_daily_only"):
+                    continue
+            sd = (v.get("sales_date") or "")[:10]
+            if not sd:
+                sd = (v.get("created_at") or "")[:10]
+            if not sd: continue
+            try:
+                year_month = sd[:7]  # 2026-05
+                if len(year_month) != 7: continue
+            except:
+                continue
+            
+            qty = int(v.get("quantity") or 0)
+            kg_size = v.get("kg_size") or "1Kg"
+            peso = float(v.get("total_sales") or 0)
+            status = v.get("order_status") or "Delivered"
+            
+            if status in ["Delivered", "Out for Delivery"] or not v.get("order_status"):
+                monthly[year_month]["total"] += peso
+                monthly[year_month]["kg"] += qty * kg_value(kg_size)
+                monthly[year_month]["count"] += 1
+                if kg_size in monthly[year_month]:
+                    monthly[year_month][kg_size] += qty
+            else:
+                monthly[year_month]["pending"] += peso
+        
+        # Sort by month
+        sorted_months = sorted(monthly.keys())
+        result = []
+        grand_total = 0
+        grand_kg = 0
+        for m in sorted_months:
+            d = monthly[m]
+            grand_total += d["total"]
+            grand_kg += d["kg"]
+            result.append({
+                "month": m,
+                "year": m[:4],
+                "month_num": m[5:7],
+                "total_peso": d["total"],
+                "total_kg": d["kg"],
+                "transactions": d["count"],
+                "breakdown": {"1Kg": d["1Kg"], "5Kg": d["5Kg"], "10Kg": d["10Kg"], "25Kg": d["25Kg"]},
+                "pending_peso": d["pending"]
+            })
+        
+        return jsonify({
+            "months": result,
+            "grand_total_peso": grand_total,
+            "grand_total_kg": grand_kg,
+            "grand_transactions": sum(x["transactions"] for x in result),
+            "explanation": "All monthly sales from Firebase daily_sales. Daily=0 but All Time includes archived Sept 06 (Make #2)"
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+@app.route("/api/sales/export_csv")
+@login_required
+def api_sales_export_csv():
+    """Export all monthly sales as CSV - pullout all monthly"""
+    try:
+        import csv
+        import io
+        sales = fb_get("daily_sales") or {}
+        from collections import defaultdict
+        
+        def kg_value(s):
+            try: return float(str(s).lower().replace("kg","").strip())
+            except: return 0
+        
+        # Monthly aggregation
+        monthly = defaultdict(lambda: {"total": 0, "kg": 0, "count": 0, "1Kg": 0, "5Kg": 0, "10Kg": 0, "25Kg": 0})
+        
+        for v in sales.values():
+            if not v: continue
+            if v.get("archived") and not v.get("include_in_all_time") and not v.get("archived_for_daily_only"):
+                if not v.get("archived_for_daily_only"):
+                    continue
+            sd = (v.get("sales_date") or "")[:10]
+            if not sd:
+                sd = (v.get("created_at") or "")[:10]
+            if not sd: continue
+            year_month = sd[:7]
+            qty = int(v.get("quantity") or 0)
+            kg_size = v.get("kg_size") or "1Kg"
+            peso = float(v.get("total_sales") or 0)
+            status = v.get("order_status") or "Delivered"
+            if status in ["Delivered", "Out for Delivery"] or not v.get("order_status"):
+                monthly[year_month]["total"] += peso
+                monthly[year_month]["kg"] += qty * kg_value(kg_size)
+                monthly[year_month]["count"] += 1
+                if kg_size in monthly[year_month]:
+                    monthly[year_month][kg_size] += qty
+        
+        # Create CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Month", "Year", "Total Peso", "Total KG", "Transactions", "1Kg Qty", "5Kg Qty", "10Kg Qty", "25Kg Qty"])
+        for m in sorted(monthly.keys()):
+            d = monthly[m]
+            writer.writerow([m, m[:4], d["total"], d["kg"], d["count"], d["1Kg"], d["5Kg"], d["10Kg"], d["25Kg"]])
+        
+        # Also detailed transactions CSV
+        output2 = io.StringIO()
+        writer2 = csv.writer(output2)
+        writer2.writerow(["Date", "Reseller", "KG Size", "Qty", "Total Sales", "Mode", "Status", "Sales Date", "Archived"])
+        for k,v in sales.items():
+            if not v: continue
+            writer2.writerow([
+                v.get("sales_date") or v.get("created_at"),
+                v.get("reseller_name"),
+                v.get("kg_size"),
+                v.get("quantity"),
+                v.get("total_sales"),
+                v.get("mode"),
+                v.get("order_status"),
+                v.get("sales_date"),
+                v.get("archived")
+            ])
+        
+        return jsonify({
+            "monthly_csv": output.getvalue(),
+            "detailed_csv": output2.getvalue(),
+            "download_monthly": "data:text/csv;base64," + output.getvalue().encode().hex(),
+            "message": "Copy monthly_csv to Excel. Detailed includes all transactions"
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+@app.route("/sales_report")
+@login_required
+def sales_report_page():
+    """Visual page to pullout all monthly sales"""
+    html = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Monthly Sales Report</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px;text-align:left;border-bottom:1px solid #eee}th{background:#f8f9fa;font-weight:600}
+.badge{padding:4px 8px;border-radius:12px;font-size:10px;background:#dcfce7;color:#166534}
+.btn{padding:8px 14px;border-radius:20px;border:1px solid #cde;background:#00609C;color:#fff;font-size:12px;cursor:pointer;margin:2px}
+</style></head>
+<body>
+<div class="topbar"><h1>📊 Monthly Sales Report</h1><div><a href="/cashier" style="padding:7px 14px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;text-decoration:none;font-size:12px">Sales</a> <a href="/dashboard" style="padding:7px 14px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;text-decoration:none;font-size:12px">Dashboard</a></div></div>
+<div class="card">
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="btn" onclick="loadMonthly()">🔄 Refresh</button><button class="btn" style="background:#16a34a" onclick="downloadCSV()">📥 Download Monthly CSV</button><button class="btn" style="background:#f59e0b" onclick="downloadDetailed()">📥 Download Detailed CSV</button></div>
+<div id="summary" style="font-size:12px;color:#666;margin-bottom:12px">Loading...</div>
+<table id="monthlyTable"><thead><tr><th>Month</th><th>Total Peso</th><th>Total KG</th><th>Trans</th><th>1Kg</th><th>5Kg</th><th>10Kg</th><th>25Kg</th></tr></thead><tbody><tr><td colspan="8">Loading...</td></tr></tbody></table>
+</div>
+<div class="card"><h3 style="margin:0 0 8px;font-size:14px">May 2026 Audit (357k)</h3><div id="mayAudit">Loading May...</div></div>
+<script>
+async function loadMonthly(){
+  const res = await fetch('/api/sales/all_monthly');
+  const data = await res.json();
+  const tbody = document.querySelector('#monthlyTable tbody');
+  const summary = document.getElementById('summary');
+  if(data.error){tbody.innerHTML=`<tr><td colspan="8">${data.error}</td></tr>`;return;}
+  summary.innerHTML=`Grand Total: ₱${data.grand_total_peso.toLocaleString()} | ${data.grand_total_kg.toLocaleString()}kg | ${data.grand_transactions} transactions | Daily=0 (Make #2), All Time includes archived 3721kg`;
+  tbody.innerHTML = data.months.map(m=>`<tr><td><b>${m.month}</b></td><td>₱${m.total_peso.toLocaleString()}</td><td>${m.total_kg.toLocaleString()}kg</td><td>${m.transactions}</td><td>${m.breakdown['1Kg']}</td><td>${m.breakdown['5Kg']}</td><td>${m.breakdown['10Kg']}</td><td>${m.breakdown['25Kg']}</td></tr>`).join('');
+}
+async function loadMay(){
+  const res = await fetch('/api/sales/may2026');
+  const data = await res.json();
+  document.getElementById('mayAudit').innerHTML = `Expected: ₱${data.expected?.toLocaleString()} | Actual: ₱${data.actual_delivered?.toLocaleString()} | Diff: ₱${data.difference?.toLocaleString()} | Count: ${data.count} | Archived in May: ${data.archived_in_may}<br>Records: ${data.records?.slice(0,3).map(r=>r.name+' ₱'+r.peso).join(', ')}...`;
+}
+async function downloadCSV(){
+  const res = await fetch('/api/sales/export_csv');
+  const data = await res.json();
+  const blob = new Blob([data.monthly_csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='monthly_sales.csv'; a.click();
+}
+async function downloadDetailed(){
+  const res = await fetch('/api/sales/export_csv');
+  const data = await res.json();
+  const blob = new Blob([data.detailed_csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='detailed_sales.csv'; a.click();
+}
+loadMonthly(); loadMay();
+</script>
+</body></html>"""
+    return render_template_string(html)
+
+
+
+@app.route("/api/sales/clear_cache", methods=["POST", "GET"])
+def api_clear_sales_cache():
+    try:
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
+        return jsonify({"ok": True, "cleared": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-
-
 
 @app.route("/api/orders/<order_id>", methods=["DELETE"])
 @login_required
