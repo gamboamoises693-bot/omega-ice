@@ -251,9 +251,13 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
   <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="alarmVibrateCheck" checked onchange="saveAlarmSettings()"> Vibrate</label>
   <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="alarmBgCheck" checked onchange="saveAlarmSettings()"> Background Notif</label>
 </div>
-<div style="margin-top:8px;display:flex;gap:6px">
+<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
   <button onclick="testAlarm()" style="padding:6px 10px;border-radius:8px;border:1px solid #ccc;background:#fff;font-size:11px">🔊 Test Alarm</button>
+  <button onclick="testVoice()" style="padding:6px 10px;border-radius:8px;border:1px solid #00609C;background:#eef7ff;color:#00609C;font-size:11px">🗣️ Test Voice - "May nag order ng ice"</button>
   <span style="font-size:9px;color:#888;margin-top:4px" id="alarmStatus">Ready</span>
+</div>
+<div style="font-size:9px;color:#00609C;margin-top:4px" id="voiceStatus">
+  🎤 Voice: Sa <b>omega</b> at <b>yhel</b> accounts = nagsasalita "May nag order ng ice!" | Sa <b>isesmo</b> = alarm lang
 </div>
 <div style="font-size:9px;color:#666;margin-top:6px;background:#fff;padding:6px;border-radius:6px">
 💡 <b>Para mag-alarm kahit naka-exit:</b> I-Add to Home Screen mo yung site (Chrome menu > Add to Home Screen) tapos Allow Notification. Kahit naka-close, mag-no-notify pa rin pag may bagong order basta may internet ang tablet.
@@ -423,7 +427,7 @@ async function fetchLiveOrdersCount(){
         badge.style.display = 'inline';
         // FIX #4: ALARM pag may bagong order
         if(active > lastActiveOrders && lastActiveOrders>=0){
-          triggerOrderAlarm(active);
+          triggerOrderAlarm(active, orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)));
         }
       } else {
         badge.style.display = 'none';
@@ -435,6 +439,95 @@ async function fetchLiveOrdersCount(){
 
 let alarmLoopInterval = null;
 let alarmAudioContext = null;
+
+
+function speakIceOrder(count, orders=[]){
+  if(!('speechSynthesis' in window)) return;
+  try{
+    // Cancel previous speech
+    window.speechSynthesis.cancel();
+    
+    // Build message in Tagalog
+    let message = '';
+    if(count===1){
+      message = 'May nag order ng ice! May isang bagong order!';
+    } else {
+      message = `May nag order ng ice! May ${count} na bagong order!`;
+    }
+    
+    // Add reseller name if available
+    if(orders && orders.length>0){
+      const firstOrder = orders[0];
+      const name = firstOrder.reseller_name || firstOrder.customer_name || '';
+      if(name){
+        message += ` Galing kay ${name}.`;
+      }
+      // Add kg info if available
+      const qty = firstOrder.quantity || '';
+      const kg = firstOrder.kg_size || '';
+      if(qty && kg){
+        message += ` ${qty} ${kg}.`;
+      }
+    }
+    
+    message += ' Paki check ang live orders!';
+    
+    // Create utterance with loud, clear voice
+    const utterance = new SpeechSynthesisUtterance(message);
+    utterance.lang = 'fil-PH'; // Filipino, fallback to tl-PH
+    utterance.rate = 0.95; // Slightly slower for clarity
+    utterance.pitch = 1.1;
+    utterance.volume = 1.0; // Max volume
+    
+    // Try to get Filipino voice, else default
+    const voices = window.speechSynthesis.getVoices();
+    const filVoice = voices.find(v=>v.lang.includes('fil') || v.lang.includes('tl') || v.lang.includes('PH') || v.name.toLowerCase().includes('filipino'));
+    const enVoice = voices.find(v=>v.lang.includes('en-PH') || v.lang.includes('en-US'));
+    if(filVoice) utterance.voice = filVoice;
+    else if(enVoice) utterance.voice = enVoice;
+    
+    // Speak 2 times with pause for emphasis
+    window.speechSynthesis.speak(utterance);
+    
+    // Second repeat after 4 seconds for isesmo to hear even if busy
+    setTimeout(()=>{
+      if(lastActiveOrders>0){
+        const repeat = new SpeechSynthesisUtterance('May nag order pa ng ice! Paki check!');
+        repeat.lang = 'fil-PH';
+        repeat.rate = 0.95;
+        repeat.volume = 1.0;
+        if(filVoice) repeat.voice = filVoice;
+        window.speechSynthesis.speak(repeat);
+      }
+    }, 4000);
+    
+    console.log('Speaking:', message);
+  }catch(e){
+    console.log('Voice error', e);
+  }
+}
+
+// Load voices (needed for Chrome)
+if('speechSynthesis' in window){
+  window.speechSynthesis.onvoiceschanged = ()=>{
+    window.speechSynthesis.getVoices();
+  };
+  // Preload voices
+  setTimeout(()=>{ window.speechSynthesis.getVoices(); }, 500);
+}
+
+function testVoice(){
+  const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
+  const isIsesmo = staffName.includes('isesmo');
+  if(isIsesmo){
+    alert('Sa ISESMO account, alarm lang gagamitin (walang voice). Mag-login ka sa omega o yhel account para ma-test ang voice.');
+    testAlarm();
+  } else {
+    speakIceOrder(1, [{reseller_name:'Test Customer', quantity:5, kg_size:'5Kg'}]);
+    document.getElementById('alarmStatus').textContent='🔊 Voice test: May nag order ng ice!';
+  }
+}
+
 
 function getAlarmSettings(){
   return {
@@ -507,15 +600,26 @@ function playAlarmSound(settings){
   }
 }
 
-function triggerOrderAlarm(count){
+function triggerOrderAlarm(count, orders=[]){
   if(!alarmEnabled) return;
   const settings = getAlarmSettings();
+  // Check account type - isesmo = alarm only, omega/yhel = voice + alarm
+  const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
+  const isIsesmo = staffName.includes('isesmo');
+  const isVoiceAccount = staffName.includes('omega') || staffName.includes('yhel') || staffName.includes('yhel');
+  // For safety, if staff name empty, assume voice account
+
   try{
     // Show stop button
     document.getElementById('stopAlarmBtn').style.display='inline-block';
     document.getElementById('alarmStatus').textContent = '🔴 ALARMING - '+count+' orders!';
     
-    // Play immediately
+    // VOICE for omega/yhel accounts - speak "May nag order ng ice"
+    if(isVoiceAccount){
+      speakIceOrder(count, orders);
+    }
+    
+    // Play alarm sound (always, but for isesmo only alarm)
     playAlarmSound(settings);
     
     // Vibrate
@@ -557,6 +661,11 @@ function triggerOrderAlarm(count){
           if(active===0){
             stopAlarmForever();
           } else {
+            const staffNameLoop = (document.querySelector('.staff')?.textContent || '').toLowerCase();
+            const isVoiceLoop = staffNameLoop.includes('omega') || staffNameLoop.includes('yhel');
+            if(isVoiceLoop){
+              speakIceOrder(active, data.orders||[]);
+            }
             playAlarmSound(settings);
             if(settings.vibrate && navigator.vibrate) navigator.vibrate([1000,200,1000]);
           }
