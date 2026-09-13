@@ -2431,10 +2431,18 @@ async function loadCustomers(){
   const otps=data.otps||{};
   const q=document.getElementById('search').value.toLowerCase();
   const filtered=rows.filter(r=>(r.store_name||'').toLowerCase().includes(q)||(r.phone||'').includes(q));
-  document.getElementById('tbody').innerHTML=filtered.map(r=>{
+  const tbody=document.getElementById('tbody');
+  tbody.innerHTML='';
+  filtered.forEach(r=>{
     const otpInfo=otps[r.phone]||'';
-    return `<tr><td><b>${r.store_name}</b><br><small>₱${r.credit_balance||0}</small></td><td>${r.phone}<br><small style="color:${r.password_hash?'green':'red'}">${r.password_hash?'Has pwd':'No pwd'}</small></td><td>${otpInfo?'<span style="background:#fef3c7;padding:2px 6px;border-radius:10px;font-size:10px">OTP:'+otpInfo+'</span>':'-'}<br><small>${r.status||'active'}</small></td><td><button class="btn" style="background:#22c55e;color:#fff" onclick="openEdit('${r.id}','${r.store_name}','${r.phone}')">Edit</button></td></tr>`;
-  }).join('');
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td><b>${r.store_name}</b><br><small>₱${r.credit_balance||0}</small></td><td>${r.phone}<br><small style="color:${r.password_hash?'green':'red'}">${r.password_hash?'Has pwd':'No pwd'}</small></td><td>${otpInfo?'<span style="background:#fef3c7;padding:2px 6px;border-radius:10px;font-size:10px">OTP:'+otpInfo+'</span>':'-'}<br><small>${r.status||'active'}</small></td><td></td>`;
+    const btn=document.createElement('button');
+    btn.className='btn'; btn.style.background='#22c55e'; btn.style.color='#fff'; btn.textContent='Edit';
+    btn.onclick=()=>openEdit(r.id,r.store_name,r.phone);
+    tr.lastElementChild.appendChild(btn);
+    tbody.appendChild(tr);
+  });
 }
 function openEdit(id,store,phone){editingId=id;document.getElementById('editStore').textContent=store;document.getElementById('editPhone').value=phone;document.getElementById('editCard').style.display='block';}
 function closeEdit(){document.getElementById('editCard').style.display='none';}
@@ -2520,8 +2528,20 @@ def api_set_reseller_password(reseller_id):
             return jsonify({"ok": False, "error": "Phone and password required"}), 400
         if len(password) < 4:
             return jsonify({"ok": False, "error": "Password min 4"}), 400
+        # Duplicate phone check (except current id) - fixes Tsongs Canteen case
+        try:
+            all_resellers = fb_get("resellers") or {}
+            for k,v in all_resellers.items():
+                if k == reseller_id:
+                    continue
+                if not v:
+                    continue
+                if clean_phone(v.get("phone") or "") == phone:
+                    return jsonify({"ok": False, "error": f"Phone {phone} already used by {v.get('store_name')}"}), 400
+        except:
+            pass
         hashed = hash_customer_password(password)
-        fb_patch(f"resellers/{reseller_id}", {"phone": phone, "password_hash": hashed, "status": "active"})
+        fb_patch(f"resellers/{reseller_id}", {"phone": phone, "password_hash": hashed, "status": "active", "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "updated_by": session.get("staff_name")})
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
