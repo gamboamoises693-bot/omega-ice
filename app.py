@@ -261,7 +261,7 @@ async function saveSale(){const qty=parseInt(document.getElementById('qtyInput')
     // Store timestamp
     localStorage.setItem('omega_last_save', timeStr);
     cancelEdit();
-    if(cashierPeriod==='daily'){loadRecent();} else {loadPeriodSales(cashierPeriod);}
+    if(cashierPeriod==='daily'){loadRecent(selectedDailyDate);} else { loadPeriodSales(cashierPeriod, selectedSubPeriod); }
     loadToday();
   }else{statusEl.textContent=data.error||'Error';statusEl.className='status err'}}
 async function editSale(id){
@@ -332,7 +332,7 @@ function setCashierPeriod(p){
   }
 }
 
-async function loadPeriodSales(period){
+async function loadPeriodSales(period, subVal=null){
   const body = document.getElementById('periodSalesBody');
   const summary = document.getElementById('periodSalesSummary');
   const label = document.getElementById('periodSalesLabel');
@@ -340,8 +340,8 @@ async function loadPeriodSales(period){
   label.textContent = period.toUpperCase() + ' SALES RECORD';
   try{
     let url = '/api/sales/by_period?period='+period;
+    let sub = subVal || selectedSubPeriod;
     if(sub) url += '&sub='+encodeURIComponent(sub);
-    else if(selectedSubPeriod) url += '&sub='+encodeURIComponent(selectedSubPeriod);
     const res = await fetch(url);
     const data = await res.json();
     const rows = data.sales||[];
@@ -608,7 +608,9 @@ function onSubPeriodChange(){
   const sel=document.getElementById('subPeriodSelect');
   selectedSubPeriod = sel.value;
   if(cashierPeriod!=='daily'){
-    loadPeriodSales(cashierPeriod, selectedSubPeriod);
+    const sel = document.getElementById('subPeriodSelect');
+    const v = sel ? sel.value : selectedSubPeriod;
+    loadPeriodSales(cashierPeriod, v);
   }
 }
 
@@ -642,8 +644,12 @@ const origSetCashier = setCashierPeriod;
 setCashierPeriod = function(p){
   origSetCashier(p);
   populateSubPeriodPicker(p);
-  if(p!=='daily' && selectedSubPeriod){
-    setTimeout(()=>loadPeriodSales(p, selectedSubPeriod), 100);
+  if(p!=='daily'){
+    setTimeout(()=>{
+      const sel = document.getElementById('subPeriodSelect');
+      const v = sel ? sel.value : selectedSubPeriod;
+      loadPeriodSales(p, v);
+    }, 150);
   }
 }
 
