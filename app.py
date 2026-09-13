@@ -186,6 +186,8 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
   <div id="subPeriodPicker" style="display:none;margin-top:10px;background:rgba(255,255,255,.15);border-radius:10px;padding:10px">
     <label style="font-size:10px;color:#fff;opacity:.9;margin:0 0 6px;display:block" id="subPeriodLabel">Select Week</label>
     <select id="subPeriodSelect" onchange="onSubPeriodChange()" style="width:100%;padding:8px;border-radius:8px;border:none;font-size:12px"></select>
+    <label style="font-size:10px;color:#fff;opacity:.8;margin:8px 0 6px;display:block">🔎 O maghanap gamit ang date</label>
+    <input type="date" id="periodDateSearchInput" onchange="onPeriodDateSearch()" style="width:100%;padding:8px;border-radius:8px;border:none;font-size:12px">
   </div>
   <div id="dailyDatePicker" class="daily-date-picker">
     <label style="font-size:10px;color:#fff;opacity:.9;margin:0 0 6px;display:block">📅 Pili ng Date (Daily)</label>
@@ -943,6 +945,10 @@ function populateSubPeriodPicker(period){
   const label = document.getElementById('subPeriodLabel');
   const dailyPicker = document.getElementById('dailyDatePicker');
   select.innerHTML='';
+  // Reset the date-search field when switching period tabs so it doesn't show
+  // a stale date left over from a different period (weekly/monthly/etc).
+  const dateSearchInp = document.getElementById('periodDateSearchInput');
+  if(dateSearchInp) dateSearchInp.value = '';
   
   // Always hide daily picker first
   if(dailyPicker) dailyPicker.style.display='none';
@@ -1028,11 +1034,45 @@ function getWeekNumber(d){
 function onSubPeriodChange(){
   const sel=document.getElementById('subPeriodSelect');
   selectedSubPeriod = sel.value;
+  // Manual dropdown pick overrides any date-search value so they don't conflict
+  const dateInp = document.getElementById('periodDateSearchInput');
+  if(dateInp) dateInp.value = '';
   if(cashierPeriod!=='daily'){
     const sel = document.getElementById('subPeriodSelect');
     const v = sel ? sel.value : selectedSubPeriod;
     loadPeriodSales(cashierPeriod, v);
   }
+}
+
+// FIX: dynamic "search by date" for weekly/monthly/quarterly/yearly - pumili ka
+// lang ng kahit anong date, awtomatikong makukuha kung anong linggo/buwan/
+// quarter/taon iyon at agad na lalabas ang sales ng period na iyon (parang
+// yung Daily date search, pero applicable na rin sa ibang period tabs).
+function onPeriodDateSearch(){
+  const inp = document.getElementById('periodDateSearchInput');
+  if(!inp || !inp.value) return;
+  const picked = new Date(inp.value + 'T00:00:00');
+  let sub = null;
+  if(cashierPeriod === 'weekly'){
+    sub = 'WW' + String(getWeekNumber(picked)).padStart(2,'0');
+  } else if(cashierPeriod === 'monthly'){
+    sub = String(picked.getMonth()+1).padStart(2,'0');
+  } else if(cashierPeriod === 'quarterly'){
+    sub = 'Q' + (Math.floor(picked.getMonth()/3)+1);
+  } else if(cashierPeriod === 'yearly'){
+    sub = String(picked.getFullYear());
+  } else {
+    return; // daily already has its own dedicated date search (dailyDateInput)
+  }
+  selectedSubPeriod = sub;
+  // Sync the dropdown selection so it matches what the date search picked
+  const sel = document.getElementById('subPeriodSelect');
+  if(sel){
+    for(const opt of sel.options){
+      opt.selected = (opt.value === sub);
+    }
+  }
+  loadPeriodSales(cashierPeriod, sub);
 }
 
 
