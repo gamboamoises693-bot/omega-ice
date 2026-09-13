@@ -142,14 +142,18 @@ label{display:block;font-size:12px;color:#666;margin:10px 0 4px}input{width:100%
 .status{font-size:13px;text-align:center;margin-top:8px;min-height:18px}.status.ok{color:#1a8a4a}.status.err{color:#c73333}
 table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:6px 4px;border-bottom:1px solid #eee}th{color:#888;font-weight:500}
 .del-btn{background:none;border:none;color:#c0392b;font-size:12px}.edit-btn{background:none;border:none;color:#0096D6;font-size:12px;margin-right:6px;font-weight:bold}
-.save-btn{position:sticky;bottom:20px;z-index:20;box-shadow:0 4px 12px rgba(0,96,156,.3)} /* FIX: sticky save */
-.bottom-spacer{height:90px} /* FIX: spacer */
+.save-btn{position:relative;z-index:5;box-shadow:0 4px 12px rgba(0,96,156,.3);margin-top:16px} /* FIX: sticky save */
+.bottom-spacer{height:140px} /* FIX: spacer */
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;cursor:pointer;transition:all .2s;font-size:14px}
 .icon-btn.edit{color:#00609C;border-color:#cde;background:#eef7ff}
 .icon-btn.edit:hover{background:#00609C;color:#fff}
 .icon-btn.del{color:#ef4444;border-color:#fecaca;background:#fef2f2}
 .icon-btn.del:hover{background:#ef4444;color:#fff}
 .icon-btn:active{transform:scale(.95)}
+
+.daily-date-picker{display:none;margin-top:10px;background:rgba(255,255,255,.15);border-radius:10px;padding:10px}
+.daily-date-picker input{width:100%;padding:8px;border-radius:8px;border:none;font-size:13px}
+
 .date-input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:13px;margin-top:4px}
 
 .period-sales-table td{font-size:11px}
@@ -182,6 +186,14 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
   <div id="subPeriodPicker" style="display:none;margin-top:10px;background:rgba(255,255,255,.15);border-radius:10px;padding:10px">
     <label style="font-size:10px;color:#fff;opacity:.9;margin:0 0 6px;display:block" id="subPeriodLabel">Select Week</label>
     <select id="subPeriodSelect" onchange="onSubPeriodChange()" style="width:100%;padding:8px;border-radius:8px;border:none;font-size:12px"></select>
+  </div>
+  <div id="dailyDatePicker" class="daily-date-picker">
+    <label style="font-size:10px;color:#fff;opacity:.9;margin:0 0 6px;display:block">📅 Pili ng Date (Daily)</label>
+    <input type="date" id="dailyDateInput" onchange="onDailyDateChange()">
+    <div style="display:flex;gap:6px;margin-top:6px">
+      <button onclick="setDailyToday()" style="flex:1;padding:6px;border-radius:8px;border:none;background:rgba(255,255,255,.3);color:#fff;font-size:11px">Today</button>
+      <button onclick="setDailyYesterday()" style="flex:1;padding:6px;border-radius:8px;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:11px">Yesterday</button>
+    </div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;text-align:center;">
     <div><div style="font-size:18px;font-weight:700;" id="todayKg">0kg</div><div style="font-size:9px;opacity:.8;">TOTAL KG</div></div>
@@ -327,7 +339,10 @@ async function loadPeriodSales(period){
   body.innerHTML='<tr><td colspan=6>Loading '+period+' sales...</td></tr>';
   label.textContent = period.toUpperCase() + ' SALES RECORD';
   try{
-    const res = await fetch('/api/sales/by_period?period='+period);
+    let url = '/api/sales/by_period?period='+period;
+    if(sub) url += '&sub='+encodeURIComponent(sub);
+    else if(selectedSubPeriod) url += '&sub='+encodeURIComponent(selectedSubPeriod);
+    const res = await fetch(url);
     const data = await res.json();
     const rows = data.sales||[];
     if(!rows.length){
@@ -426,16 +441,22 @@ function stopAlarm(){
 
 setInterval(fetchLiveOrdersCount, 30000);
 fetchLiveOrdersCount();
-async function loadToday(){
+async function loadToday(customDate=null){
   // Show date immediately so not stuck on 2026-09-06 - Tap Refresh
   const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
+  let todayStr = now.toISOString().split('T')[0];
+  if(customDate) todayStr = customDate;
+  else if(selectedDailyDate && cashierPeriod==='daily') todayStr = selectedDailyDate;
+  
   document.getElementById('todayDate').textContent = todayStr + ' to ' + todayStr;
-  document.getElementById('todayLabel').textContent = (cashierPeriod||'daily').toUpperCase() + ' SALES';
+  document.getElementById('todayLabel').textContent = (cashierPeriod||'daily').toUpperCase() + ' SALES' + (customDate ? ' - '+customDate : '');
   try{
     const controller = new AbortController();
-    const timeout = setTimeout(()=>controller.abort(), 8000); // 8 sec timeout
-    const res=await fetch('/api/sales/dashboard?period='+cashierPeriod, {signal: controller.signal});
+    const timeout = setTimeout(()=>controller.abort(), 8000);
+    let url = '/api/sales/dashboard?period='+cashierPeriod;
+    if(customDate) url += '&date='+customDate;
+    else if(selectedDailyDate && cashierPeriod==='daily') url += '&date='+selectedDailyDate;
+    const res=await fetch(url, {signal: controller.signal});
     clearTimeout(timeout);
     if(res.status===401){window.location.href='/login';return;}
     const data=await res.json();
@@ -455,9 +476,12 @@ async function loadToday(){
     document.getElementById('todayBreakdown').textContent = 'Failed to load - tap Refresh. Error: ' + (e.message||'timeout');
   }
 }
-async function loadRecent(){
+async function loadRecent(customDate=null){
   try{
-    const res=await fetch('/api/sales/recent');
+    let recentUrl = '/api/sales/recent';
+    if(customDate) recentUrl += '?date='+customDate;
+    else if(selectedDailyDate && cashierPeriod==='daily') recentUrl += '?date='+selectedDailyDate;
+    const res=await fetch(recentUrl);
     if(res.status===401){window.location.href='/login';return;}
     let rows=await res.json();
     if(rows.sales)rows=rows.sales;
@@ -496,9 +520,25 @@ function populateSubPeriodPicker(period){
   const picker = document.getElementById('subPeriodPicker');
   const select = document.getElementById('subPeriodSelect');
   const label = document.getElementById('subPeriodLabel');
+  const dailyPicker = document.getElementById('dailyDatePicker');
   select.innerHTML='';
   
-  if(period==='weekly'){
+  // Always hide daily picker first
+  if(dailyPicker) dailyPicker.style.display='none';
+  
+  if(period==='daily'){
+    // Show daily date picker
+    if(dailyPicker){
+      dailyPicker.style.display='block';
+      const dailyInput = document.getElementById('dailyDateInput');
+      if(!dailyInput.value){
+        dailyInput.value = new Date().toISOString().split('T')[0];
+      }
+    }
+    picker.style.display='none';
+    selectedSubPeriod=null;
+    return;
+  } else if(period==='weekly'){
     label.textContent='Select Week (WW01-WW52)';
     const now = new Date();
     const currentWeek = getWeekNumber(now);
@@ -570,6 +610,31 @@ function onSubPeriodChange(){
   if(cashierPeriod!=='daily'){
     loadPeriodSales(cashierPeriod, selectedSubPeriod);
   }
+}
+
+
+let selectedDailyDate = null;
+
+function onDailyDateChange(){
+  const inp = document.getElementById('dailyDateInput');
+  selectedDailyDate = inp.value;
+  // Load both today card and recent for that date
+  loadToday(selectedDailyDate);
+  loadRecent(selectedDailyDate);
+}
+
+function setDailyToday(){
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('dailyDateInput').value = today;
+  onDailyDateChange();
+}
+
+function setDailyYesterday(){
+  const d = new Date();
+  d.setDate(d.getDate()-1);
+  const y = d.toISOString().split('T')[0];
+  document.getElementById('dailyDateInput').value = y;
+  onDailyDateChange();
 }
 
 // Hook into setCashierPeriod to show picker
@@ -875,21 +940,45 @@ def cashier_page():
 def api_resellers():
     q = request.args.get("q", "").strip().lower()
     # Try online
-    data = fb_get("resellers")
+    try:
+        data = fb_get("resellers")
+    except:
+        data = None
     if data:
-        save_cached_resellers(data)
+        try:
+            save_cached_resellers(data)
+        except:
+            pass
         resellers = []
         for key, val in data.items():
-            if val:
-                name = val.get("store_name", "")
-                if not q or q in name.lower():
-                    resellers.append({"id": key, "store_name": name, "credit_balance": val.get("credit_balance", 0)})
-        resellers.sort(key=lambda x: x["store_name"])
-        return jsonify(resellers[:50] if not q else resellers[:20])
+            if not val:
+                continue
+            name = (val.get("store_name") or "").strip()
+            phone = (val.get("phone") or val.get("contact") or "").strip()
+            # Search in both name and phone, case-insensitive, partial match
+            if not q:
+                resellers.append({"id": key, "store_name": name, "credit_balance": val.get("credit_balance", 0), "phone": phone})
+            else:
+                # q matches name OR phone OR store_name contains q
+                if q in name.lower() or q in phone.lower() or q in phone.replace(" ",""):
+                    resellers.append({"id": key, "store_name": name, "credit_balance": val.get("credit_balance", 0), "phone": phone})
+                # Also try without spaces
+                elif q.replace(" ","") in name.lower().replace(" ",""):
+                    resellers.append({"id": key, "store_name": name, "credit_balance": val.get("credit_balance", 0), "phone": phone})
+        resellers.sort(key=lambda x: x["store_name"].lower())
+        # Return more results for search
+        if not q:
+            return jsonify(resellers[:100])
+        else:
+            return jsonify(resellers[:50])
     else:
         # offline fallback - use cached
-        cached = get_cached_resellers(q)
-        return jsonify(cached)
+        try:
+            cached = get_cached_resellers(q)
+            # also filter by phone in cached if needed
+            return jsonify(cached[:50])
+        except:
+            return jsonify([])
 
 @app.route("/api/price")
 @login_required
@@ -994,14 +1083,16 @@ def api_create_sale():
 @app.route("/api/sales/recent")
 @login_required
 def api_recent_sales():
-    # FIXED: Dashboard vs Recent Sales - both show customer Delivered today
+    # FIXED: Dashboard vs Recent Sales + custom date filter
+    custom_date = request.args.get("date", "").strip()
+
     try:
         import pytz
         manila = pytz.timezone('Asia/Manila')
         now = datetime.now(manila)
     except:
         now = datetime.now()
-    today_str = now.strftime("%Y-%m-%d")
+    today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
     
     data = fb_get("daily_sales")
     sales = []
@@ -3059,6 +3150,7 @@ def api_set_reseller_password(reseller_id):
 @login_required
 def api_sales_dashboard():
     period = request.args.get("period", "daily").lower()
+    custom_date = request.args.get("date", "").strip()
     # Fast path for daily - use Manila time
     try:
         import pytz
@@ -3161,7 +3253,7 @@ def api_today_sales():
         now = datetime.now(manila)
     except:
         now = datetime.now()
-    today_str = now.strftime("%Y-%m-%d")
+    today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
     def kg_value(s):
         try: return float(str(s).lower().replace("kg","").strip())
         except: return 0
@@ -3790,7 +3882,7 @@ def api_restore_sept06():
             now = datetime.now(manila)
         except:
             now = datetime.now()
-        today_str = now.strftime("%Y-%m-%d")
+        today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
         yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
         
         action = request.args.get("action", "move_to_yesterday")  # or "archive" or "spread"
@@ -3872,7 +3964,7 @@ def api_dashboard_debug():
             now = datetime.now(manila)
         except:
             now = datetime.now()
-        today_str = now.strftime("%Y-%m-%d")
+        today_str = custom_date if custom_date else now.strftime("%Y-%m-%d")
         today_records = []
         total_kg = 0
         total_peso = 0
