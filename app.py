@@ -90,16 +90,18 @@ KG_OPTIONS = ["1Kg", "5Kg", "10Kg", "25Kg"]
 FALLBACK_PRICES = {"1Kg": 10, "5Kg": 50, "10Kg": 100, "25Kg": 250}
 
 LOGIN_HTML = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Omega Purified Ice - Login</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Omega Purified Ice - Login</title>
 <style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}.card{background:#fff;border-radius:16px;padding:28px 24px;width:100%;max-width:340px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.06)}h1{font-size:20px;color:#00609C;margin:0 0 4px}.subtitle{font-size:13px;color:#333;margin:0 0 4px;font-weight:600}.tagline{font-size:11px;color:#888;margin:0 0 24px}.dots{font-size:28px;letter-spacing:8px;margin:12px 0;color:#222;min-height:36px}.msg{font-size:12px;color:#888;min-height:18px;margin-bottom:16px}.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}.keypad button{padding:20px 0;font-size:24px;border-radius:12px;border:none;background:#f0f0f0;cursor:pointer}.keypad button.clear{background:#e5433d;color:#fff}.keypad button.back{background:#999;color:#fff}</style>
 </head><body>
 
 <div id="kioskOverlay">
-  <div style="text-align:center">
-    <div style="font-size:48px;margin-bottom:20px">🧊</div>
-    <div style="font-size:24px;font-weight:700;margin-bottom:10px">OMEGA ICE - KIOSK MODE</div>
-    <div style="font-size:14px;opacity:0.7;margin-bottom:30px">Tap to start kiosk</div>
-    <button onclick="enterKioskMode()" style="padding:16px 40px;border-radius:30px;border:none;background:#00609C;color:#fff;font-size:18px;font-weight:700">ENTER KIOSK MODE</button>
+  <div style="text-align:center;max-width:320px;width:100%">
+    <div style="font-size:64px;margin-bottom:16px">🧊</div>
+    <div style="font-size:26px;font-weight:800;margin-bottom:8px;letter-spacing:0.5px">OMEGA ICE</div>
+    <div style="font-size:16px;font-weight:600;margin-bottom:4px;color:#00d4ff">KIOSK MODE</div>
+    <div style="font-size:13px;opacity:0.6;margin-bottom:32px">Tablet locked to Omega only<br>Staff cannot exit to other apps</div>
+    <button onclick="enterKioskMode()" style="width:100%;padding:18px;border-radius:16px;border:none;background:#00609C;color:#fff;font-size:18px;font-weight:700;box-shadow:0 4px 12px rgba(0,96,156,0.4)">ENTER KIOSK MODE</button>
+    <div style="margin-top:16px;font-size:11px;opacity:0.5">Tap to lock tablet • PIN 911911 to exit</div>
   </div>
 </div>
 <div id="kioskExitModal">
@@ -157,7 +159,7 @@ let kioskMode = localStorage.getItem('omega_kiosk_mode')==='true';
 let kioskPin = '';
 function enterKioskMode(){
   document.documentElement.classList.add('kiosk-mode');
-  document.getElementById('kioskOverlay').classList.remove('active');
+  document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.remove('active');
   const topBar = document.getElementById('kioskTopBar');
   if(topBar) topBar.style.display='flex';
   document.body.style.paddingTop='32px';
@@ -181,7 +183,7 @@ function exitKioskMode(){
   localStorage.setItem('omega_kiosk_mode','false');
   kioskMode=false;
 }
-function openKioskExitModal(){ document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
+function openKioskExitModal(){ document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
 function closeKioskExitModal(){ document.getElementById('kioskExitModal').classList.remove('active'); kioskPin=''; }
 function kioskAddDigit(d){ if(kioskPin.length<6){ kioskPin+=d; updateKioskPinDots(); if(kioskPin.length===6) setTimeout(kioskExitAttempt,300); } }
 function kioskBackspace(){ kioskPin=kioskPin.slice(0,-1); updateKioskPinDots(); }
@@ -229,14 +231,14 @@ document.addEventListener('click',(e)=>{
 </body></html>
 """
 CASHIER_HTML = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Omega Purified Ice - Cashier KIOSK</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Omega Purified Ice - Cashier KIOSK</title>
 
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#00609C">
 <style>
 html.kiosk-mode { overscroll-behavior:none; user-select:none; -webkit-user-select:none; }
-#kioskOverlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#000;z-index:999999;align-items:center;justify-content:center;flex-direction:column;color:#fff}
+#kioskOverlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#000;z-index:999999;align-items:center;justify-content:center;flex-direction:column;color:#fff; padding:20px; box-sizing:border-box}
 #kioskOverlay.active{display:flex}
 #kioskExitModal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:1000000;align-items:center;justify-content:center;padding:20px}
 #kioskExitModal.active{display:flex}
@@ -1257,7 +1259,7 @@ let kioskMode = localStorage.getItem('omega_kiosk_mode')==='true';
 let kioskPin = '';
 function enterKioskMode(){
   document.documentElement.classList.add('kiosk-mode');
-  document.getElementById('kioskOverlay').classList.remove('active');
+  document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.remove('active');
   const topBar = document.getElementById('kioskTopBar');
   if(topBar) topBar.style.display='flex';
   document.body.style.paddingTop='32px';
@@ -1281,7 +1283,7 @@ function exitKioskMode(){
   localStorage.setItem('omega_kiosk_mode','false');
   kioskMode=false;
 }
-function openKioskExitModal(){ document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
+function openKioskExitModal(){ document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
 function closeKioskExitModal(){ document.getElementById('kioskExitModal').classList.remove('active'); kioskPin=''; }
 function kioskAddDigit(d){ if(kioskPin.length<6){ kioskPin+=d; updateKioskPinDots(); if(kioskPin.length===6) setTimeout(kioskExitAttempt,300); } }
 function kioskBackspace(){ kioskPin=kioskPin.slice(0,-1); updateKioskPinDots(); }
@@ -2210,7 +2212,7 @@ MACHINES_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Omega Ice - Machines</title>
 <style>
   * { box-sizing: border-box; }
@@ -2410,7 +2412,7 @@ let kioskMode = localStorage.getItem('omega_kiosk_mode')==='true';
 let kioskPin = '';
 function enterKioskMode(){
   document.documentElement.classList.add('kiosk-mode');
-  document.getElementById('kioskOverlay').classList.remove('active');
+  document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.remove('active');
   const topBar = document.getElementById('kioskTopBar');
   if(topBar) topBar.style.display='flex';
   document.body.style.paddingTop='32px';
@@ -2434,7 +2436,7 @@ function exitKioskMode(){
   localStorage.setItem('omega_kiosk_mode','false');
   kioskMode=false;
 }
-function openKioskExitModal(){ document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
+function openKioskExitModal(){ document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
 function closeKioskExitModal(){ document.getElementById('kioskExitModal').classList.remove('active'); kioskPin=''; }
 function kioskAddDigit(d){ if(kioskPin.length<6){ kioskPin+=d; updateKioskPinDots(); if(kioskPin.length===6) setTimeout(kioskExitAttempt,300); } }
 function kioskBackspace(){ kioskPin=kioskPin.slice(0,-1); updateKioskPinDots(); }
@@ -2487,7 +2489,7 @@ MACHINE_MONITOR_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Omega Ice - Monitor</title>
 <style>
   * { box-sizing: border-box; }
@@ -2687,7 +2689,7 @@ let kioskMode = localStorage.getItem('omega_kiosk_mode')==='true';
 let kioskPin = '';
 function enterKioskMode(){
   document.documentElement.classList.add('kiosk-mode');
-  document.getElementById('kioskOverlay').classList.remove('active');
+  document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.remove('active');
   const topBar = document.getElementById('kioskTopBar');
   if(topBar) topBar.style.display='flex';
   document.body.style.paddingTop='32px';
@@ -2711,7 +2713,7 @@ function exitKioskMode(){
   localStorage.setItem('omega_kiosk_mode','false');
   kioskMode=false;
 }
-function openKioskExitModal(){ document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
+function openKioskExitModal(){ document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
 function closeKioskExitModal(){ document.getElementById('kioskExitModal').classList.remove('active'); kioskPin=''; }
 function kioskAddDigit(d){ if(kioskPin.length<6){ kioskPin+=d; updateKioskPinDots(); if(kioskPin.length===6) setTimeout(kioskExitAttempt,300); } }
 function kioskBackspace(){ kioskPin=kioskPin.slice(0,-1); updateKioskPinDots(); }
@@ -3104,7 +3106,7 @@ PM_HISTORY_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>PM History</title>
 <style>
   * { box-sizing: border-box; }
@@ -3160,7 +3162,7 @@ let kioskMode = localStorage.getItem('omega_kiosk_mode')==='true';
 let kioskPin = '';
 function enterKioskMode(){
   document.documentElement.classList.add('kiosk-mode');
-  document.getElementById('kioskOverlay').classList.remove('active');
+  document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.remove('active');
   const topBar = document.getElementById('kioskTopBar');
   if(topBar) topBar.style.display='flex';
   document.body.style.paddingTop='32px';
@@ -3184,7 +3186,7 @@ function exitKioskMode(){
   localStorage.setItem('omega_kiosk_mode','false');
   kioskMode=false;
 }
-function openKioskExitModal(){ document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
+function openKioskExitModal(){ document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
 function closeKioskExitModal(){ document.getElementById('kioskExitModal').classList.remove('active'); kioskPin=''; }
 function kioskAddDigit(d){ if(kioskPin.length<6){ kioskPin+=d; updateKioskPinDots(); if(kioskPin.length===6) setTimeout(kioskExitAttempt,300); } }
 function kioskBackspace(){ kioskPin=kioskPin.slice(0,-1); updateKioskPinDots(); }
@@ -3290,7 +3292,7 @@ def pm_history_page(machine_id):
 # ============= CUSTOMER PORTAL - SECURE WITH OTP =============
 
 CUSTOMER_LOGIN_HTML = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Customer Login - Omega Ice</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Customer Login - Omega Ice</title>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:linear-gradient(135deg,#00609C,#0096D6);margin:0;min-height:100vh;padding:16px;display:flex;align-items:center;justify-content:center}
 .card{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:380px;box-shadow:0 8px 30px rgba(0,0,0,.2)}
@@ -3328,7 +3330,7 @@ let kioskMode = localStorage.getItem('omega_kiosk_mode')==='true';
 let kioskPin = '';
 function enterKioskMode(){
   document.documentElement.classList.add('kiosk-mode');
-  document.getElementById('kioskOverlay').classList.remove('active');
+  document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.remove('active');
   const topBar = document.getElementById('kioskTopBar');
   if(topBar) topBar.style.display='flex';
   document.body.style.paddingTop='32px';
@@ -3352,7 +3354,7 @@ function exitKioskMode(){
   localStorage.setItem('omega_kiosk_mode','false');
   kioskMode=false;
 }
-function openKioskExitModal(){ document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
+function openKioskExitModal(){ document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
 function closeKioskExitModal(){ document.getElementById('kioskExitModal').classList.remove('active'); kioskPin=''; }
 function kioskAddDigit(d){ if(kioskPin.length<6){ kioskPin+=d; updateKioskPinDots(); if(kioskPin.length===6) setTimeout(kioskExitAttempt,300); } }
 function kioskBackspace(){ kioskPin=kioskPin.slice(0,-1); updateKioskPinDots(); }
@@ -3401,7 +3403,7 @@ document.addEventListener('click',(e)=>{
 """
 
 CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>My Orders - Omega Ice</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>My Orders - Omega Ice</title>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:15px;color:#00609C;margin:0}
@@ -3569,7 +3571,7 @@ let kioskMode = localStorage.getItem('omega_kiosk_mode')==='true';
 let kioskPin = '';
 function enterKioskMode(){
   document.documentElement.classList.add('kiosk-mode');
-  document.getElementById('kioskOverlay').classList.remove('active');
+  document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.remove('active');
   const topBar = document.getElementById('kioskTopBar');
   if(topBar) topBar.style.display='flex';
   document.body.style.paddingTop='32px';
@@ -3593,7 +3595,7 @@ function exitKioskMode(){
   localStorage.setItem('omega_kiosk_mode','false');
   kioskMode=false;
 }
-function openKioskExitModal(){ document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
+function openKioskExitModal(){ document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
 function closeKioskExitModal(){ document.getElementById('kioskExitModal').classList.remove('active'); kioskPin=''; }
 function kioskAddDigit(d){ if(kioskPin.length<6){ kioskPin+=d; updateKioskPinDots(); if(kioskPin.length===6) setTimeout(kioskExitAttempt,300); } }
 function kioskBackspace(){ kioskPin=kioskPin.slice(0,-1); updateKioskPinDots(); }
@@ -3643,7 +3645,7 @@ document.addEventListener('click',(e)=>{
 
 
 CUSTOMER_ORDER_HTML = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Place Order - Omega Ice</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Place Order - Omega Ice</title>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:15px;color:#00609C;margin:0}
@@ -3728,7 +3730,7 @@ let kioskMode = localStorage.getItem('omega_kiosk_mode')==='true';
 let kioskPin = '';
 function enterKioskMode(){
   document.documentElement.classList.add('kiosk-mode');
-  document.getElementById('kioskOverlay').classList.remove('active');
+  document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.remove('active');
   const topBar = document.getElementById('kioskTopBar');
   if(topBar) topBar.style.display='flex';
   document.body.style.paddingTop='32px';
@@ -3752,7 +3754,7 @@ function exitKioskMode(){
   localStorage.setItem('omega_kiosk_mode','false');
   kioskMode=false;
 }
-function openKioskExitModal(){ document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
+function openKioskExitModal(){ document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
 function closeKioskExitModal(){ document.getElementById('kioskExitModal').classList.remove('active'); kioskPin=''; }
 function kioskAddDigit(d){ if(kioskPin.length<6){ kioskPin+=d; updateKioskPinDots(); if(kioskPin.length===6) setTimeout(kioskExitAttempt,300); } }
 function kioskBackspace(){ kioskPin=kioskPin.slice(0,-1); updateKioskPinDots(); }
@@ -4106,7 +4108,7 @@ def staff_customers_page():
     if staff not in ["isesmo", "isesmo gamboa"]:
         return "<h3>Access Denied</h3><p>Only ISESMO can manage customers.</p><a href='/cashier'>Back</a>", 403
     html = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Customers - Only ISESMO</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Customers - Only ISESMO</title>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap}.topbar h1{font-size:15px;color:#00609C;margin:0;flex:1;min-width:180px}.topbar .nav-group{display:flex;gap:6px;flex-wrap:nowrap;align-items:center}
@@ -4181,7 +4183,7 @@ let kioskMode = localStorage.getItem('omega_kiosk_mode')==='true';
 let kioskPin = '';
 function enterKioskMode(){
   document.documentElement.classList.add('kiosk-mode');
-  document.getElementById('kioskOverlay').classList.remove('active');
+  document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.remove('active');
   const topBar = document.getElementById('kioskTopBar');
   if(topBar) topBar.style.display='flex';
   document.body.style.paddingTop='32px';
@@ -4205,7 +4207,7 @@ function exitKioskMode(){
   localStorage.setItem('omega_kiosk_mode','false');
   kioskMode=false;
 }
-function openKioskExitModal(){ document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
+function openKioskExitModal(){ document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
 function closeKioskExitModal(){ document.getElementById('kioskExitModal').classList.remove('active'); kioskPin=''; }
 function kioskAddDigit(d){ if(kioskPin.length<6){ kioskPin+=d; updateKioskPinDots(); if(kioskPin.length===6) setTimeout(kioskExitAttempt,300); } }
 function kioskBackspace(){ kioskPin=kioskPin.slice(0,-1); updateKioskPinDots(); }
@@ -4491,7 +4493,7 @@ def api_today_sales():
 @app.route("/dashboard")
 @login_required
 def dashboard_page():
-    html = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard</title>
+    html = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Dashboard</title>
 <style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.topbar h1{font-size:16px;color:#00609C;margin:0}.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}.nav-pill.active{background:#00609C;color:#fff}.period-btn{padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px;color:#00609C}.period-btn.active{background:#00609C;color:#fff}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px}.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center}.stat-val{font-size:20px;font-weight:700;color:#00609C}</style></head>
 <body>
 <div class="topbar"><h1>OMEGA ICE</h1><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444">🔴 Live Orders</a><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a> <a href="/dashboard" class="nav-pill active">Dashboard</a></div></div>
@@ -4515,7 +4517,7 @@ let kioskMode = localStorage.getItem('omega_kiosk_mode')==='true';
 let kioskPin = '';
 function enterKioskMode(){
   document.documentElement.classList.add('kiosk-mode');
-  document.getElementById('kioskOverlay').classList.remove('active');
+  document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.remove('active');
   const topBar = document.getElementById('kioskTopBar');
   if(topBar) topBar.style.display='flex';
   document.body.style.paddingTop='32px';
@@ -4539,7 +4541,7 @@ function exitKioskMode(){
   localStorage.setItem('omega_kiosk_mode','false');
   kioskMode=false;
 }
-function openKioskExitModal(){ document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
+function openKioskExitModal(){ document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
 function closeKioskExitModal(){ document.getElementById('kioskExitModal').classList.remove('active'); kioskPin=''; }
 function kioskAddDigit(d){ if(kioskPin.length<6){ kioskPin+=d; updateKioskPinDots(); if(kioskPin.length===6) setTimeout(kioskExitAttempt,300); } }
 function kioskBackspace(){ kioskPin=kioskPin.slice(0,-1); updateKioskPinDots(); }
@@ -4591,7 +4593,7 @@ document.addEventListener('click',(e)=>{
 @login_required
 def staff_orders_page():
     html = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Live Orders</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Live Orders</title>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:16px;color:#00609C;margin:0}
@@ -4722,7 +4724,7 @@ let kioskMode = localStorage.getItem('omega_kiosk_mode')==='true';
 let kioskPin = '';
 function enterKioskMode(){
   document.documentElement.classList.add('kiosk-mode');
-  document.getElementById('kioskOverlay').classList.remove('active');
+  document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.remove('active');
   const topBar = document.getElementById('kioskTopBar');
   if(topBar) topBar.style.display='flex';
   document.body.style.paddingTop='32px';
@@ -4746,7 +4748,7 @@ function exitKioskMode(){
   localStorage.setItem('omega_kiosk_mode','false');
   kioskMode=false;
 }
-function openKioskExitModal(){ document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
+function openKioskExitModal(){ document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
 function closeKioskExitModal(){ document.getElementById('kioskExitModal').classList.remove('active'); kioskPin=''; }
 function kioskAddDigit(d){ if(kioskPin.length<6){ kioskPin+=d; updateKioskPinDots(); if(kioskPin.length===6) setTimeout(kioskExitAttempt,300); } }
 function kioskBackspace(){ kioskPin=kioskPin.slice(0,-1); updateKioskPinDots(); }
@@ -5665,7 +5667,7 @@ def api_sales_export_csv():
 def sales_report_page():
     """Visual page to pullout all monthly sales"""
     html = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Monthly Sales Report</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Monthly Sales Report</title>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
@@ -5719,7 +5721,7 @@ let kioskMode = localStorage.getItem('omega_kiosk_mode')==='true';
 let kioskPin = '';
 function enterKioskMode(){
   document.documentElement.classList.add('kiosk-mode');
-  document.getElementById('kioskOverlay').classList.remove('active');
+  document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.remove('active');
   const topBar = document.getElementById('kioskTopBar');
   if(topBar) topBar.style.display='flex';
   document.body.style.paddingTop='32px';
@@ -5743,7 +5745,7 @@ function exitKioskMode(){
   localStorage.setItem('omega_kiosk_mode','false');
   kioskMode=false;
 }
-function openKioskExitModal(){ document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
+function openKioskExitModal(){ document.getElementById('kioskOverlay').classList.remove('active'); document.getElementById('kioskExitModal').classList.add('active'); kioskPin=''; updateKioskPinDots(); }
 function closeKioskExitModal(){ document.getElementById('kioskExitModal').classList.remove('active'); kioskPin=''; }
 function kioskAddDigit(d){ if(kioskPin.length<6){ kioskPin+=d; updateKioskPinDots(); if(kioskPin.length===6) setTimeout(kioskExitAttempt,300); } }
 function kioskBackspace(){ kioskPin=kioskPin.slice(0,-1); updateKioskPinDots(); }
@@ -5791,6 +5793,21 @@ document.addEventListener('click',(e)=>{
 </body></html>"""
     return render_template_string(html)
 
+
+
+
+@app.route("/manifest.json")
+def manifest():
+    return jsonify({
+        "name": "Omega Ice Kiosk",
+        "short_name": "Omega Kiosk",
+        "start_url": "/cashier",
+        "display": "fullscreen",
+        "orientation": "portrait",
+        "background_color": "#000000",
+        "theme_color": "#00609C",
+        "icons": [{"src": "https://cdn-icons-png.flaticon.com/512/2936/2936886.png", "sizes": "512x512", "type": "image/png"}]
+    })
 
 
 @app.route("/api/sales/clear_cache", methods=["POST", "GET"])
