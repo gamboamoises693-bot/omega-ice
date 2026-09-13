@@ -514,26 +514,26 @@ function speakIceOrder(count, orders=[]){
     window.speechSynthesis.cancel();
     let message = '';
     if(count===1){
-      message = 'May nag order ng ice! May isang bagong order!';
+      message = 'New ice order! You have one new order!';
     } else {
-      message = `May nag order ng ice! May ${count} na bagong order!`;
+      message = `New ice order! You have ${count} new orders!`;
     }
     if(orders && orders.length>0){
       const firstOrder = orders[0];
       const name = firstOrder.reseller_name || firstOrder.customer_name || '';
-      if(name){ message += ` Galing kay ${name}.`; }
+      if(name){ message += ` From ${name}.`; }
     }
-    message += ' Paki check ang live orders!';
+    message += ' Please check live orders now!';
     const utterance = new SpeechSynthesisUtterance(message);
-    utterance.lang = 'fil-PH';
+    utterance.lang = 'en-US';
     utterance.rate = 0.95;
     utterance.pitch = 1.1;
     utterance.volume = 1.0;
     const voices = window.speechSynthesis.getVoices();
-    const filVoice = voices.find(v=>v.lang.includes('fil') || v.lang.includes('tl') || v.lang.includes('PH'));
-    const enVoice = voices.find(v=>v.lang.includes('en-PH') || v.lang.includes('en-US'));
-    if(filVoice) utterance.voice = filVoice;
-    else if(enVoice) utterance.voice = enVoice;
+    const enVoice = voices.find(v=>v.lang.includes('en-US') || v.lang.includes('en-PH'));
+    const enUKVoice = voices.find(v=>v.lang.includes('en-GB'));
+    if(enVoice) utterance.voice = enVoice;
+    else if(enUKVoice) utterance.voice = enUKVoice;
     window.speechSynthesis.speak(utterance);
     console.log('Speaking:', message);
   }catch(e){ console.log('Voice error',e); }
@@ -553,7 +553,7 @@ function testVoice(){
     testAlarm();
   } else {
     speakIceOrder(1, [{reseller_name:'Test Customer', quantity:5, kg_size:'5Kg'}]);
-    document.getElementById('alarmStatus').textContent='🔊 Voice: May nag order ng ice!';
+    document.getElementById('alarmStatus').textContent='🔊 Voice: New ice order!';
   }
 }
 
