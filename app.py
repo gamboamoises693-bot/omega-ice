@@ -361,6 +361,10 @@ function cancelEdit(){
   updateTotal();
 }
 
+
+
+
+
 let alarmLoopInterval = null;
 let alarmAudioContext = null;
 let audioUnlocked = false;
@@ -375,76 +379,134 @@ function openAlarmModal(){
   const nameEl = document.getElementById('modalStaffName');
   if(nameEl) nameEl.textContent = staff;
   loadAlarmSettings();
+  // Try unlock immediately when opening modal
   unlockAudio();
 }
+
 function closeAlarmModal(){
   const modal = document.getElementById('alarmModal');
   if(modal) modal.style.display='none';
   saveAlarmSettings();
 }
+
+// TABLET-OPTIMIZED unlock - must be called on user tap
 function unlockAudio(){
-  if(audioUnlocked) return;
+  console.log('Attempting audio unlock...');
   try{
-    if(!alarmAudioContext) alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-    if(alarmAudioContext.state === 'suspended') alarmAudioContext.resume();
-    const audio = document.getElementById('orderAlarm');
-    if(audio){
-      audio.volume = 0;
-      const p = audio.play();
-      if(p){
-        p.then(()=>{
-          audio.pause();
-          audio.volume = 1;
-          audioUnlocked = true;
-          const st = document.getElementById('alarmStatus');
-          if(st) st.textContent = '✅ Sound unlocked - Ready!';
-        }).catch(()=>{});
-      }
+    // Create or resume AudioContext
+    if(!alarmAudioContext){
+      alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
     }
+    if(alarmAudioContext.state === 'suspended'){
+      alarmAudioContext.resume().then(()=>{
+        console.log('AudioContext resumed');
+        audioUnlocked = true;
+        const st = document.getElementById('alarmStatus');
+        if(st) st.textContent = '✅ Sound unlocked! Ready for orders.';
+      });
+    } else {
+      audioUnlocked = true;
+    }
+    
+    // For tablets: play a very short silent beep to unlock
+    if(alarmAudioContext){
+      const osc = alarmAudioContext.createOscillator();
+      const gain = alarmAudioContext.createGain();
+      gain.gain.value = 0.001; // almost silent
+      osc.connect(gain);
+      gain.connect(alarmAudioContext.destination);
+      osc.start();
+      osc.stop(alarmAudioContext.currentTime + 0.1);
+    }
+    
+    // Unlock speech
     if('speechSynthesis' in window){
-      const u = new SpeechSynthesisUtterance('');
-      u.volume = 0;
-      window.speechSynthesis.speak(u);
+      window.speechSynthesis.cancel();
+      // Preload voices
+      const voices = window.speechSynthesis.getVoices();
+      console.log('Voices loaded:', voices.length);
     }
-  }catch(e){}
+    
+  }catch(e){ console.log('Unlock error', e); }
 }
+
 function speakIceOrder(count, orders=[]){
-  if(!('speechSynthesis' in window)) return;
+  console.log('speakIceOrder called', count);
+  if(!('speechSynthesis' in window)){
+    console.log('speechSynthesis not supported');
+    alert('Voice not supported on this tablet');
+    return;
+  }
   try{
     window.speechSynthesis.cancel();
-    let msg = count===1 ? 'New ice order! You have one new order!' : `New ice order! You have ${count} new orders!`;
+    let msg = count===1 ? 'New ice order! One new order!' : `New ice order! ${count} new orders!`;
     if(orders && orders.length>0){
       const n = orders[0].reseller_name || orders[0].customer_name || '';
       if(n) msg += ` From ${n}.`;
     }
-    msg += ' Please check live orders now!';
+    msg += ' Please check live orders!';
+    
+    // Tablet fix: ensure voices loaded
+    let voices = window.speechSynthesis.getVoices();
+    if(voices.length===0){
+      // Wait and retry
+      setTimeout(()=>{
+        voices = window.speechSynthesis.getVoices();
+        doSpeak(msg, voices);
+      }, 500);
+    } else {
+      doSpeak(msg, voices);
+    }
+  }catch(e){ console.log('Voice error', e); alert('Voice error: '+e.message); }
+}
+
+function doSpeak(msg, voices){
+  try{
     const utter = new SpeechSynthesisUtterance(msg);
     utter.lang = 'en-US';
-    utter.rate = 0.95;
+    utter.rate = 1.0;
+    utter.pitch = 1.0;
     utter.volume = 1.0;
-    const voices = window.speechSynthesis.getVoices();
-    const en = voices.find(v=>v.lang.includes('en-US') || v.lang.includes('en-PH'));
-    if(en) utter.voice = en;
+    // Find English voice
+    const enVoice = voices.find(v=>v.lang.toLowerCase().includes('en-us')) || voices.find(v=>v.lang.toLowerCase().includes('en')) || voices[0];
+    if(enVoice){
+      utter.voice = enVoice;
+      console.log('Using voice:', enVoice.name, enVoice.lang);
+    }
+    utter.onstart = ()=>{ console.log('Voice started'); };
+    utter.onerror = (e)=>{ console.log('Voice error', e); alert('Voice failed: '+e.error); };
+    utter.onend = ()=>{ console.log('Voice ended'); };
     window.speechSynthesis.speak(utter);
-  }catch(e){}
+  }catch(e){ console.log('doSpeak error', e); }
 }
+
 if('speechSynthesis' in window){
-  window.speechSynthesis.onvoiceschanged = ()=>{ window.speechSynthesis.getVoices(); };
-  setTimeout(()=>{ window.speechSynthesis.getVoices(); }, 500);
+  window.speechSynthesis.onvoiceschanged = ()=>{
+    const v = window.speechSynthesis.getVoices();
+    console.log('Voices changed, now', v.length);
+  };
 }
+
 function testVoice(){
+  console.log('testVoice tapped');
   unlockAudio();
-  const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
-  const isIsesmo = staffName.includes('isesmo');
-  if(isIsesmo){
-    alert('ISESMO account: alarm only. Login as omega/yhel for voice.');
-    testAlarm();
-  } else {
-    speakIceOrder(1, [{reseller_name:'Test'}]);
+  // Small delay to ensure unlock
+  setTimeout(()=>{
+    const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
+    const isIsesmo = staffName.includes('isesmo');
+    if(isIsesmo){
+      alert('ISESMO: alarm only. But testing voice anyway for tablet.');
+    }
+    // Force voice
+    speakIceOrder(1, [{reseller_name:'Test Customer'}]);
     const st = document.getElementById('alarmStatus');
-    if(st) st.textContent = '🔊 Voice: New ice order!';
-  }
+    if(st) st.textContent = '🔊 Testing English voice... Listen!';
+    
+    // Also vibrate to confirm button works
+    if(navigator.vibrate) navigator.vibrate([200,100,200]);
+  }, 300);
 }
+
 function getAlarmSettings(){
   return {
     sound: document.getElementById('alarmSoundSelect')?.value || localStorage.getItem('omega_alarm_sound') || 'custom_loud',
@@ -454,6 +516,7 @@ function getAlarmSettings(){
     bg: document.getElementById('alarmBgCheck')?.checked ?? (localStorage.getItem('omega_alarm_bg') !== 'false')
   };
 }
+
 function saveAlarmSettings(){
   const s = getAlarmSettings();
   localStorage.setItem('omega_alarm_sound', s.sound);
@@ -464,6 +527,7 @@ function saveAlarmSettings(){
   const st = document.getElementById('alarmStatus');
   if(st) st.textContent = 'Saved: ' + s.sound + ' @ ' + Math.round(s.volume*100) + '%';
 }
+
 function loadAlarmSettings(){
   try{
     const sound = localStorage.getItem('omega_alarm_sound');
@@ -475,71 +539,105 @@ function loadAlarmSettings(){
     if(localStorage.getItem('omega_alarm_bg')!==null) document.getElementById('alarmBgCheck').checked = localStorage.getItem('omega_alarm_bg')==='true';
   }catch{}
 }
+
 function previewAlarmSound(){
   const sel = document.getElementById('alarmSoundSelect')?.value || 'custom_loud';
   const vol = parseFloat(document.getElementById('alarmVolumeSelect')?.value || '1.0');
   playAlarmSound({sound: sel, volume: vol});
 }
+
+// TABLET FIX: Always use Web Audio, no HTML audio
 function playAlarmSound(settings){
+  console.log('playAlarmSound', settings.sound, 'vol', settings.volume);
   lastAlarmTime = Date.now();
+  
   try{
-    if(!alarmAudioContext) alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-    if(alarmAudioContext.state === 'suspended') alarmAudioContext.resume();
-    // For all sounds, use Web Audio for reliability
-    if(settings.sound === 'custom_loud' || settings.sound === 'custom_very_loud' || settings.sound === 'siren' || settings.sound === 'radar'){
-      const ctx = alarmAudioContext;
-      const repeats = settings.sound === 'custom_very_loud' ? 5 : 3;
-      for(let i=0;i<repeats;i++){
-        setTimeout(()=>{
+    // Ensure AudioContext exists and is running - THIS IS CRITICAL FOR TABLET
+    if(!alarmAudioContext){
+      alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+      console.log('Created AudioContext, state:', alarmAudioContext.state);
+    }
+    if(alarmAudioContext.state === 'suspended'){
+      console.log('Resuming suspended AudioContext...');
+      alarmAudioContext.resume().then(()=>{
+        console.log('Resumed, now playing');
+        doPlayBeep(settings);
+      });
+    } else {
+      doPlayBeep(settings);
+    }
+  }catch(e){ 
+    console.log('playAlarmSound error', e); 
+    alert('Sound error: '+e.message+'. Try tapping Test again.');
+  }
+}
+
+function doPlayBeep(settings){
+  try{
+    const ctx = alarmAudioContext;
+    const vol = settings.volume || 1.0;
+    
+    // Different patterns for tablet
+    let repeats = 3;
+    let freq1 = 1000;
+    let freq2 = 1500;
+    
+    if(settings.sound === 'custom_very_loud'){
+      repeats = 6;
+      freq1 = 1200;
+      freq2 = 1800;
+    } else if(settings.sound === 'siren'){
+      repeats = 8;
+      freq1 = 800;
+      freq2 = 1600;
+    } else if(settings.sound === 'alarm_clock'){
+      repeats = 4;
+      freq1 = 900;
+      freq2 = 900;
+    } else if(settings.sound === 'radar'){
+      repeats = 3;
+      freq1 = 600;
+      freq2 = 1200;
+    }
+    
+    console.log('Playing', repeats, 'beeps');
+    
+    for(let i=0;i<repeats;i++){
+      setTimeout(()=>{
+        try{
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
-          osc.type='square';
-          osc.frequency.value = i%2===0 ? 1000 : 1500;
-          if(settings.sound==='siren') osc.frequency.value = 800 + i*200;
-          if(settings.sound==='radar') osc.frequency.value = 600;
-          gain.gain.setValueAtTime(settings.volume, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime+0.6);
+          osc.type = 'square'; // Loudest
+          osc.frequency.value = i%2===0 ? freq1 : freq2;
+          gain.gain.setValueAtTime(vol, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime+0.7);
           osc.connect(gain);
           gain.connect(ctx.destination);
           osc.start();
-          osc.stop(ctx.currentTime+0.6);
-        }, i*700);
-      }
-      return;
+          osc.stop(ctx.currentTime+0.7);
+          console.log('Beep', i, 'played');
+        }catch(e){ console.log('Beep error', e); }
+      }, i*800);
     }
-    // HTML audio fallback
-    const audio = document.getElementById('orderAlarm');
-    const sounds = {
-      'beep_short': 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg',
-      'alarm_clock': 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg',
-      'chime': 'https://actions.google.com/sounds/v1/cartoon/pop.ogg'
-    };
-    const src = sounds[settings.sound] || sounds['beep_short'];
-    if(!audio.src || !audio.src.includes(src.split('/').pop())){
-      audio.src = src;
-      audio.load();
+    
+    // Vibrate for tablet
+    if(settings.vibrate && navigator.vibrate){
+      navigator.vibrate([500,200,500,200,1000]);
     }
-    audio.volume = settings.volume;
-    audio.currentTime = 0;
-    audio.play().catch(()=>{
-      // Fallback beep
-      const osc = alarmAudioContext.createOscillator();
-      const gain = alarmAudioContext.createGain();
-      osc.frequency.value = 800;
-      gain.gain.value = settings.volume;
-      osc.connect(gain);
-      gain.connect(alarmAudioContext.destination);
-      osc.start();
-      osc.stop(alarmAudioContext.currentTime+0.8);
-    });
-  }catch(e){ console.log(e); }
+    
+    const st = document.getElementById('alarmStatus');
+    if(st) st.textContent = '🔊 Playing '+settings.sound+' - '+new Date().toLocaleTimeString();
+    
+  }catch(e){ console.log('doPlayBeep error', e); }
 }
+
 function triggerOrderAlarm(count, orders=[]){
   if(!alarmEnabled) return;
   const settings = getAlarmSettings();
   const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
   const isVoiceAccount = staffName.includes('omega') || staffName.includes('yhel');
-  console.log('TRIGGER', count, isVoiceAccount);
+  console.log('TRIGGER ALARM', count, 'voice?', isVoiceAccount);
+  
   try{
     const stopBtn = document.getElementById('stopAlarmBtn');
     if(stopBtn) stopBtn.style.display='inline-block';
@@ -547,16 +645,17 @@ function triggerOrderAlarm(count, orders=[]){
     const bannerCount = document.getElementById('bannerCount');
     if(banner){ banner.style.display='block'; if(bannerCount) bannerCount.textContent = count; }
     const statusEl = document.getElementById('alarmStatus');
-    if(statusEl) statusEl.textContent = '🔴 ALARMING '+count+' orders!';
-    if(isVoiceAccount) speakIceOrder(count, orders);
-    playAlarmSound(settings);
-    if(settings.vibrate && navigator.vibrate) navigator.vibrate([1000,200,1000,200,2000]);
-    if(settings.bg && Notification && Notification.permission==='granted'){
-      try{
-        const notif = new Notification('NEW ICE ORDER!', {body: count+' new orders waiting!', requireInteraction:true, tag:'omega-order'});
-        notif.onclick = ()=>{ window.focus(); stopAlarmForever(); window.location.href='/orders'; };
-      }catch{}
+    if(statusEl) statusEl.textContent = '🔴 NEW ORDER '+count+' - '+new Date().toLocaleTimeString();
+    
+    // Voice first for omega/yhel
+    if(isVoiceAccount){
+      setTimeout(()=>{ speakIceOrder(count, orders); }, 500);
     }
+    
+    // Then beep
+    setTimeout(()=>{ playAlarmSound(settings); }, 100);
+    
+    // Title flash
     let flash=0;
     if(window._flashInterval) clearInterval(window._flashInterval);
     window._flashInterval = setInterval(()=>{
@@ -564,8 +663,11 @@ function triggerOrderAlarm(count, orders=[]){
       flash++;
       if(flash>200){ clearInterval(window._flashInterval); document.title='Omega Ice - Cashier'; }
     }, 700);
+    
     const liveBtn = document.querySelector('a[href="/orders"]');
     if(liveBtn) liveBtn.classList.add('alarm-active');
+    
+    // Loop
     if(alarmLoopInterval) clearInterval(alarmLoopInterval);
     if(settings.loop){
       alarmLoopInterval = setInterval(()=>{
@@ -582,9 +684,9 @@ function triggerOrderAlarm(count, orders=[]){
     }
   }catch(e){ console.log(e); }
 }
+
 function stopAlarmForever(){
-  const audio = document.getElementById('orderAlarm');
-  if(audio){ audio.pause(); audio.currentTime=0; }
+  console.log('Stop alarm');
   if(alarmLoopInterval){ clearInterval(alarmLoopInterval); alarmLoopInterval=null; }
   if(window._flashInterval){ clearInterval(window._flashInterval); window._flashInterval=null; }
   document.title='Omega Ice - Cashier';
@@ -593,19 +695,35 @@ function stopAlarmForever(){
   const banner=document.getElementById('alarmBanner');
   if(banner) banner.style.display='none';
   const st=document.getElementById('alarmStatus');
-  if(st) st.textContent='Alarm stopped';
+  if(st) st.textContent='Stopped - '+new Date().toLocaleTimeString();
   const liveBtn = document.querySelector('a[href="/orders"]');
   if(liveBtn) liveBtn.classList.remove('alarm-active');
   if('speechSynthesis' in window) window.speechSynthesis.cancel();
   lastActiveOrders=0;
   setTimeout(()=>{ fetchLiveOrdersCount(); }, 2000);
 }
+
 function testAlarm(){
+  console.log('testAlarm tapped - TABLET MODE');
   unlockAudio();
-  const s = getAlarmSettings();
-  triggerOrderAlarm(1, [{reseller_name:'Test'}]);
+  // For tablet, need immediate audible beep after user tap
+  setTimeout(()=>{
+    const s = getAlarmSettings();
+    console.log('Test with', s);
+    playAlarmSound(s);
+    // Also show visual feedback that button works
+    const btn = document.getElementById('openAlarmSettingsBtn');
+    if(btn){
+      const orig = btn.textContent;
+      btn.textContent = '🔊 Playing...';
+      setTimeout(()=>{ btn.textContent = orig; }, 1000);
+    }
+    if(navigator.vibrate) navigator.vibrate([300,100,300]);
+  }, 200);
 }
+
 function stopAlarm(){ stopAlarmForever(); }
+
 async function fetchLiveOrdersCount(){
   try{
     const res = await fetch('/api/staff/customer_orders');
@@ -617,6 +735,7 @@ async function fetchLiveOrdersCount(){
       if(active>0){
         badge.textContent = active;
         badge.style.display='inline';
+        console.log('Live orders:', active, 'last:', lastActiveOrders, 'loop:', !!alarmLoopInterval);
         if(active > lastActiveOrders && lastActiveOrders>=0){
           triggerOrderAlarm(active, orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)));
         } else if(active>0 && lastActiveOrders===0 && !alarmLoopInterval){
@@ -628,14 +747,39 @@ async function fetchLiveOrdersCount(){
       }
     }
     lastActiveOrders = active;
-  }catch(e){}
+  }catch(e){ console.log('fetch error', e); }
 }
+
+// TABLET: Unlock on ANY tap
 document.addEventListener('click', ()=>{ unlockAudio(); }, {once:false});
-document.addEventListener('touchstart', ()=>{ unlockAudio(); }, {once:false});
+document.addEventListener('touchstart', ()=>{ 
+  console.log('touchstart - unlocking');
+  unlockAudio(); 
+}, {once:false});
+document.addEventListener('touchend', ()=>{ unlockAudio(); }, {once:false});
+
 document.addEventListener('DOMContentLoaded', ()=>{
   loadAlarmSettings();
-  setTimeout(()=>{ unlockAudio(); }, 1000);
-  if(Notification && Notification.permission==='default'){ Notification.requestPermission(); }
+  console.log('DOM loaded, trying unlock');
+  setTimeout(()=>{ 
+    unlockAudio(); 
+    // Preload voices
+    if('speechSynthesis' in window) window.speechSynthesis.getVoices();
+  }, 500);
+  
+  if(Notification && Notification.permission==='default'){ 
+    Notification.requestPermission(); 
+  }
+  
+  // TABLET: Big hint to tap Test first
+  setTimeout(()=>{
+    const st = document.getElementById('alarmStatus');
+    if(st && !audioUnlocked){
+      st.textContent = '⚠️ TAP Test Alarm first to enable sound on tablet!';
+      st.style.color = '#ef4444';
+      st.style.fontWeight = 'bold';
+    }
+  }, 2000);
 });
 
 
