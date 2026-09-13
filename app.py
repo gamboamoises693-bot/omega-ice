@@ -667,16 +667,17 @@ function triggerOrderAlarm(count, orders=[]){
     const liveBtn = document.querySelector('a[href="/orders"]');
     if(liveBtn) liveBtn.classList.add('alarm-active');
     
-    // Loop
+    // Loop every 5s until every "New Order" has been accepted (status changed
+    // away from "New Order") in the Live Orders UI. Does NOT wait for Delivered.
     if(alarmLoopInterval) clearInterval(alarmLoopInterval);
     if(settings.loop){
       alarmLoopInterval = setInterval(()=>{
         fetch('/api/staff/customer_orders').then(r=>r.json()).then(data=>{
-          const active = (data.orders||[]).filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
-          if(active===0){ stopAlarmForever(); }
+          const stillNew = (data.orders||[]).filter(o=>o.order_status==='New Order');
+          if(stillNew.length===0){ stopAlarmForever(); }
           else {
             const sLoop = (document.querySelector('.staff')?.textContent || '').toLowerCase();
-            if(sLoop.includes('omega') || sLoop.includes('yhel')) speakIceOrder(active, data.orders||[]);
+            if(sLoop.includes('omega') || sLoop.includes('yhel')) speakIceOrder(stillNew.length, stillNew);
             playAlarmSound(getAlarmSettings());
           }
         });
@@ -730,23 +731,32 @@ async function fetchLiveOrdersCount(){
     const data = await res.json();
     const orders = data.orders||[];
     const active = orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
+    // FIX: alarm must key off unaccepted "New Order" items specifically, not just
+    // "not delivered yet". Pending/Preparing/Out for Delivery are already accepted
+    // in the Live Orders UI and should NOT keep the alarm ringing.
+    const newOrders = orders.filter(o=>o.order_status==='New Order');
+    const newOrderCount = newOrders.length;
     const badge = document.getElementById('liveOrdersCount');
     if(badge){
       if(active>0){
         badge.textContent = active;
         badge.style.display='inline';
-        console.log('Live orders:', active, 'last:', lastActiveOrders, 'loop:', !!alarmLoopInterval);
-        if(active > lastActiveOrders && lastActiveOrders>=0){
-          triggerOrderAlarm(active, orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)));
-        } else if(active>0 && lastActiveOrders===0 && !alarmLoopInterval){
-          triggerOrderAlarm(active, orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)));
-        }
       } else {
         badge.style.display='none';
-        if(alarmLoopInterval) stopAlarmForever();
       }
     }
-    lastActiveOrders = active;
+    console.log('Live orders:', active, 'unaccepted new:', newOrderCount, 'loop:', !!alarmLoopInterval);
+    if(newOrderCount>0){
+      // Ring when a fresh unaccepted order shows up, or when the loop isn't
+      // running yet (e.g. page/tab just loaded with unaccepted orders waiting).
+      if(newOrderCount > lastActiveOrders || !alarmLoopInterval){
+        triggerOrderAlarm(newOrderCount, newOrders);
+      }
+    } else if(alarmLoopInterval){
+      // Nothing left unaccepted -> staff already tapped Accept in Live Orders UI
+      stopAlarmForever();
+    }
+    lastActiveOrders = newOrderCount;
   }catch(e){ console.log('fetch error', e); }
 }
 
@@ -842,52 +852,13 @@ function formatTimestamp(iso){
 
 
 
-function triggerOrderAlarm(count){
-  if(!alarmEnabled) return;
-  try{
-    const audio = document.getElementById('orderAlarm');
-    if(audio){
-      audio.currentTime = 0;
-      audio.play().catch(()=>{});
-      // Stop after 10 seconds
-      setTimeout(()=>{ audio.pause(); audio.currentTime=0; }, 10000);
-    }
-    // Vibrate phone/tablet
-    if(navigator.vibrate){ navigator.vibrate([500,200,500,200,1000]); }
-    // Show notification if permitted
-    if(Notification && Notification.permission==='granted'){
-      new Notification('🧊 New Omega Order!', {body: `${count} new order(s) waiting!`, icon: '/favicon.ico'});
-    }
-    // Flash title
-    const originalTitle = document.title;
-    let flash = 0;
-    const flashInterval = setInterval(()=>{
-      document.title = flash%2===0 ? '🔴 NEW ORDER! - '+originalTitle : '🔵 '+count+' Orders - '+originalTitle;
-      flash++;
-      if(flash>10){ clearInterval(flashInterval); document.title=originalTitle; }
-    }, 800);
-    // Visual flash on live orders button
-    const liveBtn = document.querySelector('a[href="/orders"]');
-    if(liveBtn){ liveBtn.classList.add('alarm-active'); setTimeout(()=>liveBtn.classList.remove('alarm-active'),10000); }
-  }catch(e){ console.log('Alarm error',e); }
-}
-
-// Request notification permission on load
-document.addEventListener('DOMContentLoaded', ()=>{
-  if(Notification && Notification.permission==='default'){
-    Notification.requestPermission();
-  }
-  // Enable alarm on first user interaction (browser policy)
-  document.body.addEventListener('click', ()=>{
-    const audio = document.getElementById('orderAlarm');
-    if(audio){ audio.play().then(()=>{audio.pause();}).catch(()=>{}); }
-  }, {once:true});
-});
-
-function stopAlarm(){
-  const audio=document.getElementById('orderAlarm');
-  if(audio){ audio.pause(); audio.currentTime=0; }
-}
+// NOTE: A second, broken copy of triggerOrderAlarm() and stopAlarm() used to be
+// defined here. In JS, a later `function` declaration silently replaces an
+// earlier one with the same name in the same scope - so THIS was the version
+// that actually ran, not the correct looping/voice one defined above. It also
+// played the <audio id="orderAlarm"> element, which has no `src`, so it was
+// silent on top of not looping. Removed as the root-cause fix for the alarm
+// not looping / not respecting the accept action.
 
 setInterval(fetchLiveOrdersCount, 30000);
 fetchLiveOrdersCount();
