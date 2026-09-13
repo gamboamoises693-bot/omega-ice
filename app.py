@@ -220,54 +220,127 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 <p style="font-size:10px;color:#888;margin-top:6px" id="lastSaveTime"></p>
 </div>
 <div class="bottom-spacer"></div>
-
-<div class="bottom-spacer"></div>
-<div class="card" id="alarmSettingsCard" style="border:2px solid #ff4444;background:#fff5f5">
-<div style="display:flex;justify-content:space-between;align-items:center">
-<label style="font-weight:700;color:#c0392b;font-size:13px">🔊 Live Order Alarm Settings</label>
-<button id="stopAlarmBtn" onclick="stopAlarmForever()" style="display:none;padding:6px 12px;border-radius:20px;border:none;background:#ef4444;color:#fff;font-size:11px;font-weight:600">🔇 Stop Alarm</button>
+<div style="display:flex;gap:8px;margin:10px 0">
+  <button id="openAlarmSettingsBtn" onclick="openAlarmModal()" style="flex:1;padding:12px;border-radius:10px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:12px">⚙️🔊 Alarm Settings</button>
+  <button id="stopAlarmBtn" onclick="stopAlarmForever()" style="display:none;padding:12px;border-radius:10px;border:none;background:#ef4444;color:#fff;font-weight:700;font-size:12px">🔇 Stop Alarm</button>
 </div>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
-  <div>
-    <label style="font-size:10px;color:#666">Alarm Sound</label>
-    <select id="alarmSoundSelect" onchange="saveAlarmSettings()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;font-size:12px">
-      <option value="beep_short">Beep Short (default)</option>
-      <option value="alarm_clock">Alarm Clock - Loud</option>
-      <option value="radar">Radar - Emergency</option>
-      <option value="siren">Siren - Very Loud</option>
-      <option value="chime">Chime - Soft</option>
-      <option value="custom_loud">🔥 LOUD BEEP (Web Audio - Loudest)</option>
+
+<!-- Alarm Modal Popup -->
+<div id="alarmModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;padding:20px;max-width:400px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0;font-size:16px;color:#c0392b">🔊 Alarm Settings</h3>
+      <button onclick="closeAlarmModal()" style="width:32px;height:32px;border-radius:50%;border:none;background:#f0f0f0;font-size:18px">✕</button>
+    </div>
+    
+    <div style="background:#fff5f5;border:1px solid #fecaca;border-radius:10px;padding:10px;margin-bottom:12px">
+      <div style="font-size:10px;color:#666;margin-bottom:4px">Current Staff: <b id="modalStaffName">Loading...</b></div>
+      <div style="font-size:10px;color:#00609C" id="voiceStatus">🎤 omega/yhel = voice + alarm | isesmo = alarm only</div>
+    </div>
+
+    <label style="font-size:11px;font-weight:600;color:#333">Alarm Sound</label>
+    <select id="alarmSoundSelect" onchange="saveAlarmSettings(); previewAlarmSound();" style="width:100%;padding:12px;border-radius:10px;border:2px solid #ddd;font-size:13px;margin:6px 0 12px">
+      <option value="beep_short">🔔 Beep Short (default)</option>
+      <option value="alarm_clock">⏰ Alarm Clock - Loud</option>
+      <option value="radar">🚨 Radar - Emergency</option>
+      <option value="siren">🚒 Siren - Very Loud</option>
+      <option value="chime">🔔 Chime - Soft</option>
+      <option value="custom_loud">🔥 LOUD BEEP (Loudest - Web Audio)</option>
+      <option value="custom_very_loud">💥 SUPER LOUD - 5x Beep</option>
     </select>
-  </div>
-  <div>
-    <label style="font-size:10px;color:#666">Volume</label>
-    <select id="alarmVolumeSelect" onchange="saveAlarmSettings()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;font-size:12px">
+
+    <label style="font-size:11px;font-weight:600;color:#333">Volume</label>
+    <select id="alarmVolumeSelect" onchange="saveAlarmSettings()" style="width:100%;padding:12px;border-radius:10px;border:2px solid #ddd;font-size:13px;margin:6px 0 12px">
       <option value="0.5">50% - Normal</option>
       <option value="0.8">80% - Loud</option>
-      <option value="1.0" selected>100% - MAX</option>
+      <option value="1.0" selected>100% - MAX LOUD</option>
     </select>
+
+    <div style="background:#f8f8f8;border-radius:10px;padding:10px;margin-bottom:12px">
+      <label style="font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="alarmLoopCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <span><b>Loop until accepted</b> - Tuloy tuloy hanggang ma-accept</span></label>
+      <label style="font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="alarmVibrateCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <span><b>Vibrate</b> - Yung phone magvi-vibrate</span></label>
+      <label style="font-size:11px;display:flex;align-items:center;gap:8px"><input type="checkbox" id="alarmBgCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <span><b>Background Notif</b> - Kahit naka-minimize</span></label>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <button onclick="testAlarm()" style="padding:12px;border-radius:10px;border:2px solid #00609C;background:#eef7ff;color:#00609C;font-weight:700;font-size:12px">🔊 Test Alarm</button>
+      <button onclick="testVoice()" style="padding:12px;border-radius:10px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:12px">🗣️ Test Voice</button>
+    </div>
+
+    <div style="background:#eef7ff;border-radius:8px;padding:8px;font-size:10px;color:#333;margin-bottom:12px">
+      <div>Status: <span id="alarmStatus" style="font-weight:700">Ready - Click Test to unlock sound</span></div>
+      <div style="margin-top:4px;color:#666">💡 <b>Tip:</b> Kailangan pindutin muna ang Test para ma-unlock ang sound sa tablet (browser policy). Pag naka-Add to Home Screen, mas malakas at kahit naka-exit magno-notify.</div>
+    </div>
+
+    <button onclick="closeAlarmModal()" style="width:100%;padding:14px;border-radius:10px;border:none;background:#00609C;color:#fff;font-weight:700;font-size:14px">✅ Save & Close</button>
   </div>
 </div>
-<div style="display:flex;gap:6px;margin-top:8px">
-  <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="alarmLoopCheck" checked onchange="saveAlarmSettings()"> Loop until accepted</label>
-  <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="alarmVibrateCheck" checked onchange="saveAlarmSettings()"> Vibrate</label>
-  <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="alarmBgCheck" checked onchange="saveAlarmSettings()"> Background Notif</label>
-</div>
-<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-  <button onclick="testAlarm()" style="padding:6px 10px;border-radius:8px;border:1px solid #ccc;background:#fff;font-size:11px">🔊 Test Alarm</button>
-  <button onclick="testVoice()" style="padding:6px 10px;border-radius:8px;border:1px solid #00609C;background:#eef7ff;color:#00609C;font-size:11px">🗣️ Test Voice - "May nag order ng ice"</button>
-  <span style="font-size:9px;color:#888;margin-top:4px" id="alarmStatus">Ready</span>
-</div>
-<div style="font-size:9px;color:#00609C;margin-top:4px">🎤 Voice: Sa <b>omega</b> at <b>yhel</b> = nagsasalita "May nag order ng ice!" | Sa <b>isesmo</b> = alarm lang</div>
-<div style="font-size:9px;color:#666;margin-top:6px;background:#fff;padding:6px;border-radius:6px">
-💡 <b>Para mag-alarm kahit naka-exit:</b> I-Add to Home Screen mo yung site (Chrome menu > Add to Home Screen) tapos Allow Notification.
-</div>
+
+<audio id="orderAlarm" preload="auto" style="display:none"></audio>
+<audio id="orderAlarm2" preload="auto" style="display:none"></audio>
+
+
+<div class="bottom-spacer"></div>
+<div style="display:flex;gap:8px;margin:10px 0">
+  <button id="openAlarmSettingsBtn" onclick="openAlarmModal()" style="flex:1;padding:12px;border-radius:10px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:12px">⚙️🔊 Alarm Settings</button>
+  <button id="stopAlarmBtn" onclick="stopAlarmForever()" style="display:none;padding:12px;border-radius:10px;border:none;background:#ef4444;color:#fff;font-weight:700;font-size:12px">🔇 Stop Alarm</button>
 </div>
 
-<audio id="orderAlarm" preload="auto">
-<source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg">
-</audio>
-<audio id="orderAlarm2" preload="auto"></audio>
+<!-- Alarm Modal Popup -->
+<div id="alarmModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;padding:20px;max-width:400px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0;font-size:16px;color:#c0392b">🔊 Alarm Settings</h3>
+      <button onclick="closeAlarmModal()" style="width:32px;height:32px;border-radius:50%;border:none;background:#f0f0f0;font-size:18px">✕</button>
+    </div>
+    
+    <div style="background:#fff5f5;border:1px solid #fecaca;border-radius:10px;padding:10px;margin-bottom:12px">
+      <div style="font-size:10px;color:#666;margin-bottom:4px">Current Staff: <b id="modalStaffName">Loading...</b></div>
+      <div style="font-size:10px;color:#00609C" id="voiceStatus">🎤 omega/yhel = voice + alarm | isesmo = alarm only</div>
+    </div>
+
+    <label style="font-size:11px;font-weight:600;color:#333">Alarm Sound</label>
+    <select id="alarmSoundSelect" onchange="saveAlarmSettings(); previewAlarmSound();" style="width:100%;padding:12px;border-radius:10px;border:2px solid #ddd;font-size:13px;margin:6px 0 12px">
+      <option value="beep_short">🔔 Beep Short (default)</option>
+      <option value="alarm_clock">⏰ Alarm Clock - Loud</option>
+      <option value="radar">🚨 Radar - Emergency</option>
+      <option value="siren">🚒 Siren - Very Loud</option>
+      <option value="chime">🔔 Chime - Soft</option>
+      <option value="custom_loud">🔥 LOUD BEEP (Loudest - Web Audio)</option>
+      <option value="custom_very_loud">💥 SUPER LOUD - 5x Beep</option>
+    </select>
+
+    <label style="font-size:11px;font-weight:600;color:#333">Volume</label>
+    <select id="alarmVolumeSelect" onchange="saveAlarmSettings()" style="width:100%;padding:12px;border-radius:10px;border:2px solid #ddd;font-size:13px;margin:6px 0 12px">
+      <option value="0.5">50% - Normal</option>
+      <option value="0.8">80% - Loud</option>
+      <option value="1.0" selected>100% - MAX LOUD</option>
+    </select>
+
+    <div style="background:#f8f8f8;border-radius:10px;padding:10px;margin-bottom:12px">
+      <label style="font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="alarmLoopCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <span><b>Loop until accepted</b> - Tuloy tuloy hanggang ma-accept</span></label>
+      <label style="font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px"><input type="checkbox" id="alarmVibrateCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <span><b>Vibrate</b> - Yung phone magvi-vibrate</span></label>
+      <label style="font-size:11px;display:flex;align-items:center;gap:8px"><input type="checkbox" id="alarmBgCheck" checked onchange="saveAlarmSettings()" style="width:18px;height:18px"> <span><b>Background Notif</b> - Kahit naka-minimize</span></label>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <button onclick="testAlarm()" style="padding:12px;border-radius:10px;border:2px solid #00609C;background:#eef7ff;color:#00609C;font-weight:700;font-size:12px">🔊 Test Alarm</button>
+      <button onclick="testVoice()" style="padding:12px;border-radius:10px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:12px">🗣️ Test Voice</button>
+    </div>
+
+    <div style="background:#eef7ff;border-radius:8px;padding:8px;font-size:10px;color:#333;margin-bottom:12px">
+      <div>Status: <span id="alarmStatus" style="font-weight:700">Ready - Click Test to unlock sound</span></div>
+      <div style="margin-top:4px;color:#666">💡 <b>Tip:</b> Kailangan pindutin muna ang Test para ma-unlock ang sound sa tablet (browser policy). Pag naka-Add to Home Screen, mas malakas at kahit naka-exit magno-notify.</div>
+    </div>
+
+    <button onclick="closeAlarmModal()" style="width:100%;padding:14px;border-radius:10px;border:none;background:#00609C;color:#fff;font-weight:700;font-size:14px">✅ Save & Close</button>
+  </div>
+</div>
+
+<audio id="orderAlarm" preload="auto" style="display:none"></audio>
+<audio id="orderAlarm2" preload="auto" style="display:none"></audio>
+
+
 
 
 <div class="card" id="periodSalesCard" style="display:none">
@@ -356,209 +429,7 @@ function cancelEdit(){
   updateTotal();
 }
 
-let alarmLoopInterval = null;
-let alarmAudioContext = null;
 
-function speakIceOrder(count, orders=[]){
-  if(!('speechSynthesis' in window)) return;
-  try{
-    window.speechSynthesis.cancel();
-    let message = '';
-    if(count===1){
-      message = 'May nag order ng ice! May isang bagong order!';
-    } else {
-      message = `May nag order ng ice! May ${count} na bagong order!`;
-    }
-    if(orders && orders.length>0){
-      const firstOrder = orders[0];
-      const name = firstOrder.reseller_name || firstOrder.customer_name || '';
-      if(name){ message += ` Galing kay ${name}.`; }
-      const qty = firstOrder.quantity || '';
-      const kg = firstOrder.kg_size || '';
-      if(qty && kg){ message += ` ${qty} ${kg}.`; }
-    }
-    message += ' Paki check ang live orders!';
-    const utterance = new SpeechSynthesisUtterance(message);
-    utterance.lang = 'fil-PH';
-    utterance.rate = 0.95;
-    utterance.pitch = 1.1;
-    utterance.volume = 1.0;
-    const voices = window.speechSynthesis.getVoices();
-    const filVoice = voices.find(v=>v.lang.includes('fil') || v.lang.includes('tl') || v.lang.includes('PH'));
-    const enVoice = voices.find(v=>v.lang.includes('en-PH') || v.lang.includes('en-US'));
-    if(filVoice) utterance.voice = filVoice;
-    else if(enVoice) utterance.voice = enVoice;
-    window.speechSynthesis.speak(utterance);
-    setTimeout(()=>{
-      if(lastActiveOrders>0){
-        const repeat = new SpeechSynthesisUtterance('May nag order pa ng ice! Paki check!');
-        repeat.lang = 'fil-PH';
-        repeat.rate = 0.95;
-        repeat.volume = 1.0;
-        if(filVoice) repeat.voice = filVoice;
-        window.speechSynthesis.speak(repeat);
-      }
-    }, 4000);
-  }catch(e){ console.log('Voice error',e); }
-}
-if('speechSynthesis' in window){
-  window.speechSynthesis.onvoiceschanged = ()=>{ window.speechSynthesis.getVoices(); };
-  setTimeout(()=>{ window.speechSynthesis.getVoices(); }, 500);
-}
-function testVoice(){
-  const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
-  const isIsesmo = staffName.includes('isesmo');
-  if(isIsesmo){
-    alert('Sa ISESMO account, alarm lang (walang voice). Mag-login sa omega o yhel para ma-test ang voice.');
-    testAlarm();
-  } else {
-    speakIceOrder(1, [{reseller_name:'Test Customer', quantity:5, kg_size:'5Kg'}]);
-    document.getElementById('alarmStatus').textContent='🔊 Voice test: May nag order ng ice!';
-  }
-}
-
-function getAlarmSettings(){
-  return {
-    sound: document.getElementById('alarmSoundSelect')?.value || localStorage.getItem('omega_alarm_sound') || 'beep_short',
-    volume: parseFloat(document.getElementById('alarmVolumeSelect')?.value || localStorage.getItem('omega_alarm_volume') || '1.0'),
-    loop: document.getElementById('alarmLoopCheck')?.checked ?? (localStorage.getItem('omega_alarm_loop') !== 'false'),
-    vibrate: document.getElementById('alarmVibrateCheck')?.checked ?? (localStorage.getItem('omega_alarm_vibrate') !== 'false'),
-    bg: document.getElementById('alarmBgCheck')?.checked ?? (localStorage.getItem('omega_alarm_bg') !== 'false')
-  };
-}
-function saveAlarmSettings(){
-  const s = getAlarmSettings();
-  localStorage.setItem('omega_alarm_sound', s.sound);
-  localStorage.setItem('omega_alarm_volume', String(s.volume));
-  localStorage.setItem('omega_alarm_loop', String(s.loop));
-  localStorage.setItem('omega_alarm_vibrate', String(s.vibrate));
-  localStorage.setItem('omega_alarm_bg', String(s.bg));
-  document.getElementById('alarmStatus').textContent = 'Saved: ' + s.sound + ' @ ' + Math.round(s.volume*100) + '%';
-}
-function loadAlarmSettings(){
-  try{
-    const sound = localStorage.getItem('omega_alarm_sound');
-    const vol = localStorage.getItem('omega_alarm_volume');
-    if(sound) document.getElementById('alarmSoundSelect').value = sound;
-    if(vol) document.getElementById('alarmVolumeSelect').value = vol;
-    if(localStorage.getItem('omega_alarm_loop')!==null) document.getElementById('alarmLoopCheck').checked = localStorage.getItem('omega_alarm_loop')==='true';
-    if(localStorage.getItem('omega_alarm_vibrate')!==null) document.getElementById('alarmVibrateCheck').checked = localStorage.getItem('omega_alarm_vibrate')==='true';
-    if(localStorage.getItem('omega_alarm_bg')!==null) document.getElementById('alarmBgCheck').checked = localStorage.getItem('omega_alarm_bg')==='true';
-  }catch{}
-}
-function playAlarmSound(settings){
-  const audio = document.getElementById('orderAlarm');
-  const sounds = {
-    'beep_short': 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg',
-    'alarm_clock': 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg',
-    'radar': 'https://actions.google.com/sounds/v1/alarms/spaceship_alarm.ogg',
-    'siren': 'https://actions.google.com/sounds/v1/emergency/beeper_emergency_call.ogg',
-    'chime': 'https://actions.google.com/sounds/v1/cartoon/pop.ogg'
-  };
-  if(settings.sound === 'custom_loud'){
-    try{
-      if(!alarmAudioContext) alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const ctx = alarmAudioContext;
-      for(let i=0;i<3;i++){
-        setTimeout(()=>{
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type='square';
-          osc.frequency.value=1000;
-          gain.gain.value=settings.volume;
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start();
-          osc.stop(ctx.currentTime+0.5);
-        }, i*600);
-      }
-    }catch(e){ console.log('Web Audio fail',e); }
-  } else {
-    const src = sounds[settings.sound] || sounds['beep_short'];
-    if(audio.src !== src) audio.src = src;
-    audio.volume = settings.volume;
-    audio.currentTime=0;
-    audio.play().catch(()=>{});
-  }
-}
-function triggerOrderAlarm(count, orders=[]){
-  if(!alarmEnabled) return;
-  const settings = getAlarmSettings();
-  const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
-  const isVoiceAccount = staffName.includes('omega') || staffName.includes('yhel');
-  try{
-    document.getElementById('stopAlarmBtn').style.display='inline-block';
-    document.getElementById('alarmStatus').textContent = '🔴 ALARMING - '+count+' orders!';
-    if(isVoiceAccount){ speakIceOrder(count, orders); }
-    playAlarmSound(settings);
-    if(settings.vibrate && navigator.vibrate){ navigator.vibrate([1000,200,1000,200,2000]); }
-    if(settings.bg && Notification && Notification.permission==='granted'){
-      const notif = new Notification('🧊 NEW OMEGA ORDER! 🔴', {
-        body: `${count} new order(s) waiting! Tap to open. Alarm will loop until accepted.`,
-        icon: 'https://cdn-icons-png.flaticon.com/512/2936/2936886.png',
-        requireInteraction: true,
-        vibrate: [1000,200,1000],
-        tag: 'omega-order'
-      });
-      notif.onclick = ()=>{ window.focus(); stopAlarmForever(); window.location.href='/orders'; };
-    }
-    const originalTitle = document.title;
-    let flash = 0;
-    if(window._flashInterval) clearInterval(window._flashInterval);
-    window._flashInterval = setInterval(()=>{
-      document.title = flash%2===0 ? '🔴 NEW ORDER ('+count+') - ACCEPT NOW!' : '🔵 '+count+' ORDERS WAITING!';
-      flash++;
-      if(flash>200){ clearInterval(window._flashInterval); document.title=originalTitle; }
-    }, 700);
-    const liveBtn = document.querySelector('a[href="/orders"]');
-    if(liveBtn){ liveBtn.classList.add('alarm-active'); }
-    if(settings.loop){
-      if(alarmLoopInterval) clearInterval(alarmLoopInterval);
-      alarmLoopInterval = setInterval(()=>{
-        fetch('/api/staff/customer_orders').then(r=>r.json()).then(data=>{
-          const active = (data.orders||[]).filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
-          if(active===0){
-            stopAlarmForever();
-          } else {
-            const staffLoop = (document.querySelector('.staff')?.textContent || '').toLowerCase();
-            if(staffLoop.includes('omega') || staffLoop.includes('yhel')){ speakIceOrder(active, data.orders||[]); }
-            playAlarmSound(settings);
-            if(settings.vibrate && navigator.vibrate) navigator.vibrate([1000,200,1000]);
-          }
-        });
-      }, 5000);
-    } else {
-      setTimeout(()=>stopAlarmForever(), 15000);
-    }
-    localStorage.setItem('omega_last_alarm', JSON.stringify({count, time: Date.now()}));
-  }catch(e){ console.log('Alarm error',e); }
-}
-function stopAlarmForever(){
-  const audio = document.getElementById('orderAlarm');
-  const audio2 = document.getElementById('orderAlarm2');
-  if(audio){ audio.pause(); audio.currentTime=0; }
-  if(audio2){ audio2.pause(); audio2.currentTime=0; }
-  if(alarmLoopInterval){ clearInterval(alarmLoopInterval); alarmLoopInterval=null; }
-  if(window._flashInterval){ clearInterval(window._flashInterval); window._flashInterval=null; }
-  document.title='Omega Purified Ice - Cashier';
-  const btn=document.getElementById('stopAlarmBtn');
-  if(btn) btn.style.display='none';
-  const st=document.getElementById('alarmStatus');
-  if(st) st.textContent='Alarm stopped';
-  const liveBtn = document.querySelector('a[href="/orders"]');
-  if(liveBtn) liveBtn.classList.remove('alarm-active');
-  lastActiveOrders = 0;
-  setTimeout(()=>{ fetchLiveOrdersCount(); }, 2000);
-}
-function testAlarm(){
-  triggerOrderAlarm(1, [{reseller_name:'Test Customer'}]);
-  setTimeout(()=>{ 
-    if(confirm('Lakas ba? Gusto mo i-stop na?')) stopAlarmForever();
-  }, 2000);
-}
-function stopAlarm(){
-  stopAlarmForever();
-}
 
 
 
@@ -585,8 +456,373 @@ async function fetchLiveOrdersCount(){
 }
 
 
-let lastActiveOrders = 0;
+
 let alarmEnabled = true;
+
+let alarmLoopInterval = null;
+let alarmAudioContext = null;
+let audioUnlocked = false;
+let lastAlarmTime = 0;
+
+function openAlarmModal(){
+  document.getElementById('alarmModal').style.display='flex';
+  const staff = document.querySelector('.staff')?.textContent || 'Unknown';
+  document.getElementById('modalStaffName').textContent = staff;
+  loadAlarmSettings();
+  // Unlock audio on modal open (user interaction)
+  unlockAudio();
+}
+
+function closeAlarmModal(){
+  document.getElementById('alarmModal').style.display='none';
+  saveAlarmSettings();
+}
+
+function unlockAudio(){
+  if(audioUnlocked) return;
+  try{
+    // Web Audio API unlock
+    if(!alarmAudioContext) alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if(alarmAudioContext.state === 'suspended') alarmAudioContext.resume();
+    
+    // HTML Audio unlock - play silent then pause
+    const audio = document.getElementById('orderAlarm');
+    audio.volume = 0;
+    audio.play().then(()=>{
+      audio.pause();
+      audio.volume = 1;
+      audioUnlocked = true;
+      document.getElementById('alarmStatus').textContent = '✅ Sound unlocked - Ready!';
+      console.log('Audio unlocked');
+    }).catch(()=>{
+      // Try again on next interaction
+      console.log('Audio unlock needs more interaction');
+    });
+    
+    // Speech unlock
+    if('speechSynthesis' in window){
+      const utter = new SpeechSynthesisUtterance('');
+      utter.volume = 0;
+      window.speechSynthesis.speak(utter);
+    }
+  }catch(e){ console.log('Unlock error', e); }
+}
+
+function speakIceOrder(count, orders=[]){
+  if(!('speechSynthesis' in window)) return;
+  try{
+    window.speechSynthesis.cancel();
+    let message = '';
+    if(count===1){
+      message = 'May nag order ng ice! May isang bagong order!';
+    } else {
+      message = `May nag order ng ice! May ${count} na bagong order!`;
+    }
+    if(orders && orders.length>0){
+      const firstOrder = orders[0];
+      const name = firstOrder.reseller_name || firstOrder.customer_name || '';
+      if(name){ message += ` Galing kay ${name}.`; }
+    }
+    message += ' Paki check ang live orders!';
+    const utterance = new SpeechSynthesisUtterance(message);
+    utterance.lang = 'fil-PH';
+    utterance.rate = 0.95;
+    utterance.pitch = 1.1;
+    utterance.volume = 1.0;
+    const voices = window.speechSynthesis.getVoices();
+    const filVoice = voices.find(v=>v.lang.includes('fil') || v.lang.includes('tl') || v.lang.includes('PH'));
+    const enVoice = voices.find(v=>v.lang.includes('en-PH') || v.lang.includes('en-US'));
+    if(filVoice) utterance.voice = filVoice;
+    else if(enVoice) utterance.voice = enVoice;
+    window.speechSynthesis.speak(utterance);
+    console.log('Speaking:', message);
+  }catch(e){ console.log('Voice error',e); }
+}
+
+if('speechSynthesis' in window){
+  window.speechSynthesis.onvoiceschanged = ()=>{ window.speechSynthesis.getVoices(); };
+  setTimeout(()=>{ window.speechSynthesis.getVoices(); }, 500);
+}
+
+function testVoice(){
+  unlockAudio();
+  const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
+  const isIsesmo = staffName.includes('isesmo');
+  if(isIsesmo){
+    alert('Sa ISESMO account, alarm lang (walang voice). Mag-login sa omega o yhel para ma-test ang voice. Pero i-test pa rin natin alarm.');
+    testAlarm();
+  } else {
+    speakIceOrder(1, [{reseller_name:'Test Customer', quantity:5, kg_size:'5Kg'}]);
+    document.getElementById('alarmStatus').textContent='🔊 Voice: May nag order ng ice!';
+  }
+}
+
+function getAlarmSettings(){
+  return {
+    sound: document.getElementById('alarmSoundSelect')?.value || localStorage.getItem('omega_alarm_sound') || 'beep_short',
+    volume: parseFloat(document.getElementById('alarmVolumeSelect')?.value || localStorage.getItem('omega_alarm_volume') || '1.0'),
+    loop: document.getElementById('alarmLoopCheck')?.checked ?? (localStorage.getItem('omega_alarm_loop') !== 'false'),
+    vibrate: document.getElementById('alarmVibrateCheck')?.checked ?? (localStorage.getItem('omega_alarm_vibrate') !== 'false'),
+    bg: document.getElementById('alarmBgCheck')?.checked ?? (localStorage.getItem('omega_alarm_bg') !== 'false')
+  };
+}
+
+function saveAlarmSettings(){
+  const s = getAlarmSettings();
+  localStorage.setItem('omega_alarm_sound', s.sound);
+  localStorage.setItem('omega_alarm_volume', String(s.volume));
+  localStorage.setItem('omega_alarm_loop', String(s.loop));
+  localStorage.setItem('omega_alarm_vibrate', String(s.vibrate));
+  localStorage.setItem('omega_alarm_bg', String(s.bg));
+  const st = document.getElementById('alarmStatus');
+  if(st) st.textContent = 'Saved: ' + s.sound + ' @ ' + Math.round(s.volume*100) + '%';
+}
+
+function loadAlarmSettings(){
+  try{
+    const sound = localStorage.getItem('omega_alarm_sound');
+    const vol = localStorage.getItem('omega_alarm_volume');
+    if(sound && document.getElementById('alarmSoundSelect')) document.getElementById('alarmSoundSelect').value = sound;
+    if(vol && document.getElementById('alarmVolumeSelect')) document.getElementById('alarmVolumeSelect').value = vol;
+    if(localStorage.getItem('omega_alarm_loop')!==null) document.getElementById('alarmLoopCheck').checked = localStorage.getItem('omega_alarm_loop')==='true';
+    if(localStorage.getItem('omega_alarm_vibrate')!==null) document.getElementById('alarmVibrateCheck').checked = localStorage.getItem('omega_alarm_vibrate')==='true';
+    if(localStorage.getItem('omega_alarm_bg')!==null) document.getElementById('alarmBgCheck').checked = localStorage.getItem('omega_alarm_bg')==='true';
+  }catch{}
+}
+
+function previewAlarmSound(){
+  const sel = document.getElementById('alarmSoundSelect').value;
+  const vol = parseFloat(document.getElementById('alarmVolumeSelect').value || '1.0');
+  playAlarmSound({sound: sel, volume: vol});
+}
+
+function playAlarmSound(settings){
+  // Prevent spam - at least 500ms between plays
+  const now = Date.now();
+  if(now - lastAlarmTime < 500 && settings.sound !== 'custom_very_loud') {
+    // allow very loud to bypass
+  }
+  lastAlarmTime = now;
+  
+  console.log('Playing alarm:', settings.sound, 'vol:', settings.volume);
+  
+  try{
+    // Always try Web Audio first for loudest
+    if(settings.sound === 'custom_loud' || settings.sound === 'custom_very_loud'){
+      if(!alarmAudioContext) alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+      if(alarmAudioContext.state === 'suspended') alarmAudioContext.resume();
+      const ctx = alarmAudioContext;
+      const repeats = settings.sound === 'custom_very_loud' ? 5 : 3;
+      for(let i=0;i<repeats;i++){
+        setTimeout(()=>{
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type='square';
+          osc.frequency.value= i%2===0 ? 1000 : 1500;
+          gain.gain.setValueAtTime(settings.volume, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime+0.6);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime+0.6);
+        }, i*700);
+      }
+      return;
+    }
+    
+    // HTML Audio for other sounds
+    const audio = document.getElementById('orderAlarm');
+    const sounds = {
+      'beep_short': 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg',
+      'alarm_clock': 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg',
+      'radar': 'https://actions.google.com/sounds/v1/alarms/spaceship_alarm.ogg',
+      'siren': 'https://actions.google.com/sounds/v1/emergency/beeper_emergency_call.ogg',
+      'chime': 'https://actions.google.com/sounds/v1/cartoon/pop.ogg'
+    };
+    const src = sounds[settings.sound] || sounds['beep_short'];
+    // Force reload if different
+    if(!audio.src.includes(settings.sound)){
+      audio.src = src;
+      audio.load();
+    }
+    audio.volume = settings.volume;
+    audio.currentTime = 0;
+    const playPromise = audio.play();
+    if(playPromise){
+      playPromise.catch(e=>{
+        console.log('Audio play failed, trying Web Audio fallback', e);
+        // Fallback to Web Audio beep
+        if(!alarmAudioContext) alarmAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+        if(alarmAudioContext.state === 'suspended') alarmAudioContext.resume();
+        const osc = alarmAudioContext.createOscillator();
+        const gain = alarmAudioContext.createGain();
+        osc.frequency.value = 800;
+        gain.gain.value = settings.volume;
+        osc.connect(gain);
+        gain.connect(alarmAudioContext.destination);
+        osc.start();
+        osc.stop(alarmAudioContext.currentTime+0.8);
+      });
+    }
+  }catch(e){ console.log('playAlarm error', e); }
+}
+
+function triggerOrderAlarm(count, orders=[]){
+  if(!alarmEnabled) return;
+  const settings = getAlarmSettings();
+  const staffName = (document.querySelector('.staff')?.textContent || '').toLowerCase();
+  const isVoiceAccount = staffName.includes('omega') || staffName.includes('yhel');
+  console.log('TRIGGER ALARM', count, 'voice:', isVoiceAccount, 'settings:', settings);
+  
+  try{
+    const stopBtn = document.getElementById('stopAlarmBtn');
+    if(stopBtn) stopBtn.style.display='inline-block';
+    const statusEl = document.getElementById('alarmStatus');
+    if(statusEl) statusEl.textContent = '🔴 ALARMING - '+count+' orders! - '+new Date().toLocaleTimeString();
+    
+    if(isVoiceAccount){ 
+      speakIceOrder(count, orders); 
+    }
+    playAlarmSound(settings);
+    
+    if(settings.vibrate && navigator.vibrate){ 
+      navigator.vibrate([1000,200,1000,200,2000]); 
+    }
+    
+    if(settings.bg && Notification && Notification.permission==='granted'){
+      try{
+        const notif = new Notification('🧊 NEW OMEGA ORDER! 🔴', {
+          body: `${count} new order(s) waiting! Tap to open.`,
+          icon: 'https://cdn-icons-png.flaticon.com/512/2936/2936886.png',
+          requireInteraction: true,
+          vibrate: [1000,200,1000],
+          tag: 'omega-order'
+        });
+        notif.onclick = ()=>{ window.focus(); stopAlarmForever(); window.location.href='/orders'; };
+      }catch(e){ console.log('Notif error', e); }
+    }
+    
+    // Flash title
+    const originalTitle = document.title;
+    let flash = 0;
+    if(window._flashInterval) clearInterval(window._flashInterval);
+    window._flashInterval = setInterval(()=>{
+      document.title = flash%2===0 ? '🔴 NEW ORDER ('+count+') - ACCEPT NOW!' : '🔵 '+count+' ORDERS WAITING!';
+      flash++;
+      if(flash>200){ clearInterval(window._flashInterval); document.title=originalTitle; }
+    }, 700);
+    
+    const liveBtn = document.querySelector('a[href="/orders"]');
+    if(liveBtn){ liveBtn.classList.add('alarm-active'); }
+    
+    // LOOP - fixed
+    if(alarmLoopInterval) clearInterval(alarmLoopInterval);
+    if(settings.loop){
+      console.log('Starting loop interval');
+      alarmLoopInterval = setInterval(()=>{
+        console.log('Loop tick - checking orders');
+        fetch('/api/staff/customer_orders').then(r=>r.json()).then(data=>{
+          const active = (data.orders||[]).filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
+          console.log('Loop check active:', active);
+          if(active===0){
+            stopAlarmForever();
+          } else {
+            const staffLoop = (document.querySelector('.staff')?.textContent || '').toLowerCase();
+            if(staffLoop.includes('omega') || staffLoop.includes('yhel')){ 
+              speakIceOrder(active, data.orders||[]); 
+            }
+            // Re-get settings in case changed
+            const loopSettings = getAlarmSettings();
+            playAlarmSound(loopSettings);
+            if(loopSettings.vibrate && navigator.vibrate) navigator.vibrate([1000,200,1000]);
+          }
+        }).catch(e=>console.log('Loop fetch error', e));
+      }, 5000);
+    }
+    
+    localStorage.setItem('omega_last_alarm', JSON.stringify({count, time: Date.now()}));
+    
+  }catch(e){ console.log('Alarm trigger error',e); }
+}
+
+function stopAlarmForever(){
+  console.log('Stopping alarm');
+  const audio = document.getElementById('orderAlarm');
+  const audio2 = document.getElementById('orderAlarm2');
+  if(audio){ audio.pause(); audio.currentTime=0; }
+  if(audio2){ audio2.pause(); audio2.currentTime=0; }
+  if(alarmLoopInterval){ clearInterval(alarmLoopInterval); alarmLoopInterval=null; console.log('Loop cleared'); }
+  if(window._flashInterval){ clearInterval(window._flashInterval); window._flashInterval=null; }
+  document.title='Omega Purified Ice - Cashier';
+  const btn=document.getElementById('stopAlarmBtn');
+  if(btn) btn.style.display='none';
+  const st=document.getElementById('alarmStatus');
+  if(st) st.textContent='Alarm stopped - '+new Date().toLocaleTimeString();
+  const liveBtn = document.querySelector('a[href="/orders"]');
+  if(liveBtn) liveBtn.classList.remove('alarm-active');
+  if('speechSynthesis' in window) window.speechSynthesis.cancel();
+  lastActiveOrders = 0;
+  setTimeout(()=>{ fetchLiveOrdersCount(); }, 2000);
+}
+
+function testAlarm(){
+  unlockAudio();
+  const settings = getAlarmSettings();
+  console.log('Test alarm with', settings);
+  triggerOrderAlarm(1, [{reseller_name:'Test Customer'}]);
+}
+
+function stopAlarm(){
+  stopAlarmForever();
+}
+
+async function fetchLiveOrdersCount(){
+  try{
+    const res = await fetch('/api/staff/customer_orders');
+    const data = await res.json();
+    const orders = data.orders||[];
+    const active = orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)).length;
+    const badge = document.getElementById('liveOrdersCount');
+    if(badge){
+      if(active>0){
+        badge.textContent = active;
+        badge.style.display = 'inline';
+        console.log('Live orders:', active, 'last:', lastActiveOrders);
+        if(active > lastActiveOrders && lastActiveOrders>=0){
+          console.log('New order detected, triggering alarm');
+          triggerOrderAlarm(active, orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)));
+        } else if(active>0 && lastActiveOrders===0 && !alarmLoopInterval){
+          // First load with existing orders - trigger once
+          console.log('Existing orders on load, triggering');
+          triggerOrderAlarm(active, orders.filter(o=>!['Delivered','Cancelled'].includes(o.order_status)));
+        }
+      } else {
+        badge.style.display = 'none';
+        if(alarmLoopInterval){
+          console.log('No active orders, stopping loop');
+          stopAlarmForever();
+        }
+      }
+    }
+    lastActiveOrders = active;
+  }catch(e){ console.log('fetchLiveOrdersCount error', e); }
+}
+
+// Unlock audio on any user interaction
+document.addEventListener('click', ()=>{ unlockAudio(); }, {once:false});
+document.addEventListener('touchstart', ()=>{ unlockAudio(); }, {once:false});
+document.addEventListener('DOMContentLoaded', ()=>{
+  loadAlarmSettings();
+  // Auto unlock attempt
+  setTimeout(()=>{ unlockAudio(); }, 1000);
+  if(Notification && Notification.permission==='default'){
+    Notification.requestPermission();
+  }
+});
+
+
+let lastActiveOrders = 0;
+
 function setCashierPeriod(p){
   cashierPeriod=p;
   document.querySelectorAll('.today-card .period-btn').forEach(b=>{
