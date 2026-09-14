@@ -2882,7 +2882,7 @@ label{font-size:12px;color:#666;display:block;margin:12px 0 6px}input{width:100%
 </style></head>
 <body>
 <div class="card">
-<div class="header"><h1>🧊 OMEGA ICE</h1><p>Customer Secure Login</p><p style="font-size:11px;color:#888">One phone + password per store</p></div>
+<div class="header"><h1>🧊 OMEGA PURIFIED ICE</h1><p>Customer Secure Login</p><p style="font-size:11px;color:#888">One phone + password per store</p></div>
 <label>Registered Phone</label><input type="tel" id="phone" placeholder="09xx xxx xxxx">
 <label>Password</label><input type="password" id="password" placeholder="Enter password">
 <button class="btn" onclick="doLogin()">🔐 Login</button>
@@ -3039,7 +3039,7 @@ function openTracking(orderId){
   const isPickup=o.mode==='PICKUP';
   const descs=[
     'Order received • Waiting for confirmation',
-    `Crushing & packing ${o.quantity}x ${o.kg_size}`,
+    `Packing ${o.quantity}x ${o.kg_size}`,
     isPickup?'Ready for pickup at the store':'Rider is on the way to you',
     isPickup?`Picked up • ₱${o.total_sales} ${o.payment||''}`:`Delivered • ₱${o.total_sales} ${o.payment||''}`
   ];
