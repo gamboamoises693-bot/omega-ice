@@ -163,8 +163,8 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 <body>
 <div class="topbar"><h1>OMEGA PURIFIED ICE</h1><div style="display:flex;align-items:center;gap:10px"><span class="staff">{{ staff_name }}</span><button class="logout" onclick="logout()">Logout</button></div></div>
 <div class="one-row">
-  <span class="cloud-badge online" id="onlineBadge">● Online</span>
-  <a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444;position:relative">🔴 Live Orders <span id="liveOrdersCount" style="background:#fff;color:#ff4444;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;display:none">0</span></a>
+  <span class="cloud-badge online" id="onlineBadge">● Cloud Online</span>
+  <a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444;position:relative">🔴 Online Orders <span id="liveOrdersCount" style="background:#fff;color:#ff4444;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:4px;display:none">0</span></a>
   <span class="cloud-badge pending" id="pendingBadge" style="display:none" onclick="syncOffline()">0 Pending</span>
   <a href="/cashier" class="nav-pill active">Sales</a>
   <a href="/machines" class="nav-pill">Machines</a>
@@ -223,7 +223,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 </div>
 
 <div style="display:flex;gap:8px;margin:12px 0">
-  <button id="openAlarmSettingsBtn" onclick="openAlarmModal()" style="flex:1;padding:14px;border-radius:12px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:13px">⚙️🔊 Alarm Settings (1 button only)</button>
+  <button id="openAlarmSettingsBtn" onclick="openAlarmModal()" style="flex:1;padding:14px;border-radius:12px;border:2px solid #ff4444;background:#fff5f5;color:#c0392b;font-weight:700;font-size:13px">⚙️🔊 Alarm Settings</button>
   <button id="stopAlarmBtn" onclick="stopAlarmForever()" style="display:none;padding:14px;border-radius:12px;border:none;background:#ef4444;color:#fff;font-weight:700;font-size:13px">🔇 Stop Alarm</button>
 </div>
 
