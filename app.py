@@ -8,28 +8,100 @@ Omega Ice - OFFLINE FIRST - Firebase + Local SQLite backup
 Firebase: https://moises-92842-default-rtdb.asia-southeast1.firebasedatabase.app
 """
 
-import os, sqlite3, json, requests, time
+import os, sqlite3, json, requests, time, base64
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 import random, string, re
 from flask import Flask, request, jsonify, session, redirect, url_for, render_template_string
 
+# --- Firebase Admin SDK ---
+import firebase_admin
+from firebase_admin import credentials, db
+
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "omega-ice-realtime-2026")
+@app.after_request
+def add_security_headers(resp):
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["X-XSS-Protection"] = "1; mode=block"
+    return resp
+
+
+# --- SECURITY HARDENING ---
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY environment variable is required! Set it in Render > Environment")
+app.secret_key = SECRET_KEY
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=True,
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8)
+)
+
+# Init Firebase Admin from env variable FIREBASE_CREDENTIALS (paste whole JSON as string) or file path
+firebase_creds_json = (
+    os.environ.get("FIREBASE_CREDENTIALS_JSON")
+    or os.environ.get("FIREBASE_CREDENTIALS")
+    or os.environ.get("FIREBASE_ADMIN_JSON")
+    or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+)
+firebase_creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+firebase_db_url = os.environ.get("FIREBASE_URL", "https://moises-92842-default-rtdb.asia-southeast1.firebasedatabase.app")
+
+if not firebase_admin._apps:
+    try:
+        if firebase_creds_json:
+            # If you paste the JSON content in env var
+            import tempfile
+            # Handle base64 encoded json too
+            try:
+                # try to parse as json
+                cred_dict = json.loads(firebase_creds_json)
+            except:
+                # try base64 decode
+                cred_dict = json.loads(base64.b64decode(firebase_creds_json).decode())
+            cred = credentials.Certificate(cred_dict)
+        elif firebase_creds_path and os.path.exists(firebase_creds_path):
+            cred = credentials.Certificate(firebase_creds_path)
+        else:
+            # fallback to local file if exists (for local dev)
+            local_json = os.path.join(os.path.dirname(os.path.abspath(__file__)), "firebase-admin.json")
+            if os.path.exists(local_json):
+                cred = credentials.Certificate(local_json)
+            else:
+                raise RuntimeError("No firebase credentials found")
+        firebase_admin.initialize_app(cred, {
+            "databaseURL": firebase_db_url
+        })
+    except Exception as e:
+        print(f"Firebase Admin init error: {e}")
+        raise
+
+# Rate limiting simple
+from collections import defaultdict
+_login_attempts = defaultdict(list)
+
+def is_rate_limited(ip, max_attempts=5, window_seconds=300):
+    now = time.time()
+    _login_attempts[ip] = [t for t in _login_attempts[ip] if now - t < window_seconds]
+    return len(_login_attempts[ip]) >= max_attempts
+
+def record_attempt(ip):
+    _login_attempts[ip].append(time.time())
+
 
 def hash_customer_password(pwd):
-    try:
-        return generate_password_hash(pwd)
-    except:
-        import hashlib
-        return hashlib.sha256(pwd.encode()).hexdigest()
+    return generate_password_hash(pwd, method="pbkdf2:sha256", salt_length=16)
 
 def verify_customer_password(hash_val, pwd):
+    if not hash_val or not pwd or len(hash_val) < 20 or hash_val == pwd:
+        return False
     try:
         return check_password_hash(hash_val, pwd)
     except:
-        import hashlib
-        return hash_val == hashlib.sha256(pwd.encode()).hexdigest() or hash_val == pwd
+        return False
 
 def customer_login_required(v):
     def w(*a,**k):
@@ -1169,8 +1241,8 @@ init_local_db()
 
 def is_online():
     try:
-        r = requests.get(f"{FIREBASE_URL}/.json", timeout=3)
-        return r.status_code in [200, 401, 403]
+        db.reference("/").get(shallow=True)
+        return True
     except:
         return False
 
@@ -1217,45 +1289,44 @@ def get_cached_resellers(q=""):
 # ---------- Firebase helpers ----------
 def fb_get(path):
     try:
-        r = requests.get(f"{FIREBASE_URL}/{path}.json", timeout=7)
-        if r.status_code == 200:
-            return r.json()
+        ref = db.reference(path)
+        return ref.get()
     except Exception as e:
         print(f"GET {path} error: {e}")
     return None
 
 def fb_post(path, data):
     try:
-        r = requests.post(f"{FIREBASE_URL}/{path}.json", json=data, timeout=10)
-        if r.status_code == 200:
-            return r.json()
+        ref = db.reference(path)
+        new_ref = ref.push(data)
+        return {"name": new_ref.key}
     except Exception as e:
         print(f"POST {path} error: {e}")
     return None
 
 def fb_put(path, data):
     try:
-        r = requests.put(f"{FIREBASE_URL}/{path}.json", json=data, timeout=10)
-        if r.status_code == 200:
-            return r.json()
+        ref = db.reference(path)
+        ref.set(data)
+        return data
     except Exception as e:
         print(f"PUT {path} error: {e}")
     return None
 
 def fb_delete(path):
     try:
-        r = requests.delete(f"{FIREBASE_URL}/{path}.json", timeout=10)
-        if r.status_code == 200:
-            return True
+        ref = db.reference(path)
+        ref.delete()
+        return True
     except Exception as e:
         print(f"DELETE {path} error: {e}")
     return False
 
 def fb_patch(path, data):
     try:
-        r = requests.patch(f"{FIREBASE_URL}/{path}.json", json=data, timeout=10)
-        if r.status_code == 200:
-            return r.json()
+        ref = db.reference(path)
+        ref.update(data)
+        return data
     except Exception as e:
         print(f"PATCH {path} error: {e}")
     return None
@@ -1331,25 +1402,21 @@ def login_page():
     return render_template_string(LOGIN_HTML)
 
 @app.route("/debug")
+@login_required
 def debug_page():
-    import os
-    info = []
-    info.append(f"FIREBASE_URL: {FIREBASE_URL}")
-    info.append(f"Online: {is_online()}")
-    info.append(f"CWD: {os.getcwd()}")
-    info.append(f"Local DB: {LOCAL_DB} exists={os.path.exists(LOCAL_DB)}")
-    info.append(f"Pending offline sales: {get_pending_count()}")
-    try:
-        r = requests.get(f"{FIREBASE_URL}/.json", timeout=5)
-        info.append(f"Firebase status: {r.status_code}")
-    except Exception as e:
-        info.append(f"Firebase failed: {e}")
-    return "<br>".join(info)
+    if (session.get("staff_name") or "").lower() not in ["isesmo", "isesmo gamboa"]:
+        return jsonify({"ok": False, "error": "Forbidden"}), 403
+    return jsonify({"ok": True, "online": True, "pending": get_pending_count()})
 
 @app.route("/api/login", methods=["POST"])
 def api_login():
+    ip = request.remote_addr or "unknown"
+    if is_rate_limited(ip):
+        return jsonify({"ok": False, "error": "Daming try! Wait 5 mins"}), 429
     pin = (request.json or {}).get("pin", "").strip()
-    if len(pin) != 4:
+    if len(pin) != 4 or not pin.isdigit():
+        record_attempt(ip)
+
         return jsonify({"ok": False, "error": "Enter 4-digit PIN"}), 400
     # Try online first
     staff_data = fb_get("staff")
@@ -1369,13 +1436,16 @@ def api_login():
             session["staff_name"] = val.get("name")
             session["staff_position"] = val.get("position", "Staff")
             return jsonify({"ok": True, "name": val.get("name"), "position": val.get("position")})
+    record_attempt(ip)
     return jsonify({"ok": False, "error": "Wrong PIN"}), 401
 
 @app.route("/api/setup")
 def api_setup():
+    if os.environ.get("ALLOW_SETUP", "false").lower() != "true":
+        return jsonify({"ok": False, "error": "Setup disabled for security"}), 403
     existing = fb_get("staff")
     if existing:
-        return jsonify({"ok": False, "message": "Already setup", "staff_count": len(existing)})
+        return jsonify({"ok": False, "message": "Already setup"})
     staff = {
         "staff1": {"name": "Tatay/Nanay", "position": "Co-Owner", "pin": "1928", "status": "Active"},
         "staff2": {"name": "Yhel", "position": "Staff", "pin": "0615", "status": "Active"},
@@ -1385,7 +1455,8 @@ def api_setup():
     fb_put("staff", staff)
     fb_put("price_settings/REGULAR", {"kg1": 10, "kg5": 50, "kg10": 100, "kg25": 250, "type": "REGULAR"})
     fb_put("price_settings/PICKUP", {"kg1": 9, "kg5": 45, "kg10": 90, "kg25": 230, "type": "PICKUP"})
-    return jsonify({"ok": True, "message": "Setup done! PIN 1928"})
+    return jsonify({"ok": True, "message": "Setup done!"})
+
 
 @app.route("/api/logout", methods=["POST"])
 def api_logout():
