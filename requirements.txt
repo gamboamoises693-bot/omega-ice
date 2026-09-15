@@ -1,8 +1,0 @@
-Flask
-gunicorn
-requests
-firebase-admin
-Werkzeug
-qrcode
-Pillow
-pytz
