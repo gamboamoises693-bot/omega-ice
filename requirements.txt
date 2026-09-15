@@ -1,8 +1,8 @@
-Flask==2.3.3
-gunicorn==21.2.0
-requests==2.31.0
-firebase-admin==6.4.0
-Werkzeug==2.3.7
-qrcode==7.4.2
-Pillow==10.0.1
-pytz==2023.3
+Flask
+gunicorn
+requests
+firebase-admin
+Werkzeug
+qrcode
+Pillow
+pytz
