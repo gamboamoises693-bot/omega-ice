@@ -1,4 +1,5 @@
 
+
 """
 Omega Ice - OFFLINE FIRST - Firebase + Local SQLite backup
 - If internet: saves to Firebase instantly
@@ -2948,7 +2949,6 @@ CUSTOMER_LOGIN_HTML = """<!DOCTYPE html>
 .header{text-align:center;margin-bottom:20px}.header h1{font-size:20px;color:#00609C;margin:0}.header p{font-size:12px;color:#666;margin:4px 0}
 label{font-size:12px;color:#666;display:block;margin:12px 0 6px}input{width:100%;padding:14px;border-radius:12px;border:1.5px solid #ccd;font-size:15px}
 .btn{width:100%;padding:14px;background:#00609C;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;margin-top:16px}
-.btn-otp{background:#f59e0b;margin-top:8px}
 .status{font-size:12px;text-align:center;margin-top:10px;min-height:18px}.status.err{color:#c0392b}.status.ok{color:#1a8a4a}
 .qr-hint{background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:10px;margin-top:12px;font-size:11px;color:#0369a1}
 </style></head>
@@ -2964,14 +2964,11 @@ label{font-size:12px;color:#666;display:block;margin:12px 0 6px}input{width:100%
 <label>Password</label><input type="password" id="password" placeholder="Enter password">
 <button class="btn" onclick="doLogin()">🔐 Login</button>
 <p class="status" id="status"></p>
-<div class="qr-hint">💡 <b>May QR ka?</b> I-scan mo lang yung QR na binigay ni ISESMO, auto-login ka na! Hindi na kailangan mag-type. Parang chat box, tap nalang!</div>
-<p style="font-size:12px;color:#888;text-align:center;margin-top:14px;border-top:1px solid #eee;padding-top:14px">Forgot your password?<br>Contact ISESMO to have it reset for you.</p>
+<div class="qr-hint">💡 <b>May QR ka?</b> I-scan mo lang yung QR na binigay ni ISESMO, auto-login ka na!</div>
+<p style="font-size:12px;color:#888;text-align:center;margin-top:14px;border-top:1px solid #eee;padding-top:14px">Forgot your password?<br>Contact ISESMO</p>
 </div>
 <script>
-function getParam(name){
-  const url=new URL(window.location.href);
-  return url.searchParams.get(name);
-}
+function getParam(name){const url=new URL(window.location.href);return url.searchParams.get(name);}
 async function doLogin(){
   const phone=document.getElementById('phone').value.trim();
   const pwd=document.getElementById('password').value;
@@ -2980,8 +2977,8 @@ async function doLogin(){
   st.textContent='Checking...';
   const res=await fetch('/api/customer/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone,password:pwd})});
   const data=await res.json();
-  if(data.ok){st.textContent='OK! Login success...';window.location.href=`/customer/${data.reseller_id}/dashboard`;}
-  else{st.textContent=data.error||'Wrong phone or password';st.className='status err';}
+  if(data.ok){st.textContent='OK! Login...';window.location.href=`/customer/${data.reseller_id}/dashboard`;}
+  else{st.textContent=data.error||'Wrong';st.className='status err';}
 }
 (function(){
   const phoneParam=getParam('phone');
@@ -2991,13 +2988,11 @@ async function doLogin(){
     if(pwdParam){
       try{
         let decoded=pwdParam;
-        if(pwdParam.length>10 && !pwdParam.includes(' ')){
-          try{ decoded=atob(pwdParam); }catch(e){ decoded=pwdParam; }
-        }
+        if(pwdParam.length>10 && !pwdParam.includes(' ')){try{ decoded=atob(pwdParam); }catch(e){ decoded=pwdParam; }}
         document.getElementById('password').value=decoded;
       }catch(e){ document.getElementById('password').value=pwdParam; }
       document.getElementById('qrAutoBox').style.display='block';
-      document.getElementById('qrAutoText').textContent='Phone: '+phoneParam+' • Password auto-filled. Tap to login!';
+      document.getElementById('qrAutoText').textContent='Phone: '+phoneParam+' • Auto-filled. Tap login!';
       setTimeout(()=>{ doLogin(); }, 1200);
     }
   }
@@ -3579,7 +3574,6 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px 4px;b
 <body>
 <div class="topbar"><h1>👥 Customers (ISESMO Only)</h1><div class="nav-group"><a href="/cashier" class="nav-pill">Sales</a><a href="/orders" class="nav-pill">Live Orders</a></div></div>
 
-<!-- OTP CHAT BOX - SAFE HERE ONLY ISESMO -->
 <div class="card" style="border:2px solid #f59e0b;background:#fffbeb">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
     <h3 style="margin:0;font-size:14px;color:#92400e">💬 OTP Requests - Safe Zone (ISESMO Only)</h3>
@@ -3605,14 +3599,14 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px 4px;b
 <button class="btn btn-save" style="width:100%;margin-top:10px;padding:12px" onclick="addCustomer()">+ Add Customer (ISESMO Only)</button>
 <p id="addStatus" style="font-size:12px;margin-top:8px"></p>
 </div>
-<div class="card"><input type="text" id="search" placeholder="Search store or phone..." oninput="loadCustomers()"></div>
-<div class="card"><table><thead><tr><th>Store</th><th>Phone / Login</th><th>OTP / Status</th><th>Action</th></tr></thead><tbody id="tbody"></tbody></table></div>
+<div class="card"><input type="text" id="search" placeholder="Search store or phone..." oninput="loadCustomers()"><div style="font-size:10px;color:#666;margin-top:6px" id="customerCount">Loading customers...</div></div>
+<div class="card"><div style="overflow-x:auto"><table><thead><tr><th>Store</th><th>Phone / Login</th><th>OTP / Status</th><th>Action</th></tr></thead><tbody id="tbody"><tr><td colspan=4 style="text-align:center;padding:20px;color:#999">Loading...</td></tr></tbody></table></div></div>
 <div class="card" id="editCard" style="display:none">
 <h3 style="margin:0 0 8px;font-size:14px">Edit Phone & Password</h3>
 <p style="font-size:11px;color:#666" id="editStore"></p>
 <label>Phone</label><input id="editPhone">
 <label>New Password</label><input id="editPassword" type="text">
-<div style="display:flex;gap:8px;margin-top:8px">
+<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
 <button class="btn btn-save" onclick="savePassword()">Save</button>
 <button class="btn" style="background:#ddd" onclick="closeEdit()">Cancel</button>
 <button class="btn btn-qr" onclick="generateQR()">📱 Generate QR Login</button>
@@ -3620,7 +3614,6 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px 4px;b
 <p id="editStatus" style="font-size:12px;margin-top:8px"></p>
 </div>
 
-<!-- QR MODAL -->
 <div class="qr-modal" id="qrModal" onclick="if(event.target===this)closeQR()">
   <div class="qr-box">
     <h3 style="margin:0 0 8px;color:#6d28d9">📱 QR Login</h3>
@@ -3632,7 +3625,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px 4px;b
       <button class="btn btn-qr" style="flex:1" onclick="copyQRLink()">📋 Copy Link</button>
     </div>
     <button class="btn" style="width:100%;background:#eee;margin-top:8px" onclick="closeQR()">Close</button>
-    <p style="font-size:9px;color:#999;margin-top:8px">Pag na-scan ng reseller, auto-login na! Parang chat box, tap nalang ng Login.</p>
+    <p style="font-size:9px;color:#999;margin-top:8px">Pag na-scan ng reseller, auto-login na! Tap nalang ng Login.</p>
   </div>
 </div>
 
@@ -3651,21 +3644,32 @@ async function addCustomer(){
   if(data.ok){document.getElementById('newStore').value='';document.getElementById('newPhone').value='';document.getElementById('newPassword').value='';loadCustomers();}
 }
 async function loadCustomers(){
-  const res=await fetch('/api/customers/list');
-  const data=await res.json();
-  const rows=data.resellers||[];
-  const otps=data.otps||{};
-  const q=document.getElementById('search').value.toLowerCase();
-  const filtered=rows.filter(r=>(r.store_name||'').toLowerCase().includes(q)||(r.phone||'').includes(q));
-  document.getElementById('tbody').innerHTML=filtered.map(r=>{
-    const otpInfo=otps[r.phone]||'';
-    return `<tr>
-      <td><b>${r.store_name}</b><br><small>₱${r.credit_balance||0}</small><br><button class="btn btn-qr" style="padding:4px 8px;font-size:10px;margin-top:4px" onclick="openEdit('${r.id}','${r.store_name.replace(/'/g, "\'")}','${r.phone}');setTimeout(generateQR,300)">📱 QR</button></td>
-      <td>${r.phone}<br><small style="color:${r.password_hash?'green':'red'}">${r.password_hash?'Has pwd':'No pwd'}</small></td>
-      <td>${otpInfo?'<span style="background:#fef3c7;padding:2px 6px;border-radius:10px;font-size:10px">OTP:'+otpInfo+'</span>':'-'}<br><small>${r.status||'active'}</small></td>
-      <td><button class="btn" style="background:#22c55e;color:#fff" data-id="${r.id}" data-store="${r.store_name}" data-phone="${r.phone}" onclick="openEdit(this.dataset.id,this.dataset.store,this.dataset.phone)">Edit</button></td>
-    </tr>`;
-  }).join('');
+  try{
+    const res=await fetch('/api/customers/list');
+    if(!res.ok){document.getElementById('customerCount').textContent='Error: '+res.status; document.getElementById('tbody').innerHTML='<tr><td colspan=4 style="color:red;text-align:center">Error loading: '+res.status+'</td></tr>'; return;}
+    const data=await res.json();
+    if(data.error){document.getElementById('customerCount').textContent='Error: '+data.error;}
+    const rows=data.resellers||[];
+    const otps=data.otps||{};
+    document.getElementById('customerCount').textContent=rows.length+' customers found';
+    if(!rows.length){document.getElementById('tbody').innerHTML='<tr><td colspan=4 style="text-align:center;padding:20px;color:#888">No customers yet. Add one above.<br><small>Records are safe in Firebase - baka na-filter lang sa search</small></td></tr>'; return;}
+    const q=document.getElementById('search').value.toLowerCase();
+    const filtered=rows.filter(r=>(r.store_name||'').toLowerCase().includes(q)||(r.phone||'').includes(q));
+    document.getElementById('tbody').innerHTML=filtered.map(r=>{
+      const otpInfo=otps[r.phone]||'';
+      const safeStore = (r.store_name||'').replace(/'/g, "\'");
+      return `<tr>
+        <td><b>${r.store_name}</b><br><small>₱${r.credit_balance||0}</small><br><button class="btn btn-qr" style="padding:4px 8px;font-size:10px;margin-top:4px" onclick="openEdit('${r.id}','${safeStore}','${r.phone}');setTimeout(generateQR,300)">📱 QR</button></td>
+        <td>${r.phone}<br><small style="color:${r.password_hash?'green':'red'}">${r.password_hash?'Has pwd':'No pwd'}</small></td>
+        <td>${otpInfo?'<span style="background:#fef3c7;padding:2px 6px;border-radius:10px;font-size:10px">OTP:'+otpInfo+'</span>':'-'}<br><small>${r.status||'active'}</small></td>
+        <td><button class="btn" style="background:#22c55e;color:#fff" data-id="${r.id}" data-store="${r.store_name}" data-phone="${r.phone}" onclick="openEdit(this.dataset.id,this.dataset.store,this.dataset.phone)">Edit</button></td>
+      </tr>`;
+    }).join('');
+    if(!filtered.length && q){document.getElementById('tbody').innerHTML='<tr><td colspan=4 style="text-align:center;padding:10px;color:#888">No match for "'+q+'"</td></tr>';}
+  }catch(e){
+    document.getElementById('customerCount').textContent='Error: '+e.message;
+    document.getElementById('tbody').innerHTML='<tr><td colspan=4 style="color:red;text-align:center">Load failed: '+e.message+'<br><button onclick="loadCustomers()" style="margin-top:8px;padding:6px 12px;border-radius:8px;border:none;background:#00609C;color:#fff">Retry</button></td></tr>';
+  }
 }
 function openEdit(id,store,phone){editingId=id;document.getElementById('editStore').textContent=store;document.getElementById('editPhone').value=phone;document.getElementById('editCard').style.display='block';window.scrollTo({top:document.getElementById('editCard').offsetTop,behavior:'smooth'});}
 function closeEdit(){document.getElementById('editCard').style.display='none';}
@@ -3693,10 +3697,8 @@ async function generateQR(){
   }catch(e){document.getElementById('editStatus').textContent='Error: '+e.message;}
 }
 function closeQR(){document.getElementById('qrModal').classList.remove('show');}
-function copyQRLink(){
-  navigator.clipboard.writeText(currentQRLink).then(()=>{alert('Link copied!
-'+currentQRLink);});
-}
+function copyQRLink(){navigator.clipboard.writeText(currentQRLink).then(()=>{alert('Link copied!
+'+currentQRLink);});}
 function downloadQR(){
   const img=document.getElementById('qrImage');
   const a=document.createElement('a');
@@ -3704,12 +3706,12 @@ function downloadQR(){
   a.download='omega-qr-'+Date.now()+'.png';
   a.click();
 }
-// OTP CHAT BOX LOGIC - SAFE HERE
 async function loadOTPs(){
   try{
     const res=await fetch('/api/admin/otps');
+    if(!res.ok){document.getElementById('otpList').innerHTML='<div style="color:#c0392b;font-size:12px;text-align:center;padding:10px">Error: '+res.status+' - Baka hindi ISESMO login</div>'; return;}
     const data=await res.json();
-    if(!data.ok){document.getElementById('otpList').innerHTML='<div style="color:#c0392b;font-size:12px">Error: '+(data.error||'')+'</div>';return;}
+    if(!data.ok){document.getElementById('otpList').innerHTML='<div style="color:#c0392b;font-size:12px;text-align:center">Error: '+(data.error||'')+'</div>';return;}
     const otps=data.otps||[];
     document.getElementById('otpCount').textContent=otps.length;
     if(!otps.length){
@@ -3726,7 +3728,7 @@ async function loadOTPs(){
           <b style="font-size:13px">📱 ${o.phone}</b>
           <span style="font-size:9px;padding:2px 6px;border-radius:8px;background:#fff;border:1px solid ${border}">${isUsed} • ${isExpired}</span>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;margin:6px 0">
+        <div style="display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap">
           <div style="font-size:20px;font-weight:800;letter-spacing:4px;background:#fff;padding:6px 12px;border-radius:8px;border:2px dashed #f59e0b">${o.otp}</div>
           <button class="btn btn-otp" onclick="navigator.clipboard.writeText('${o.otp}').then(()=>alert('Copied: ${o.otp}'))">📋 Copy</button>
           <button class="btn" style="background:#fff;border:1px solid #f59e0b;color:#92400e" onclick="navigator.clipboard.writeText('Omega Ice OTP mo: ${o.otp}. Valid 5 mins. - ISESMO').then(()=>alert('Message copied for ${o.phone}'))">💬 Msg</button>
@@ -3739,7 +3741,7 @@ async function loadOTPs(){
       </div>`;
     }).join('');
   }catch(e){
-    document.getElementById('otpList').innerHTML=`<div style="color:#c0392b">Error: ${e.message}</div>`;
+    document.getElementById('otpList').innerHTML=`<div style="color:#c0392b;text-align:center">Error: ${e.message}<br><button onclick="loadOTPs()" style="margin-top:6px;padding:4px 8px;border-radius:6px;border:none;background:#f59e0b;color:#fff">Retry</button></div>`;
   }
 }
 loadCustomers();
@@ -3805,7 +3807,6 @@ def api_customers_list():
     except Exception as e:
         return jsonify({"resellers": [], "otps": {}, "error": str(e)}), 500
 
-
 @app.route("/api/reseller/<reseller_id>/set_password", methods=["POST"])
 @login_required
 def api_set_reseller_password(reseller_id):
@@ -3826,11 +3827,9 @@ def api_set_reseller_password(reseller_id):
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-# ========== OTP CHAT BOX - SAFE ZONE ONLY ISESMO ==========
 @app.route("/api/admin/otps")
 @login_required
 def api_admin_otps():
-    """Only ISESMO can see OTPs - chat box style - FREE"""
     try:
         staff = (session.get("staff_name") or "").lower()
         if staff not in ["isesmo", "isesmo gamboa", "omega", "yhel", "omega purified ice"]:
@@ -3876,11 +3875,9 @@ def api_admin_otps():
         import traceback
         return jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()}), 500
 
-# ========== QR LOGIN - AUTO LOGIN VIA QR CODE ==========
 @app.route("/api/customers/<reseller_id>/qr")
 @login_required
 def api_customer_qr(reseller_id):
-    """Generate QR code with auto-login link - ONLY ISESMO"""
     try:
         staff = (session.get("staff_name") or "").lower()
         if staff not in ["isesmo", "isesmo gamboa"]:
@@ -3919,21 +3916,13 @@ def api_customer_qr(reseller_id):
             data_url = f"data:image/png;base64,{b64}"
         except Exception as e:
             data_url = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={auto_link}"
-        return jsonify({
-            "ok": True,
-            "link": auto_link,
-            "qr_data_url": data_url,
-            "store_name": store_name,
-            "phone": phone,
-            "expires_at": token_data["expires_at"]
-        })
+        return jsonify({"ok": True, "link": auto_link, "qr_data_url": data_url, "store_name": store_name, "phone": phone, "expires_at": token_data["expires_at"]})
     except Exception as e:
         import traceback
         return jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()}), 500
 
 @app.route("/customer/qr")
 def customer_qr_login():
-    """When customer scans QR, auto-login"""
     try:
         token = request.args.get("token") or ""
         if not token:
@@ -3971,7 +3960,6 @@ def customer_qr_login():
     except Exception as e:
         import traceback
         return f"<h3>Error</h3><pre>{e}<br>{traceback.format_exc()}</pre>", 500
-
 
 @app.route("/api/sales/dashboard")
 @login_required
