@@ -1,5 +1,4 @@
 
-
 """
 Omega Ice - OFFLINE FIRST - Firebase + Local SQLite backup
 - If internet: saves to Firebase instantly
