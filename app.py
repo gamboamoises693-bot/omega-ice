@@ -41,8 +41,14 @@ app.config.update(
 )
 
 # Init Firebase Admin from env variable FIREBASE_CREDENTIALS (paste whole JSON as string) or file path
-firebase_creds_json = os.environ.get("FIREBASE_CREDENTIALS")
+firebase_creds_json = (
+    os.environ.get("FIREBASE_CREDENTIALS_JSON")
+    or os.environ.get("FIREBASE_CREDENTIALS")
+    or os.environ.get("FIREBASE_ADMIN_JSON")
+    or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+)
 firebase_creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+firebase_db_url = os.environ.get("FIREBASE_URL", "https://moises-92842-default-rtdb.asia-southeast1.firebasedatabase.app")
 
 if not firebase_admin._apps:
     try:
@@ -67,7 +73,7 @@ if not firebase_admin._apps:
             else:
                 raise RuntimeError("No firebase credentials found")
         firebase_admin.initialize_app(cred, {
-            "databaseURL": "https://moises-92842-default-rtdb.asia-southeast1.firebasedatabase.app"
+            "databaseURL": firebase_db_url
         })
     except Exception as e:
         print(f"Firebase Admin init error: {e}")
@@ -2944,28 +2950,17 @@ label{font-size:12px;color:#666;display:block;margin:12px 0 6px}input{width:100%
 .btn{width:100%;padding:14px;background:#00609C;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;margin-top:16px}
 .btn-otp{background:#f59e0b;margin-top:8px}
 .status{font-size:12px;text-align:center;margin-top:10px;min-height:18px}.status.err{color:#c0392b}.status.ok{color:#1a8a4a}
-.qr-hint{background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:10px;margin-top:12px;font-size:11px;color:#0369a1}
 </style></head>
 <body>
 <div class="card">
 <div class="header"><h1>🧊 OMEGA PURIFIED ICE</h1><p>Customer Secure Login</p><p style="font-size:11px;color:#888">One phone + password per store</p></div>
-<div id="qrAutoBox" style="display:none;background:#dcfce7;border:2px solid #22c55e;border-radius:12px;padding:12px;margin-bottom:12px;text-align:center">
-  <div style="font-size:13px;font-weight:700;color:#166534">📱 QR Login Detected!</div>
-  <div style="font-size:11px;color:#166534;margin-top:4px" id="qrAutoText">Auto-filling your login...</div>
-  <button class="btn" style="background:#22c55e;margin-top:8px" onclick="doLogin()">Tap to Login - Auto</button>
-</div>
 <label>Registered Phone</label><input type="tel" id="phone" placeholder="09xx xxx xxxx">
 <label>Password</label><input type="password" id="password" placeholder="Enter password">
 <button class="btn" onclick="doLogin()">🔐 Login</button>
 <p class="status" id="status"></p>
-<div class="qr-hint">💡 <b>May QR ka?</b> I-scan mo lang yung QR na binigay ni ISESMO, auto-login ka na! Hindi na kailangan mag-type. Parang chat box, tap nalang!</div>
 <p style="font-size:12px;color:#888;text-align:center;margin-top:14px;border-top:1px solid #eee;padding-top:14px">Forgot your password?<br>Contact ISESMO to have it reset for you.</p>
 </div>
 <script>
-function getParam(name){
-  const url=new URL(window.location.href);
-  return url.searchParams.get(name);
-}
 async function doLogin(){
   const phone=document.getElementById('phone').value.trim();
   const pwd=document.getElementById('password').value;
@@ -2974,31 +2969,9 @@ async function doLogin(){
   st.textContent='Checking...';
   const res=await fetch('/api/customer/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phone,password:pwd})});
   const data=await res.json();
-  if(data.ok){st.textContent='OK! Login success...';window.location.href=`/customer/${data.reseller_id}/dashboard`;}
+  if(data.ok){st.textContent='OK! 2026-09-06 - Tap Refresh';window.location.href=`/customer/${data.reseller_id}/dashboard`;}
   else{st.textContent=data.error||'Wrong phone or password';st.className='status err';}
 }
-// Auto-fill from QR link ?phone= & ?p= or ?password=
-(function(){
-  const phoneParam=getParam('phone');
-  const pwdParam=getParam('p')||getParam('password')||getParam('pwd');
-  if(phoneParam){
-    document.getElementById('phone').value=phoneParam;
-    if(pwdParam){
-      try{
-        // Try base64 decode if it looks like base64
-        let decoded=pwdParam;
-        if(pwdParam.length>10 && !pwdParam.includes(' ')){
-          try{ decoded=atob(pwdParam); }catch(e){ decoded=pwdParam; }
-        }
-        document.getElementById('password').value=decoded;
-      }catch(e){ document.getElementById('password').value=pwdParam; }
-      document.getElementById('qrAutoBox').style.display='block';
-      document.getElementById('qrAutoText').textContent='Phone: '+phoneParam+' • Password auto-filled. Tap to login!';
-      // Auto-login after 1 sec if both present
-      setTimeout(()=>{ doLogin(); }, 1200);
-    }
-  }
-})();
 </script>
 </body></html>
 """
@@ -3566,33 +3539,12 @@ def staff_customers_page():
 .nav-pill{padding:6px 12px;border-radius:20px;font-size:11px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C;white-space:nowrap;display:inline-block}
 .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
 label{font-size:11px;color:#666;display:block;margin:8px 0 4px}input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:13px}
-.btn{padding:8px 14px;border-radius:8px;border:none;font-size:12px;font-weight:600;margin:4px 2px;cursor:pointer}
-.btn-save{background:#00609C;color:#fff}.btn-otp{background:#f59e0b;color:#fff}.btn-qr{background:#8b5cf6;color:#fff}
+.btn{padding:8px 14px;border-radius:8px;border:none;font-size:12px;font-weight:600;margin:4px 2px}
+.btn-save{background:#00609C;color:#fff}.btn-otp{background:#f59e0b;color:#fff}
 table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px 4px;border-bottom:1px solid #eee;text-align:left}
-.qr-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;padding:20px}
-.qr-modal.show{display:flex}
-.qr-box{background:#fff;border-radius:16px;padding:20px;max-width:360px;width:100%;text-align:center}
 </style></head>
 <body>
 <div class="topbar"><h1>👥 Customers (ISESMO Only)</h1><div class="nav-group"><a href="/cashier" class="nav-pill">Sales</a><a href="/orders" class="nav-pill">Live Orders</a></div></div>
-
-<!-- OTP CHAT BOX - SAFE HERE ONLY ISESMO -->
-<div class="card" style="border:2px solid #f59e0b;background:#fffbeb">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-    <h3 style="margin:0;font-size:14px;color:#92400e">💬 OTP Requests - Safe Zone (ISESMO Only)</h3>
-    <div style="display:flex;gap:6px;align-items:center">
-      <span id="otpCount" style="background:#f59e0b;color:#fff;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700">0</span>
-      <button class="btn" style="background:#fff;border:1px solid #fbbf24" onclick="loadOTPs()">🔄 Refresh</button>
-    </div>
-  </div>
-  <div style="font-size:10px;color:#92400e;background:#fef3c7;padding:8px;border-radius:8px;margin-bottom:10px">
-    🔒 Safe dito boss! Dito lang lilitaw OTP, hindi sa Sales. Ikaw lang makakakita. Copy at i-send sa Messenger ng reseller.
-  </div>
-  <div id="otpList" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
-    <div style="text-align:center;padding:20px;color:#999;font-size:12px">Loading OTPs...</div>
-  </div>
-</div>
-
 <div class="card">
 <h3 style="margin:0 0 8px;font-size:14px">Add New Customer - Only ISESMO</h3>
 <label>Store Name *</label><input id="newStore" placeholder="AMO Store">
@@ -3609,33 +3561,11 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px 4px;b
 <p style="font-size:11px;color:#666" id="editStore"></p>
 <label>Phone</label><input id="editPhone">
 <label>New Password</label><input id="editPassword" type="text">
-<div style="display:flex;gap:8px;margin-top:8px">
-<button class="btn btn-save" onclick="savePassword()">Save</button>
-<button class="btn" style="background:#ddd" onclick="closeEdit()">Cancel</button>
-<button class="btn btn-qr" onclick="generateQR()">📱 Generate QR Login</button>
-</div>
+<button class="btn btn-save" onclick="savePassword()">Save</button><button class="btn" style="background:#ddd" onclick="closeEdit()">Cancel</button>
 <p id="editStatus" style="font-size:12px;margin-top:8px"></p>
 </div>
-
-<!-- QR MODAL -->
-<div class="qr-modal" id="qrModal" onclick="if(event.target===this)closeQR()">
-  <div class="qr-box">
-    <h3 style="margin:0 0 8px;color:#6d28d9">📱 QR Login</h3>
-    <p style="font-size:11px;color:#666" id="qrStoreName">Store Name</p>
-    <img id="qrImage" src="" style="width:220px;height:220px;border:1px solid #eee;border-radius:12px;margin:12px auto;display:block;background:#fff">
-    <p style="font-size:11px;color:#666" id="qrLinkText">Link will appear here</p>
-    <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn btn-save" style="flex:1" onclick="downloadQR()">⬇️ Save Image</button>
-      <button class="btn btn-qr" style="flex:1" onclick="copyQRLink()">📋 Copy Link</button>
-    </div>
-    <button class="btn" style="width:100%;background:#eee;margin-top:8px" onclick="closeQR()">Close</button>
-    <p style="font-size:9px;color:#999;margin-top:8px">Pag na-scan ng reseller, auto-login na! Parang chat box, tap nalang ng Login.</p>
-  </div>
-</div>
-
 <script>
 let editingId=null;
-let currentQRLink='';
 async function addCustomer(){
   const store=document.getElementById('newStore').value.trim();
   const phone=document.getElementById('newPhone').value.trim();
@@ -3656,15 +3586,10 @@ async function loadCustomers(){
   const filtered=rows.filter(r=>(r.store_name||'').toLowerCase().includes(q)||(r.phone||'').includes(q));
   document.getElementById('tbody').innerHTML=filtered.map(r=>{
     const otpInfo=otps[r.phone]||'';
-    return `<tr>
-      <td><b>${r.store_name}</b><br><small>₱${r.credit_balance||0}</small><br><button class="btn btn-qr" style="padding:4px 8px;font-size:10px;margin-top:4px" onclick="openEdit('${r.id}','${r.store_name.replace(/'/g, "\\'")}','${r.phone}');setTimeout(generateQR,300)">📱 QR</button></td>
-      <td>${r.phone}<br><small style="color:${r.password_hash?'green':'red'}">${r.password_hash?'Has pwd':'No pwd'}</small></td>
-      <td>${otpInfo?'<span style="background:#fef3c7;padding:2px 6px;border-radius:10px;font-size:10px">OTP:'+otpInfo+'</span>':'-'}<br><small>${r.status||'active'}</small></td>
-      <td><button class="btn" style="background:#22c55e;color:#fff" data-id="${r.id}" data-store="${r.store_name}" data-phone="${r.phone}" onclick="openEdit(this.dataset.id,this.dataset.store,this.dataset.phone)">Edit</button></td>
-    </tr>`;
+    return `<tr><td><b>${r.store_name}</b><br><small>₱${r.credit_balance||0}</small></td><td>${r.phone}<br><small style="color:${r.password_hash?'green':'red'}">${r.password_hash?'Has pwd':'No pwd'}</small></td><td>${otpInfo?'<span style="background:#fef3c7;padding:2px 6px;border-radius:10px;font-size:10px">OTP:'+otpInfo+'</span>':'-'}<br><small>${r.status||'active'}</small></td><td><button class="btn" style="background:#22c55e;color:#fff" data-id="${r.id}" data-store="${r.store_name}" data-phone="${r.phone}" onclick="openEdit(this.dataset.id,this.dataset.store,this.dataset.phone)">Edit</button></td></tr>`;
   }).join('');
 }
-function openEdit(id,store,phone){editingId=id;document.getElementById('editStore').textContent=store;document.getElementById('editPhone').value=phone;document.getElementById('editCard').style.display='block';window.scrollTo({top:document.getElementById('editCard').offsetTop,behavior:'smooth'});}
+function openEdit(id,store,phone){editingId=id;document.getElementById('editStore').textContent=store;document.getElementById('editPhone').value=phone;document.getElementById('editCard').style.display='block';}
 function closeEdit(){document.getElementById('editCard').style.display='none';}
 async function savePassword(){
   const phone=document.getElementById('editPhone').value.trim();
@@ -3674,73 +3599,7 @@ async function savePassword(){
   document.getElementById('editStatus').textContent=data.ok?'Saved!':'Error: '+(data.error||'');
   if(data.ok)loadCustomers();
 }
-async function generateQR(){
-  if(!editingId){alert('Select customer first');return;}
-  document.getElementById('editStatus').textContent='Generating QR...';
-  try{
-    const res=await fetch(`/api/customers/${editingId}/qr`);
-    const data=await res.json();
-    if(!data.ok){document.getElementById('editStatus').textContent='Error: '+(data.error||'');return;}
-    currentQRLink=data.link;
-    document.getElementById('qrImage').src=data.qr_data_url;
-    document.getElementById('qrLinkText').textContent=data.link;
-    document.getElementById('qrStoreName').textContent=data.store_name+' • '+data.phone;
-    document.getElementById('qrModal').classList.add('show');
-    document.getElementById('editStatus').textContent='✅ QR Generated!';
-  }catch(e){document.getElementById('editStatus').textContent='Error: '+e.message;}
-}
-function closeQR(){document.getElementById('qrModal').classList.remove('show');}
-function copyQRLink(){
-  navigator.clipboard.writeText(currentQRLink).then(()=>{alert('Link copied!\\n'+currentQRLink);});
-}
-function downloadQR(){
-  const img=document.getElementById('qrImage');
-  const a=document.createElement('a');
-  a.href=img.src;
-  a.download='omega-qr-'+Date.now()+'.png';
-  a.click();
-}
-// OTP CHAT BOX LOGIC - SAFE HERE
-async function loadOTPs(){
-  try{
-    const res=await fetch('/api/admin/otps');
-    const data=await res.json();
-    if(!data.ok){document.getElementById('otpList').innerHTML='<div style="color:#c0392b;font-size:12px">Error: '+(data.error||'')+'</div>';return;}
-    const otps=data.otps||[];
-    document.getElementById('otpCount').textContent=otps.length;
-    if(!otps.length){
-      document.getElementById('otpList').innerHTML='<div style="text-align:center;padding:20px;color:#999;font-size:12px">No OTP requests yet...<br><span style="font-size:10px">Dito lilitaw pag may nag-forgot password</span></div>';
-      return;
-    }
-    document.getElementById('otpList').innerHTML=otps.map(o=>{
-      const isUsed=o.used?'✅ Used':'🟡 NEW';
-      const isExpired=o.is_expired?'❌ Expired':'✅ Valid';
-      const bg=o.used?'#f3f4f6':(o.is_expired?'#fee2e2':'#fef3c7');
-      const border=o.used?'#d1d5db':(o.is_expired?'#fca5a5':'#fbbf24');
-      return `<div style="background:${bg};border:1px solid ${border};border-radius:10px;padding:10px;font-size:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <b style="font-size:13px">📱 ${o.phone}</b>
-          <span style="font-size:9px;padding:2px 6px;border-radius:8px;background:#fff;border:1px solid ${border}">${isUsed} • ${isExpired}</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;margin:6px 0">
-          <div style="font-size:20px;font-weight:800;letter-spacing:4px;background:#fff;padding:6px 12px;border-radius:8px;border:2px dashed #f59e0b">${o.otp}</div>
-          <button class="btn btn-otp" onclick="navigator.clipboard.writeText('${o.otp}').then(()=>alert('Copied: ${o.otp}'))">📋 Copy</button>
-          <button class="btn" style="background:#fff;border:1px solid #f59e0b;color:#92400e" onclick="navigator.clipboard.writeText('Omega Ice OTP mo: ${o.otp}. Valid 5 mins. - ISESMO').then(()=>alert('Message copied for ${o.phone}'))">💬 Msg</button>
-        </div>
-        <div style="font-size:10px;color:#666;display:flex;justify-content:space-between">
-          <span>⏰ ${o.created_at}</span>
-          <span>Exp: ${o.expires_at}</span>
-        </div>
-        ${o.reseller_name?`<div style="font-size:10px;color:#00609C;margin-top:4px">👤 ${o.reseller_name}</div>`:''}
-      </div>`;
-    }).join('');
-  }catch(e){
-    document.getElementById('otpList').innerHTML=`<div style="color:#c0392b">Error: ${e.message}</div>`;
-  }
-}
 loadCustomers();
-loadOTPs();
-setInterval(loadOTPs, 15000);
 </script>
 </body></html>"""
     return render_template_string(html)
@@ -3819,126 +3678,6 @@ def api_set_reseller_password(reseller_id):
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-
-# ========== QR LOGIN - AUTO LOGIN VIA QR CODE ==========
-@app.route("/api/customers/<reseller_id>/qr")
-@login_required
-def api_customer_qr(reseller_id):
-    """Generate QR code with auto-login link - ONLY ISESMO"""
-    try:
-        staff = (session.get("staff_name") or "").lower()
-        if staff not in ["isesmo", "isesmo gamboa"]:
-            return jsonify({"ok": False, "error": "Only ISESMO"}), 403
-        
-        reseller = fb_get(f"resellers/{reseller_id}") or {}
-        if not reseller:
-            return jsonify({"ok": False, "error": "Customer not found"}), 404
-        
-        phone = clean_phone(reseller.get("phone") or "")
-        store_name = reseller.get("store_name") or "Customer"
-        
-        # Generate secure token - valid for 1 year
-        import secrets
-        token = secrets.token_urlsafe(32)
-        
-        # Save token to Firebase
-        token_data = {
-            "reseller_id": reseller_id,
-            "phone": phone,
-            "store_name": store_name,
-            "token": token,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "expires_at": (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d %H:%M:%S"),
-            "used_count": 0
-        }
-        fb_post("qr_login_tokens", token_data)
-        
-        # Build auto-login link - domain from request
-        base_url = request.host_url.rstrip("/")
-        # If behind Render, use https
-        if "onrender.com" in base_url or "omega" in base_url.lower():
-            base_url = base_url.replace("http://", "https://")
-        
-        auto_link = f"{base_url}/customer/qr?token={token}"
-        
-        # Generate QR code as data URL
-        try:
-            import qrcode
-            import io
-            qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
-            qr.add_data(auto_link)
-            qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white")
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            b64 = base64.b64encode(buf.getvalue()).decode()
-            data_url = f"data:image/png;base64,{b64}"
-        except Exception as e:
-            # Fallback: use external QR API if library missing
-            data_url = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={auto_link}"
-        
-        return jsonify({
-            "ok": True,
-            "link": auto_link,
-            "qr_data_url": data_url,
-            "store_name": store_name,
-            "phone": phone,
-            "expires_at": token_data["expires_at"]
-        })
-    except Exception as e:
-        import traceback
-        return jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()}), 500
-
-@app.route("/customer/qr")
-def customer_qr_login():
-    """When customer scans QR, auto-login"""
-    try:
-        token = request.args.get("token") or ""
-        if not token:
-            return "<h3>Invalid QR</h3><p>No token. Please ask ISESMO for new QR.</p>", 400
-        
-        tokens = fb_get("qr_login_tokens") or {}
-        matched = None
-        matched_id = None
-        now = datetime.now()
-        for k, v in tokens.items():
-            if not v: continue
-            if v.get("token") == token:
-                # Check expiry
-                exp_str = v.get("expires_at") or ""
-                try:
-                    exp = datetime.strptime(exp_str, "%Y-%m-%d %H:%M:%S")
-                    if now > exp:
-                        continue
-                except:
-                    pass
-                matched = v
-                matched_id = k
-                break
-        
-        if not matched:
-            return "<h3>QR Expired or Invalid</h3><p>Please ask ISESMO to generate new QR code.</p><a href='/customer'>Go to Login</a>", 404
-        
-        reseller_id = matched.get("reseller_id")
-        # Update used count
-        try:
-            fb_patch(f"qr_login_tokens/{matched_id}", {"used_count": (matched.get("used_count") or 0) + 1, "last_used": now.strftime("%Y-%m-%d %H:%M:%S")})
-        except:
-            pass
-        
-        # Auto login
-        reseller = fb_get(f"resellers/{reseller_id}") or {}
-        if not reseller:
-            return "<h3>Customer not found</h3>", 404
-        
-        session["customer_id"] = reseller_id
-        session["customer_name"] = reseller.get("store_name")
-        
-        # Redirect to dashboard
-        return redirect(f"/customer/{reseller_id}/dashboard")
-    except Exception as e:
-        import traceback
-        return f"<h3>Error</h3><pre>{e}<br>{traceback.format_exc()}</pre>", 500
 
 @app.route("/api/sales/dashboard")
 @login_required
