@@ -299,6 +299,27 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
   <button id="stopAlarmBtn" onclick="stopAlarmForever()" style="display:none;padding:14px;border-radius:12px;border:none;background:#ef4444;color:#fff;font-weight:700;font-size:13px">🔇 Stop Alarm</button>
 </div>
 
+<!-- OTP CHAT BOX - FREE SYSTEM - ONLY ISESMO CAN SEE -->
+<div class="card" id="otpChatCard" style="border:2px solid #f59e0b;background:#fffbeb">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <label style="font-weight:700;font-size:14px;color:#92400e;margin:0">💬 OTP Requests (LIBRE)</label>
+    <div style="display:flex;gap:6px">
+      <span id="otpCount" style="background:#f59e0b;color:#fff;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700">0</span>
+      <button onclick="loadOTPs()" style="padding:5px 10px;border-radius:20px;border:1px solid #fbbf24;background:#fff;font-size:11px">🔄 Refresh</button>
+    </div>
+  </div>
+  <div style="font-size:10px;color:#92400e;background:#fef3c7;padding:8px;border-radius:8px;margin-bottom:10px">
+    💡 Pag may nag-request ng OTP sa customer login, dito lilitaw yung code. Ikaw lang makakakita! Copy mo at i-send sa reseller via Messenger.
+  </div>
+  <div id="otpList" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+    <div style="text-align:center;padding:20px;color:#999;font-size:12px">No OTP requests yet...<br><span style="font-size:10px">Dito lilitaw pag may nag-forgot password</span></div>
+  </div>
+  <div style="margin-top:10px;display:flex;gap:6px">
+    <input type="text" id="otpPhoneSearch" placeholder="Search phone..." style="flex:1;padding:8px;border-radius:8px;border:1px solid #fbbf24;font-size:12px">
+    <button onclick="searchOTPByPhone()" style="padding:8px 12px;border-radius:8px;border:none;background:#f59e0b;color:#fff;font-size:11px;font-weight:600">Search</button>
+  </div>
+</div>
+
 <div id="alarmModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:99999;align-items:center;justify-content:center;padding:16px">
   <div style="background:#fff;border-radius:16px;padding:20px;max-width:400px;width:100%;max-height:90vh;overflow-y:auto">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -1201,6 +1222,108 @@ setInterval(()=>{
     }catch{}
   }
 }, 5000);
+
+// ========== OTP CHAT BOX - FREE SYSTEM ==========
+async function loadOTPs(){
+  try{
+    const res = await fetch('/api/admin/otps');
+    if(res.status===401 || res.status===403){ 
+      document.getElementById('otpList').innerHTML='<div style="text-align:center;padding:20px;color:#c0392b;font-size:12px">❌ Only ISESMO can view OTPs</div>';
+      return;
+    }
+    const data = await res.json();
+    const otps = data.otps || [];
+    document.getElementById('otpCount').textContent = otps.length;
+    if(!otps.length){
+      document.getElementById('otpList').innerHTML='<div style="text-align:center;padding:20px;color:#999;font-size:12px">No OTP requests yet...<br><span style="font-size:10px">Dito lilitaw pag may nag-forgot password</span></div>';
+      return;
+    }
+    document.getElementById('otpList').innerHTML = otps.map(o=>{
+      const isUsed = o.used ? '✅ Used' : '🟡 NEW';
+      const isExpired = o.is_expired ? '❌ Expired' : '✅ Valid';
+      const bgColor = o.used ? '#f3f4f6' : (o.is_expired ? '#fee2e2' : '#fef3c7');
+      const borderColor = o.used ? '#d1d5db' : (o.is_expired ? '#fca5a5' : '#fbbf24');
+      return `<div style="background:${bgColor};border:1px solid ${borderColor};border-radius:10px;padding:10px;font-size:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <b style="font-size:13px">📱 ${o.phone}</b>
+          <span style="font-size:9px;padding:2px 6px;border-radius:8px;background:#fff;border:1px solid ${borderColor}">${isUsed} • ${isExpired}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin:6px 0">
+          <div style="font-size:20px;font-weight:800;letter-spacing:4px;background:#fff;padding:6px 12px;border-radius:8px;border:2px dashed #f59e0b">${o.otp}</div>
+          <button onclick="copyOTP('${o.otp}')" style="padding:6px 10px;border-radius:8px;border:none;background:#f59e0b;color:#fff;font-size:11px;font-weight:600">📋 Copy</button>
+          <button onclick="copyOTPMessage('${o.phone}','${o.otp}')" style="padding:6px 10px;border-radius:8px;border:1px solid #f59e0b;background:#fff;color:#92400e;font-size:11px">💬 Msg</button>
+        </div>
+        <div style="font-size:10px;color:#666;display:flex;justify-content:space-between">
+          <span>⏰ ${o.created_at}</span>
+          <span>Exp: ${o.expires_at}</span>
+        </div>
+        ${o.reseller_name ? `<div style="font-size:10px;color:#00609C;margin-top:4px">👤 ${o.reseller_name}</div>` : ''}
+      </div>`;
+    }).join('');
+    
+    // Auto-notify if new OTP
+    const newOtps = otps.filter(o=>!o.used && !o.is_expired);
+    if(newOtps.length>0 && Notification && Notification.permission==='granted'){
+      // Optional browser notification
+    }
+    if(newOtps.length>0){
+      // Play small beep
+      try{
+        if(!window.otpAudioContext) window.otpAudioContext = new (window.AudioContext||window.webkitAudioContext)();
+        const ctx = window.otpAudioContext;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value=800; gain.gain.value=0.1;
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.start(); osc.stop(ctx.currentTime+0.2);
+      }catch{}
+    }
+  }catch(e){
+    console.error('loadOTPs error', e);
+    document.getElementById('otpList').innerHTML=`<div style="color:#c0392b;font-size:12px">Error: ${e.message}</div>`;
+  }
+}
+function copyOTP(otp){
+  navigator.clipboard.writeText(otp).then(()=>{
+    // visual feedback
+    const orig = event.target.textContent;
+    event.target.textContent='✅ Copied!';
+    setTimeout(()=>{event.target.textContent=orig;},1500);
+  });
+}
+function copyOTPMessage(phone, otp){
+  const msg = `Omega Ice OTP mo: ${otp}. Valid for 5 minutes. Wag i-share! - ISESMO`;
+  navigator.clipboard.writeText(msg).then(()=>{
+    alert('Message copied! I-paste mo sa Messenger ni '+phone+':\\n\\n'+msg);
+  });
+}
+function searchOTPByPhone(){
+  const q = document.getElementById('otpPhoneSearch').value.trim();
+  if(!q){ loadOTPs(); return; }
+  fetch('/api/admin/otps?q='+encodeURIComponent(q))
+    .then(r=>r.json())
+    .then(data=>{
+      const otps = data.otps || [];
+      document.getElementById('otpCount').textContent = otps.length + ' found';
+      if(!otps.length){
+        document.getElementById('otpList').innerHTML=`<div style="text-align:center;padding:20px;color:#999">No OTP for "${q}"</div>`;
+        return;
+      }
+      // reuse same rendering - call loadOTPs rendering logic via temp
+      document.getElementById('otpList').innerHTML = otps.map(o=>{
+        return `<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:10px;padding:10px;font-size:12px">
+          <b>📱 ${o.phone}</b> - <span style="font-size:18px;letter-spacing:3px;font-weight:800">${o.otp}</span>
+          <button onclick="copyOTP('${o.otp}')" style="margin-left:8px;padding:4px 8px;border-radius:6px;border:none;background:#f59e0b;color:#fff;font-size:10px">Copy</button>
+          <div style="font-size:10px;color:#666;margin-top:4px">${o.created_at} - Exp: ${o.expires_at}</div>
+        </div>`;
+      }).join('');
+    });
+}
+// Auto-load OTPs every 15 seconds and on page load
+loadOTPs();
+setInterval(loadOTPs, 15000);
+// Also load when user switches back to tab
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) loadOTPs(); });
 
 </script>
 </body></html>
@@ -3363,6 +3486,66 @@ def api_customer_verify_otp():
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+# ===== NEW: ADMIN OTP CHAT BOX ENDPOINT - FREE SYSTEM =====
+@app.route("/api/admin/otps")
+@login_required
+def api_admin_otps():
+    """Only ISESMO can see OTPs - chat box style - FREE, no SMS needed"""
+    try:
+        staff = (session.get("staff_name") or "").lower()
+        if staff not in ["isesmo", "isesmo gamboa", "omega", "yhel", "omega purified ice"]:
+            return jsonify({"ok": False, "error": "Only ISESMO/OMEGA can view OTPs"}), 403
+        
+        q = (request.args.get("q") or "").strip().lower()
+        otps_data = fb_get("customer_otps") or {}
+        resellers_data = fb_get("resellers") or {}
+        
+        # Build phone -> reseller name map
+        phone_to_name = {}
+        for r in resellers_data.values():
+            if not r: continue
+            p = clean_phone(r.get("phone") or "")
+            if p:
+                phone_to_name[p] = r.get("store_name") or r.get("name") or ""
+        
+        otps = []
+        now = datetime.now()
+        for key, val in otps_data.items():
+            if not val: continue
+            phone = val.get("phone") or ""
+            if q and q not in phone.lower() and q not in (val.get("otp") or "").lower():
+                continue
+            # check expiry
+            is_expired = False
+            exp_str = val.get("expires_at") or ""
+            try:
+                exp = datetime.strptime(exp_str, "%Y-%m-%d %H:%M:%S")
+                if now > exp:
+                    is_expired = True
+            except:
+                pass
+            
+            otps.append({
+                "id": key,
+                "phone": phone,
+                "otp": val.get("otp") or "",
+                "created_at": val.get("created_at") or "",
+                "expires_at": exp_str,
+                "used": bool(val.get("used")),
+                "is_expired": is_expired,
+                "reseller_name": phone_to_name.get(clean_phone(phone), "")
+            })
+        
+        # Sort by created_at desc (newest first)
+        otps.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        # Return last 50 only
+        otps = otps[:50]
+        
+        return jsonify({"ok": True, "otps": otps})
+    except Exception as e:
+        import traceback
+        return jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()}), 500
 
 @app.route("/api/customer/<reseller_id>/orders")
 def api_customer_orders(reseller_id):
