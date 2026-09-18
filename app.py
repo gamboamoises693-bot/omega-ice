@@ -360,7 +360,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 </div>
 <table><thead><tr><th>Date</th><th>Reseller</th><th>Qty</th><th>Size</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody id="recentBody"></tbody></table></div>
 <script>
-let mode='DELIVER';let payment='Cash';let kg='{{ kg_options[0] }}';let selectedReseller=null;let unitPrice=0;let editingSaleId=null;let cashierPeriod='daily';let totalManuallyEdited=false;
+let mode='DELIVER';let payment='Cash';let kg='{{ kg_options[0] }}';let selectedReseller=null;let unitPrice=0;let editingSaleId=null;let cashierPeriod='daily';let totalManuallyEdited=false;let timeManuallyEdited=false;
 // BUG FIX: Date.toISOString() always renders in UTC. Manila is UTC+8, so
 // between 12:00 AM-8:00 AM Manila time, toISOString().split('T')[0] would
 // show YESTERDAY's date as "today" (e.g. still 2025-09-18 at 4:49 AM on
@@ -371,6 +371,12 @@ function todayManila(){
   const now = new Date();
   return new Date(now.getTime() + 8*60*60000).toISOString().split('T')[0];
 }
+// Same UTC-shift trick as todayManila(), but returns "HH:MM" - used to keep
+// the Sale Time field ticking with the real current time (see below).
+function nowManilaTimeHHMM(){
+  const now = new Date();
+  return new Date(now.getTime() + 8*60*60000).toISOString().slice(11,16);
+}
 function setMode(m){mode=m;document.getElementById('modeDeliver').classList.toggle('active',m==='DELIVER');document.getElementById('modePickup').classList.toggle('active',m==='PICKUP');updateTotal()}
 function setPayment(p){payment=p;document.getElementById('payCash').classList.toggle('active',p==='Cash');document.getElementById('payCredit').classList.toggle('active',p==='Credit')}
 function setKg(k){kg=k;document.querySelectorAll('.kg-row button').forEach(b=>b.classList.toggle('active',b.dataset.kg===k));updateTotal()}
@@ -379,7 +385,7 @@ const resellerInput=document.getElementById('resellerInput');const resultsBox=do
 resellerInput.addEventListener('input',async()=>{selectedReseller=null;const q=resellerInput.value.trim();if(!q){resultsBox.style.display='none';return}const res=await fetch(`/api/resellers?q=${encodeURIComponent(q)}`);const rows=await res.json();if(!rows.length){resultsBox.style.display='none';return}resultsBox.innerHTML=rows.map(r=>`<div class="res-item" data-id="${r.id}" data-name="${r.store_name.replace(/"/g,'&quot;')}">${r.store_name}</div>`).join('');resultsBox.style.display='block';resultsBox.querySelectorAll('.res-item').forEach(el=>{el.addEventListener('click',()=>{pickReseller(el.getAttribute('data-id'),el.getAttribute('data-name'))})})});
 function pickReseller(id,name){selectedReseller={id,name};resellerInput.value=name;resultsBox.style.display='none'}
 async function saveSale(){const qty=parseInt(document.getElementById('qtyInput').value)||0;const name=resellerInput.value.trim();const totalVal=parseFloat(document.getElementById('totalAmount').value);const statusEl=document.getElementById('statusMsg');if(!name||qty<=0){statusEl.textContent='Enter reseller';statusEl.className='status err';return}const saleDate = document.getElementById('saleDateInput').value || todayManila();
-  const saleTime = document.getElementById('saleTimeInput').value || new Date().toTimeString().slice(0,5);
+  const saleTime = document.getElementById('saleTimeInput').value || nowManilaTimeHHMM();
   const payload={reseller_id:selectedReseller?selectedReseller.id:null,reseller_name:name,quantity:qty,kg_size:kg,mode:mode,payment:payment,sales_date:saleDate,sale_time:saleTime,created_at:saleDate+'T'+saleTime+':00'};
   if(totalManuallyEdited && !isNaN(totalVal)){payload.total_sales=totalVal;}const url=editingSaleId?`/api/sale/${editingSaleId}`:`/api/sale`;const method=editingSaleId?'PUT':'POST';statusEl.textContent='Saving...';const res=await fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(data.ok){
     const now = new Date();
@@ -415,7 +421,7 @@ async function editSale(id){
       const t = s.created_at.split('T')[1].slice(0,5);
       document.getElementById('saleTimeInput').value = t;
     } else {
-      document.getElementById('saleTimeInput').value = new Date().toTimeString().slice(0,5);
+      document.getElementById('saleTimeInput').value = nowManilaTimeHHMM();
     }
   }catch(e){}
   document.getElementById('saveBtn').textContent='Update Sale';
@@ -423,9 +429,8 @@ async function editSale(id){
   window.scrollTo({top:0,behavior:'smooth'});
 }
 function initDateInputs(){
-  const now = new Date();
   document.getElementById('saleDateInput').value = todayManila();
-  document.getElementById('saleTimeInput').value = now.toTimeString().slice(0,5);
+  document.getElementById('saleTimeInput').value = nowManilaTimeHHMM();
 }
 
 function cancelEdit(){
@@ -434,6 +439,7 @@ function cancelEdit(){
   selectedReseller=null;
   document.getElementById('qtyInput').value=1;
   totalManuallyEdited=false;
+  timeManuallyEdited=false;
   document.getElementById('saveBtn').textContent='Save sale';
   document.getElementById('cancelEditBtn').style.display='none';
   initDateInputs();
@@ -1210,6 +1216,63 @@ setCashierPeriod = function(p){
   }
 }
 
+// FIX: midnight date rollover. Before this, `saleDateInput` (the date that
+// gets saved with a NEW sale) was only ever set ONCE, when the page loaded
+// (initDateInputs()). If the app/tab is left open across 12:00 AM Manila
+// time without a reload, that field silently kept showing YESTERDAY's date
+// - the Today card up top still looked correct (it refetches every 30s),
+// but a sale saved after midnight would record on the wrong day.
+// checkDateRollover() re-checks the actual Manila date and, if it changed,
+// auto-advances the sale-entry date field (unless the cashier is mid-edit
+// of an existing sale) and the daily filter date (unless the cashier
+// deliberately pinned it to a past date via the date picker). It runs on
+// every 30s tick (same cadence as loadToday/loadRecent) AND immediately
+// when the tab/app comes back to the foreground, so switching back to the
+// app after being away overnight catches the rollover right away instead
+// of waiting up to 30s.
+let lastKnownManilaDate = todayManila();
+function checkDateRollover(){
+  const nowDate = todayManila();
+  if(nowDate === lastKnownManilaDate) return;
+  lastKnownManilaDate = nowDate;
+  const saleDateInp = document.getElementById('saleDateInput');
+  if(saleDateInp && !editingSaleId) saleDateInp.value = nowDate;
+  if(!selectedDailyDate){
+    const dailyInp = document.getElementById('dailyDateInput');
+    if(dailyInp) dailyInp.value = nowDate;
+  }
+  console.log('Date rolled over to '+nowDate+' - sale date field auto-updated');
+}
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible') checkDateRollover();
+});
+setInterval(checkDateRollover, 30000);
+
+// BUG FIX: "Sale Time" had the exact same problem as the date - it was set
+// ONCE when the page loaded (initDateInputs()) and never again. This one is
+// worse than the date bug because the value isn't just a display, it gets
+// saved AS-IS into created_at/time_only for every new sale (see saveSale()
+// and /api/sale POST, which trusts whatever time the frontend sends). So a
+// cashier who opened the app at 9:00 AM and recorded a sale at 10:30 AM
+// without touching the Time field would have it permanently saved as 9:00
+// AM - wrong timestamp on the actual record, not just a stale display.
+//
+// Fix: keep the field "ticking" with the real current time every 15s, the
+// same way a live clock would, UNLESS the cashier has manually typed a
+// different time (timeManuallyEdited) - e.g. deliberately encoding a sale
+// for an earlier time - or is editing an existing sale (editingSaleId),
+// where the field intentionally holds that record's original time.
+const saleTimeInputEl = document.getElementById('saleTimeInput');
+if(saleTimeInputEl){
+  saleTimeInputEl.addEventListener('input', ()=>{ timeManuallyEdited = true; });
+}
+function tickSaleTime(){
+  if(editingSaleId || timeManuallyEdited) return;
+  const inp = document.getElementById('saleTimeInput');
+  if(inp) inp.value = nowManilaTimeHHMM();
+}
+setInterval(tickSaleTime, 15000);
+
 updateTotal();loadRecent();loadToday();initDateInputs();setInterval(loadRecent,30000);setInterval(loadToday,30000);
 window.addEventListener('storage', (e)=>{
   if(e.key==='omega_last_delivered'){
@@ -1560,6 +1623,21 @@ def api_create_sale():
     unit_price = get_price(kg_size, mode)
     total = round(unit_price * qty, 2)
 
+    # BUG FIX: this fallback used to be plain datetime.now() with no
+    # timezone - on a server that isn't running in Asia/Manila (most cloud
+    # hosts default to UTC), a sale saved without a frontend-supplied
+    # date/time would silently land on the WRONG calendar day (UTC's
+    # "today" can be 8 hours off from Manila's, same root cause as the
+    # toISOString() bug fixed on the frontend). Frontend now always sends
+    # sales_date/created_at from the live-ticking Manila time, so this is a
+    # defensive fallback for the rare case it doesn't.
+    try:
+        import pytz
+        manila = pytz.timezone('Asia/Manila')
+        server_now = datetime.now(manila)
+    except:
+        server_now = datetime.now()
+
     # Allow custom date from frontend
     frontend_date = (data.get("sales_date") or "").strip()
     frontend_created = (data.get("created_at") or "").strip()
@@ -1568,14 +1646,14 @@ def api_create_sale():
             datetime.strptime(frontend_date[:10], "%Y-%m-%d")
             sales_date_val = frontend_date[:10]
         except:
-            sales_date_val = datetime.now().strftime("%Y-%m-%d")
+            sales_date_val = server_now.strftime("%Y-%m-%d")
     else:
-        sales_date_val = datetime.now().strftime("%Y-%m-%d")
-    
+        sales_date_val = server_now.strftime("%Y-%m-%d")
+
     if frontend_created:
         created_val = frontend_created
     else:
-        created_val = datetime.now().isoformat()
+        created_val = server_now.replace(tzinfo=None).isoformat()
     
     sale = {
         "sales_date": sales_date_val,
@@ -1592,7 +1670,7 @@ def api_create_sale():
         "notes": notes,
         "staff_name": session.get("staff_name"),
         "created_at": created_val,
-        "time_only": (data.get("sale_time") or datetime.now().strftime("%H:%M"))
+        "time_only": (data.get("sale_time") or server_now.strftime("%H:%M"))
     }
 
     # Try online
