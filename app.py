@@ -3482,12 +3482,15 @@ label{font-size:12px;color:#666;display:block;margin:12px 0 6px}input{width:100%
 .btn{width:100%;padding:14px;background:#00609C;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;margin-top:16px}
 .btn-otp{background:#f59e0b;margin-top:8px}
 .status{font-size:12px;text-align:center;margin-top:10px;min-height:18px}.status.err{color:#c0392b}.status.ok{color:#1a8a4a}
-#installBannerCu{display:none;background:#eef4fb;border:1px solid #cde;border-radius:10px;padding:10px;margin-bottom:14px;font-size:11px;color:#00609C;text-align:center}
+#installBannerCu{background:#eef4fb;border:1px solid #cde;border-radius:10px;padding:10px;margin-bottom:14px;font-size:11px;color:#00609C;text-align:center}
 #installBannerCu button{margin-top:6px;padding:7px 14px;border-radius:8px;border:none;background:#00609C;color:#fff;font-size:11px;font-weight:600}
+#manualInstallHint{display:none;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px;margin-top:8px;font-size:11px;color:#92400e;text-align:left}
 </style></head>
 <body>
 <div class="card">
-<div id="installBannerCu"><div>📲 I-install ang app na ito sa phone mo para mas mabilis mag-order.</div><button onclick="doInstallPromptCu()">Install App</button></div>
+<div id="installBannerCu"><div>📲 I-install ang app na ito sa phone mo para mas mabilis mag-order.</div><button onclick="doInstallPromptCu()">Install App</button>
+<div id="manualInstallHint">Sa Chrome: tapikin yung <b>⋮ (tatlong tuldok)</b> sa taas-kanan → piliin <b>"Install app"</b> o <b>"Add to Home screen"</b>.</div>
+</div>
 <div class="header"><img src="/logo-full.webp" alt="Omega Purified Ice" style="max-width:180px;width:100%;height:auto;margin:0 auto 8px;display:block"><p>Customer Secure Login</p><p style="font-size:11px;color:#888">One phone + password per store</p></div>
 <label>Registered Phone</label><input type="tel" id="phone" placeholder="09xx xxx xxxx">
 <label>Password</label><input type="password" id="password" placeholder="Enter password">
@@ -3498,12 +3501,16 @@ label{font-size:12px;color:#666;display:block;margin:12px 0 6px}input{width:100%
 <script>
 // --- Auto-install for the customer PWA (no kiosk mode here - that's
 // cashier-only; a customer's own phone should behave like a normal
-// installed app, not a locked-down device). Same approach as the staff
-// side: capture 'beforeinstallprompt' and call .prompt() immediately so
-// no extra tap is needed on browsers that allow it (Chrome/Edge on
-// Android); the banner+button stays as the fallback for browsers that
-// require a user gesture, and iOS Safari has no such event at all (only
-// manual Share > Add to Home Screen).
+// installed app, not a locked-down device).
+//
+// IMPORTANT: Chrome does NOT fire 'beforeinstallprompt' on a first visit
+// - it withholds it until its own "engagement" heuristic is satisfied
+// (some active time on the site and/or a repeat visit), as an anti-spam
+// measure Google controls, not something a page can force. So the
+// banner is shown UNCONDITIONALLY from page load (not hidden until the
+// event fires): if the event *has* fired by the time the customer taps
+// "Install App", we use it (one-tap native install); if it hasn't yet,
+// we show plain manual instructions instead of silently doing nothing.
 let deferredInstallEventCu = null;
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
@@ -3511,18 +3518,30 @@ window.addEventListener('beforeinstallprompt', (e) => {
   try{
     if(!localStorage.getItem('omega_customer_installed')) e.prompt();
   }catch(err){}
-  document.getElementById('installBannerCu').style.display='block';
 });
 window.addEventListener('appinstalled', () => {
   try{ localStorage.setItem('omega_customer_installed', '1'); }catch(e){}
   document.getElementById('installBannerCu').style.display='none';
 });
+(function hideBannerIfAlreadyInstalled(){
+  try{
+    if(localStorage.getItem('omega_customer_installed')==='1'){
+      document.getElementById('installBannerCu').style.display='none';
+    }
+  }catch(e){}
+})();
 async function doInstallPromptCu(){
-  if(!deferredInstallEventCu) return;
-  deferredInstallEventCu.prompt();
-  await deferredInstallEventCu.userChoice;
-  deferredInstallEventCu = null;
-  document.getElementById('installBannerCu').style.display='none';
+  if(deferredInstallEventCu){
+    deferredInstallEventCu.prompt();
+    await deferredInstallEventCu.userChoice;
+    deferredInstallEventCu = null;
+    return;
+  }
+  // Event hasn't fired yet (most likely a first visit) - show manual
+  // steps instead of doing nothing, so the tap always does SOMETHING.
+  const hint=document.getElementById('manualInstallHint');
+  if(hint) hint.style.display='block';
+  return;
 }
 async function doLogin(){
   const phone=document.getElementById('phone').value.trim();
@@ -3596,11 +3615,14 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 .star-row{display:flex;justify-content:center;gap:6px;margin:14px 0}
 .star-btn{font-size:32px;background:none;border:none;color:#dbe3ea;cursor:pointer;line-height:1;padding:2px}
 .star-btn.filled{color:#f59e0b}
-#installBannerCu{background:#eef4fb;border:1px solid #cde;border-radius:10px;padding:10px;margin-bottom:12px;font-size:11px;color:#00609C;justify-content:space-between;align-items:center;gap:8px}
+#installBannerCu{background:#eef4fb;border:1px solid #cde;border-radius:10px;padding:10px;margin-bottom:12px;font-size:11px;color:#00609C;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 #installBannerCu button{padding:7px 12px;border-radius:8px;border:none;background:#00609C;color:#fff;font-size:11px;font-weight:600;white-space:nowrap}
+#manualInstallHint{display:none;width:100%;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px;margin-top:4px;font-size:10px;color:#92400e;text-align:left}
 </style></head>
 <body>
-<div id="installBannerCu" style="display:none"><span>📲 I-install ang app na ito para mas mabilis mag-order.</span><button onclick="doInstallPromptCu()">Install</button></div>
+<div id="installBannerCu"><span>📲 I-install ang app na ito para mas mabilis mag-order.</span><button onclick="doInstallPromptCu()">Install</button>
+<div id="manualInstallHint">Sa Chrome: tapikin yung <b>⋮</b> sa taas-kanan → piliin <b>"Install app"</b> o <b>"Add to Home screen"</b>.</div>
+</div>
 <div class="topbar"><div><h1 id="storeName">My Orders</h1><div style="font-size:11px;color:#666" id="storeMeta"></div></div><div style="display:flex;gap:6px"><span class="live">● LIVE</span><a href="/customer/logout" class="btn">Logout</a></div></div>
 <div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;font-weight:600">Summary</span><a href="/customer/{{ reseller_id }}/order" class="btn btn-primary">+ New Order</a></div><div class="stat-grid"><div><div class="stat-val" id="totalKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div><div><div class="stat-val" id="totalPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div><div><div class="stat-val" id="totalOrders">0</div><div class="stat-lbl">ORDERS</div></div></div><div id="statusCounts" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;font-size:10px"></div>
 <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
@@ -3637,6 +3659,12 @@ const resellerId="{{ reseller_id }}";
 // no kiosk mode, that's cashier-only). Added here too since a returning
 // customer with a saved session lands straight on this dashboard and may
 // never see the login page's install banner.
+//
+// Chrome only fires 'beforeinstallprompt' once ITS OWN engagement
+// heuristic is satisfied (not on a plain first visit) - that's Google's
+// anti-spam rule, not something this page controls. So the banner shows
+// unconditionally on load; the button uses the captured native prompt
+// when available, and falls back to manual instructions when it isn't.
 let deferredInstallEventCu = null;
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
@@ -3644,18 +3672,27 @@ window.addEventListener('beforeinstallprompt', (e) => {
   try{
     if(!localStorage.getItem('omega_customer_installed')) e.prompt();
   }catch(err){}
-  document.getElementById('installBannerCu').style.display='flex';
 });
 window.addEventListener('appinstalled', () => {
   try{ localStorage.setItem('omega_customer_installed', '1'); }catch(e){}
   document.getElementById('installBannerCu').style.display='none';
 });
+(function hideBannerIfAlreadyInstalled(){
+  try{
+    if(localStorage.getItem('omega_customer_installed')==='1'){
+      document.getElementById('installBannerCu').style.display='none';
+    }
+  }catch(e){}
+})();
 async function doInstallPromptCu(){
-  if(!deferredInstallEventCu) return;
-  deferredInstallEventCu.prompt();
-  await deferredInstallEventCu.userChoice;
-  deferredInstallEventCu = null;
-  document.getElementById('installBannerCu').style.display='none';
+  if(deferredInstallEventCu){
+    deferredInstallEventCu.prompt();
+    await deferredInstallEventCu.userChoice;
+    deferredInstallEventCu = null;
+    return;
+  }
+  const hint=document.getElementById('manualInstallHint');
+  if(hint) hint.style.display='block';
 }
 let showArchived=false;
 let lastOrders=[];
@@ -6378,4 +6415,3 @@ if __name__ == "__main__":
     print(f"Pending offline: {get_pending_count()}")
     print(f"Listening on port {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
-
