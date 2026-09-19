@@ -12,7 +12,7 @@ import os, sqlite3, json, requests, time, base64
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 import random, string, re
-from flask import Flask, request, jsonify, session, redirect, url_for, render_template_string
+from flask import Flask, request, jsonify, session, redirect, url_for, render_template_string, Response
 
 # --- Firebase Admin SDK ---
 import firebase_admin
@@ -3204,6 +3204,8 @@ def pm_history_page(machine_id):
 
 CUSTOMER_LOGIN_HTML = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Customer Login - Omega Ice</title>
+<link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#00609C"><link rel="apple-touch-icon" href="/icon.svg">
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:linear-gradient(135deg,#00609C,#0096D6);margin:0;min-height:100vh;padding:16px;display:flex;align-items:center;justify-content:center}
 .card{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:380px;box-shadow:0 8px 30px rgba(0,0,0,.2)}
@@ -3240,6 +3242,8 @@ async function doLogin(){
 
 CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>My Orders - Omega Ice</title>
+<link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#00609C"><link rel="apple-touch-icon" href="/icon.svg">
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:15px;color:#00609C;margin:0}
@@ -3286,6 +3290,13 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 .tl-title{font-weight:700;color:#0f2942;font-size:14px;margin-bottom:3px}
 .tl-desc{font-size:12px;color:#8a97a3}
 .track-cancelled{text-align:center;padding:30px 10px}
+.rate-overlay{display:none;position:fixed;inset:0;background:rgba(10,25,45,.5);z-index:60;align-items:center;justify-content:center;padding:16px}
+.rate-overlay.show{display:flex}
+.rate-sheet{background:#fff;border-radius:16px;width:100%;max-width:360px;padding:22px;position:relative;text-align:center}
+.rate-close{position:absolute;top:12px;right:12px;background:#f0f4f8;border:none;width:26px;height:26px;border-radius:50%;font-size:13px;color:#555;cursor:pointer}
+.star-row{display:flex;justify-content:center;gap:6px;margin:14px 0}
+.star-btn{font-size:32px;background:none;border:none;color:#dbe3ea;cursor:pointer;line-height:1;padding:2px}
+.star-btn.filled{color:#f59e0b}
 </style></head>
 <body>
 <div class="topbar"><div><h1 id="storeName">My Orders</h1><div style="font-size:11px;color:#666" id="storeMeta"></div></div><div style="display:flex;gap:6px"><span class="live">● LIVE</span><a href="/customer/logout" class="btn">Logout</a></div></div>
@@ -3306,10 +3317,42 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+<div class="rate-overlay" id="rateOverlay" onclick="if(event.target===this)closeRating()">
+  <div class="rate-sheet">
+    <button class="rate-close" onclick="closeRating()">✕</button>
+    <div style="font-size:14px;font-weight:700;color:#0f2942">How was your order?</div>
+    <div style="font-size:11px;color:#888;margin-top:2px">Tap a star to rate</div>
+    <div class="star-row" id="starRow"></div>
+    <textarea id="rateFeedback" rows="2" placeholder="Optional comment (e.g. mabilis dating, maayos yung packaging)" style="width:100%;padding:10px;border-radius:10px;border:1px solid #ccd;font-size:12px;resize:none"></textarea>
+    <button onclick="submitRating()" style="width:100%;padding:12px;margin-top:12px;background:#00609C;color:#fff;border:none;border-radius:10px;font-weight:700">Submit Rating</button>
+    <p id="rateStatus" style="font-size:11px;color:#c0392b;margin-top:6px"></p>
+  </div>
+</div>
+
 <script>
 const resellerId="{{ reseller_id }}";
 let showArchived=false;
 let lastOrders=[];
+// Parses either a plain date ("2026-09-15") or a full/loose timestamp
+// (including the old raw "...T08:05:08.955290" microsecond format) and
+// renders it the same clean way everywhere, so the order list looks
+// uniform instead of mixing clean times with raw ISO dumps.
+function parseFlexDate(s){
+  if(!s) return null;
+  const m=String(s).match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if(!m) return null;
+  const [,y,mo,da,h='00',mi='00',se='00']=m;
+  const d=new Date(+y,+mo-1,+da,+h,+mi,+se);
+  return isNaN(d.getTime())?null:d;
+}
+function fmtOrderTime(salesDate,createdAt){
+  const d=parseFlexDate(createdAt)||parseFlexDate(salesDate);
+  if(!d) return salesDate||createdAt||'';
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let h=d.getHours();const ampm=h>=12?'PM':'AM';h=h%12;if(h===0)h=12;
+  const mi=String(d.getMinutes()).padStart(2,'0');
+  return `${months[d.getMonth()]} ${d.getDate()}, ${h}:${mi} ${ampm}`;
+}
 async function loadOrders(){
   try{
     const res=await fetch(`/api/customer/${resellerId}/orders?show_archived=${showArchived?1:0}`);
@@ -3335,7 +3378,18 @@ async function loadOrders(){
     const list=document.getElementById('ordersList');
     lastOrders=orders;
     if(!orders.length){list.innerHTML='<div style="text-align:center;color:#888;padding:20px">No orders yet. Tap + New Order<br><br><button onclick="loadOrders()" style="padding:8px 14px;border-radius:20px;background:#00609C;color:#fff;border:none">🔄 Refresh Now</button></div>';return;}
-    list.innerHTML=orders.map(o=>`<div class="order-card" data-order-id="${o.id}" onclick="openTracking('${o.id}')"><div style="display:flex;justify-content:space-between"><span style="font-size:11px;color:#888">${o.sales_date||''} • ${o.created_at||''}</span><span class="status-pill status-${(o.order_status||'pending').toLowerCase().replace(/ /g,'-')}">${o.order_status||'Pending'}</span></div><div style="font-size:13px;margin-top:4px">${o.quantity}x ${o.kg_size} • ${o.mode} • ₱${o.total_sales}</div><div style="font-size:10px;color:#888;margin-top:2px">Order ID: ${o.id.slice(0,8)} • Tap to track →</div></div>`).join('');
+    list.innerHTML=orders.map(o=>{
+      const reorderBtn=`<button onclick="event.stopPropagation();reorder('${o.id}')" style="font-size:10px;padding:5px 10px;border-radius:14px;border:1px solid #cde;background:#eef4fb;color:#00609C;font-weight:600">🔁 Reorder</button>`;
+      let ratingHtml='';
+      if((o.order_status||'')==='Delivered'){
+        if(o.rating){
+          ratingHtml=`<div style="margin-top:6px;font-size:11px;color:#f59e0b">${'★'.repeat(o.rating)}${'☆'.repeat(5-o.rating)}<span style="color:#888;margin-left:4px">Rated</span></div>`;
+        }else{
+          ratingHtml=`<button onclick="event.stopPropagation();openRating('${o.id}')" style="margin-top:6px;font-size:10px;padding:5px 10px;border-radius:14px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;font-weight:600">⭐ Rate this order</button>`;
+        }
+      }
+      return `<div class="order-card" data-order-id="${o.id}" onclick="openTracking('${o.id}')"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span style="font-size:11px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fmtOrderTime(o.sales_date,o.created_at)}</span><span class="status-pill status-${(o.order_status||'pending').toLowerCase().replace(/ /g,'-')}" style="flex-shrink:0">${o.order_status||'Pending'}</span></div><div style="display:grid;grid-template-columns:56px 1fr 64px;align-items:center;gap:6px;font-size:13px;margin-top:6px"><span style="font-weight:600">${o.quantity}x</span><span style="color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.kg_size} • ${o.mode}</span><span style="text-align:right;font-weight:600;color:#00609C">₱${(+o.total_sales||0).toLocaleString()}</span></div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px"><span style="font-size:10px;color:#888">Order ID: ${o.id.slice(0,8)} • Tap to track →</span>${reorderBtn}</div>${ratingHtml}</div>`;
+    }).join('');
   }catch(e){
     document.getElementById('ordersList').innerHTML=`<div style="color:red;padding:10px">Error loading: ${e.message}<br><button onclick="loadOrders()" style="padding:8px 14px;border-radius:20px;background:#00609C;color:#fff;border:none">Retry</button></div>`;
   }
@@ -3400,6 +3454,59 @@ function openTracking(orderId){
 }
 function closeTracking(){document.getElementById('trackOverlay').classList.remove('show');}
 
+// --- Reorder: jumps to the New Order form pre-filled with the same
+// size/qty/delivery/payment as a past order, so the customer doesn't have
+// to re-type everything for a repeat purchase.
+function reorder(orderId){
+  const o=lastOrders.find(x=>x.id===orderId);
+  if(!o) return;
+  const params=new URLSearchParams({
+    kg: o.kg_size||'1Kg',
+    qty: o.quantity||1,
+    mode: o.mode||'DELIVER',
+    pay: o.payment||'Cash',
+  });
+  window.location.href=`/customer/${resellerId}/order?${params.toString()}`;
+}
+
+// --- Star rating modal (only shown for Delivered orders) ---
+let rateOrderId=null;
+let rateValue=0;
+function renderStars(){
+  const row=document.getElementById('starRow');
+  row.innerHTML='';
+  for(let i=1;i<=5;i++){
+    const b=document.createElement('button');
+    b.type='button';
+    b.className='star-btn'+(i<=rateValue?' filled':'');
+    b.textContent='★';
+    b.onclick=()=>{rateValue=i;renderStars();};
+    row.appendChild(b);
+  }
+}
+function openRating(orderId){
+  rateOrderId=orderId;
+  rateValue=0;
+  document.getElementById('rateFeedback').value='';
+  document.getElementById('rateStatus').textContent='';
+  renderStars();
+  document.getElementById('rateOverlay').classList.add('show');
+}
+function closeRating(){document.getElementById('rateOverlay').classList.remove('show');}
+async function submitRating(){
+  const statusEl=document.getElementById('rateStatus');
+  if(!rateValue){statusEl.textContent='Pumili muna ng star rating.';return;}
+  try{
+    const res=await fetch(`/api/customer/${resellerId}/rate_order/${rateOrderId}`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({rating:rateValue,feedback:document.getElementById('rateFeedback').value})
+    });
+    const data=await res.json();
+    if(data.ok){closeRating();loadOrders();}
+    else{statusEl.textContent=data.error||'Failed to submit rating';}
+  }catch(e){statusEl.textContent='Network error: '+e.message;}
+}
+
 loadOrders();setInterval(loadOrders,10000);
 </script>
 </body></html>
@@ -3408,6 +3515,9 @@ loadOrders();setInterval(loadOrders,10000);
 
 CUSTOMER_HISTORY_HTML = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sales History - Omega Ice</title>
+<link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#00609C"><link rel="apple-touch-icon" href="/icon.svg">
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:15px;color:#00609C;margin:0}
@@ -3444,6 +3554,7 @@ CUSTOMER_HISTORY_HTML = """<!DOCTYPE html>
     <div><div class="stat-val" id="histPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div>
     <div><div class="stat-val" id="histCount">0</div><div class="stat-lbl">TRANSACTIONS</div></div>
   </div>
+  <div id="histChartWrap" style="margin:6px 0 14px;display:none"><canvas id="histChart" height="160"></canvas></div>
   <div id="histList" style="font-size:11px"></div>
 </div>
 
@@ -3471,6 +3582,57 @@ function escapeHtmlC(t){
 let histPeriod = 'daily';
 let histSubPeriod = null;
 let histDailyDate = null;
+let histChartInstance = null;
+
+// Groups the period's individual orders into chart-friendly buckets: by
+// exact date for daily/weekly/monthly (few enough points to read), by
+// month for quarterly/yearly/all (otherwise a year of daily bars would be
+// unreadable on a phone screen).
+function histBucketKey(period, dateStr){
+  if(!dateStr) return 'Unknown';
+  if(period==='quarterly'||period==='yearly'||period==='all') return dateStr.slice(0,7);
+  return dateStr.slice(0,10);
+}
+function renderHistChart(period, rows){
+  const wrap=document.getElementById('histChartWrap');
+  if(!rows.length || typeof Chart==='undefined'){ wrap.style.display='none'; return; }
+  const buckets={};
+  rows.forEach(o=>{
+    const key=histBucketKey(period, o.sales_date||(o.created_at||'').slice(0,10));
+    if(!buckets[key]) buckets[key]={kg:0,peso:0};
+    // total_kg isn't in the row, so approximate from kg_size text x quantity
+    let kgEach=0;
+    try{ kgEach=parseFloat(String(o.kg_size||'').toLowerCase().replace('kg','').trim())||0; }catch(e){}
+    buckets[key].kg += kgEach*(o.quantity||0);
+    buckets[key].peso += (+o.total_sales||0);
+  });
+  const labels=Object.keys(buckets).sort();
+  if(labels.length<2){ wrap.style.display='none'; return; }
+  wrap.style.display='block';
+  const pesoData=labels.map(k=>buckets[k].peso);
+  const kgData=labels.map(k=>buckets[k].kg);
+  if(histChartInstance) histChartInstance.destroy();
+  const ctx=document.getElementById('histChart').getContext('2d');
+  histChartInstance=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels,
+      datasets:[
+        {label:'Total Peso (₱)',data:pesoData,backgroundColor:'#00609C',yAxisID:'y'},
+        {label:'Total Kg',data:kgData,type:'line',borderColor:'#f59e0b',backgroundColor:'#f59e0b',yAxisID:'y1',tension:.3}
+      ]
+    },
+    options:{
+      responsive:true,
+      plugins:{legend:{labels:{font:{size:10}}}},
+      scales:{
+        y:{beginAtZero:true,position:'left',ticks:{font:{size:9}}},
+        y1:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},ticks:{font:{size:9}}},
+        x:{ticks:{font:{size:9}}}
+      }
+    }
+  });
+}
 
 function setHistPeriod(p){
   histPeriod = p;
@@ -3599,7 +3761,12 @@ async function loadHistory(){
     document.getElementById('histPeso').textContent = '₱'+(data.total_peso||0).toLocaleString();
     document.getElementById('histCount').textContent = data.count||0;
     const rows = data.orders||[];
-    if(!rows.length){ listEl.innerHTML = '<div style="color:#888;text-align:center;padding:10px">No transactions for this period</div>'; return; }
+    if(!rows.length){
+      document.getElementById('histChartWrap').style.display='none';
+      listEl.innerHTML = '<div style="color:#888;text-align:center;padding:10px">No transactions for this period</div>';
+      return;
+    }
+    renderHistChart(histPeriod, rows);
     listEl.innerHTML = rows.map(o=>{
       const statusColor = {'Delivered':'#166534','Cancelled':'#c0392b'}[o.order_status] || '#92400e';
       return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f4f8"><div><div>${o.sales_date||''} • ${o.quantity}x ${escapeHtmlC(o.kg_size)}</div><div style="font-size:9px;color:${statusColor}">${escapeHtmlC(o.order_status)}</div></div><div style="font-weight:600">₱${o.total_sales}</div></div>`;
@@ -3617,6 +3784,8 @@ populateHistSubPicker('daily');
 
 CUSTOMER_ORDER_HTML = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Place Order - Omega Ice</title>
+<link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#00609C"><link rel="apple-touch-icon" href="/icon.svg">
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:15px;color:#00609C;margin:0}
@@ -3684,7 +3853,20 @@ function collapsePrefs(){
     }
   }catch(e){}
 })();
-document.getElementById('needDate').value=new Date().toISOString().slice(0,10);calc();
+document.getElementById('needDate').value=new Date().toISOString().slice(0,10);
+// Reorder support: /order?kg=5Kg&qty=10&mode=DELIVER&pay=Cash pre-fills the
+// form from a past order (see reorder() on the dashboard). Falls back to
+// normal defaults/saved prefs when no query params are present.
+(function applyReorderParams(){
+  const qs=new URLSearchParams(window.location.search);
+  const rKg=qs.get('kg'), rQty=qs.get('qty'), rMode=qs.get('mode'), rPay=qs.get('pay');
+  if(rKg && prices.hasOwnProperty(rKg)) setKg(rKg);
+  if(rQty && parseInt(rQty)>0) document.getElementById('qty').value=parseInt(rQty);
+  if(rMode==='DELIVER'||rMode==='PICKUP'){ setMode(rMode); expandPrefs(); }
+  if(rPay==='Cash'||rPay==='Credit'){ setPay(rPay); expandPrefs(); }
+  if(rKg||rQty||rMode||rPay){ collapsePrefs(); }
+})();
+calc();
 async function placeOrder(){
   const qty=parseInt(document.getElementById('qty').value)||0;
   const needDate=document.getElementById('needDate').value;
@@ -3697,6 +3879,51 @@ async function placeOrder(){
 </script>
 </body></html>
 """
+
+# --- PWA support: lets a customer "Add to Home Screen" on their phone so
+# the portal opens like a real app instead of a browser tab. manifest.json
+# tells the browser the app's name/icon/colors, icon.svg is a simple
+# generated icon (no static file storage needed for this), and sw.js is a
+# minimal service worker - required by Chrome/Android before it will offer
+# the install prompt at all, even though we keep it network-first (no
+# offline caching of live order data, since stale orders would be worse
+# than no offline support).
+@app.route("/manifest.json")
+def customer_manifest():
+    return jsonify({
+        "name": "Omega Ice - Customer Portal",
+        "short_name": "Omega Ice",
+        "start_url": "/customer",
+        "scope": "/customer",
+        "display": "standalone",
+        "background_color": "#eef7ff",
+        "theme_color": "#00609C",
+        "icons": [
+            {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+            {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable"},
+        ],
+    })
+
+@app.route("/icon.svg")
+def customer_icon():
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
+           '<rect width="512" height="512" rx="96" fill="#00609C"/>'
+           '<text x="50%" y="62%" font-size="300" text-anchor="middle" '
+           'font-family="Arial,sans-serif">🧊</text></svg>')
+    return Response(svg, mimetype="image/svg+xml")
+
+@app.route("/sw.js")
+def customer_service_worker():
+    js = (
+        "const CACHE='omega-ice-v1';\n"
+        "self.addEventListener('install',e=>{self.skipWaiting();});\n"
+        "self.addEventListener('activate',e=>{self.clients.claim();});\n"
+        "self.addEventListener('fetch',e=>{\n"
+        "  if(e.request.method!=='GET') return;\n"
+        "  e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));\n"
+        "});\n"
+    )
+    return Response(js, mimetype="application/javascript")
 
 # Customer routes
 
@@ -3933,7 +4160,7 @@ def api_customer_orders(reseller_id):
             total_kg += qty * kg_val(kg_size)
             total_peso += peso
             status_counts[status] = status_counts.get(status,0)+1
-            orders.append({"id": key, "sales_date": val.get("sales_date"), "quantity": qty, "kg_size": kg_size, "total_sales": peso, "mode": val.get("mode"), "payment": val.get("payment"), "order_status": status, "created_at": val.get("created_at")})
+            orders.append({"id": key, "sales_date": val.get("sales_date"), "quantity": qty, "kg_size": kg_size, "total_sales": peso, "mode": val.get("mode"), "payment": val.get("payment"), "order_status": status, "created_at": val.get("created_at"), "rating": val.get("rating"), "feedback": val.get("feedback")})
         def status_priority_c(s):
             order = (s.get("order_status") or "Pending")
             priorities = {"New Order": 0, "Pending": 1, "Preparing": 2, "Out for Delivery": 3, "Delivered": 4, "Cancelled": 5}
@@ -4038,6 +4265,45 @@ def api_customer_history(reseller_id):
             "total_kg": total_kg, "total_peso": total_peso, "count": count,
             "status_counts": status_counts, "orders": rows[:100],
         })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/customer/<reseller_id>/rate_order/<order_id>", methods=["POST"])
+def api_customer_rate_order(reseller_id, order_id):
+    """
+    Lets a customer leave a 1-5 star rating (+ optional short feedback) on
+    an order once it's Delivered. Same auth pattern as the other customer
+    endpoints. Only allowed on orders that actually belong to this reseller
+    and are already Delivered - rating something mid-delivery doesn't make
+    sense, and rating someone else's order shouldn't be possible at all.
+    """
+    if session.get("customer_id") and session.get("customer_id") != reseller_id:
+        return jsonify({"ok": False, "error": "Not allowed"}), 403
+    if not session.get("customer_id") and not session.get("staff_name"):
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    try:
+        d = request.json or {}
+        rating = int(d.get("rating", 0))
+        feedback = str(d.get("feedback", "")).strip()[:500]
+        if rating < 1 or rating > 5:
+            return jsonify({"ok": False, "error": "Rating must be 1-5"}), 400
+        order = fb_get(f"daily_sales/{order_id}")
+        if not order or order.get("deleted"):
+            return jsonify({"ok": False, "error": "Order not found"}), 404
+        reseller = fb_get(f"resellers/{reseller_id}") or {}
+        target_name = (reseller.get("store_name") or "").strip().lower()
+        rid = order.get("reseller_id")
+        rname = (order.get("reseller_name") or "").strip().lower()
+        if rid != reseller_id and rname != target_name:
+            return jsonify({"ok": False, "error": "Not allowed"}), 403
+        if (order.get("order_status") or "") != "Delivered":
+            return jsonify({"ok": False, "error": "Order isn't Delivered yet"}), 400
+        fb_patch(f"daily_sales/{order_id}", {
+            "rating": rating,
+            "feedback": feedback,
+            "rated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        return jsonify({"ok": True, "rating": rating, "feedback": feedback})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
