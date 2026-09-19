@@ -157,7 +157,7 @@ KG_OPTIONS = ["1Kg", "5Kg", "10Kg", "25Kg"]
 FALLBACK_PRICES = {"1Kg": 10, "5Kg": 50, "10Kg": 100, "25Kg": 250}
 
 LOGIN_HTML = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Omega Purified Ice - Login</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Omega Purified Ice - Login</title>
 <link rel="manifest" href="/manifest_staff.json"><meta name="theme-color" content="#00609C"><link rel="apple-touch-icon" href="/icon-192.png">
 <meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>
@@ -225,7 +225,7 @@ async function doLogin(){document.getElementById("msg").textContent="Checking...
 </body></html>
 """
 CASHIER_HTML = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Omega Purified Ice - Cashier</title>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Omega Purified Ice - Cashier</title>
 <link rel="manifest" href="/manifest_staff.json"><meta name="theme-color" content="#00609C"><link rel="apple-touch-icon" href="/icon-192.png">
 <meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>
@@ -4127,7 +4127,12 @@ def staff_manifest():
         "short_name": "Omega Cashier",
         "start_url": "/",
         "scope": "/",
-        "display": "fullscreen",
+        # "fullscreen" is known to crash/misbehave on some older or OEM
+        # Android WebView builds (common on budget MediaTek tablets) -
+        # "standalone" is far more widely supported and still hides the
+        # browser URL bar. The in-app ⛶ kiosk button covers the rest
+        # (true edge-to-edge fullscreen) via the Fullscreen API instead.
+        "display": "standalone",
         "orientation": "any",
         "background_color": "#00609C",
         "theme_color": "#00609C",
