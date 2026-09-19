@@ -377,12 +377,23 @@ function nowManilaTimeHHMM(){
   const now = new Date();
   return new Date(now.getTime() + 8*60*60000).toISOString().slice(11,16);
 }
+// SECURITY FIX (Sept 19): reseller_name/store_name were being dropped
+// straight into innerHTML (Recent Sales table, period sales table, the
+// reseller-search dropdown) with no escaping. A store name like
+// <img src=x onerror=...> would execute as real HTML/JS for any staff
+// viewing that table - a stored XSS. Every place that renders a
+// user-supplied name into HTML now runs it through this first.
+function escapeHtml(t){
+  const d = document.createElement('div');
+  d.textContent = (t===null || t===undefined) ? '' : String(t);
+  return d.innerHTML;
+}
 function setMode(m){mode=m;document.getElementById('modeDeliver').classList.toggle('active',m==='DELIVER');document.getElementById('modePickup').classList.toggle('active',m==='PICKUP');updateTotal()}
 function setPayment(p){payment=p;document.getElementById('payCash').classList.toggle('active',p==='Cash');document.getElementById('payCredit').classList.toggle('active',p==='Credit')}
 function setKg(k){kg=k;document.querySelectorAll('.kg-row button').forEach(b=>b.classList.toggle('active',b.dataset.kg===k));updateTotal()}
 async function updateTotal(){if(totalManuallyEdited)return;try{const res=await fetch(`/api/price?kg=${kg}&mode=${mode}`);const data=await res.json();unitPrice=data.price;}catch(e){unitPrice=10;}const qty=parseInt(document.getElementById('qtyInput').value)||0;document.getElementById('totalAmount').value=(unitPrice*qty).toFixed(2)}
 const resellerInput=document.getElementById('resellerInput');const resultsBox=document.getElementById('resellerResults');
-resellerInput.addEventListener('input',async()=>{selectedReseller=null;const q=resellerInput.value.trim();if(!q){resultsBox.style.display='none';return}const res=await fetch(`/api/resellers?q=${encodeURIComponent(q)}`);const rows=await res.json();if(!rows.length){resultsBox.style.display='none';return}resultsBox.innerHTML=rows.map(r=>`<div class="res-item" data-id="${r.id}" data-name="${r.store_name.replace(/"/g,'&quot;')}">${r.store_name}</div>`).join('');resultsBox.style.display='block';resultsBox.querySelectorAll('.res-item').forEach(el=>{el.addEventListener('click',()=>{pickReseller(el.getAttribute('data-id'),el.getAttribute('data-name'))})})});
+resellerInput.addEventListener('input',async()=>{selectedReseller=null;const q=resellerInput.value.trim();if(!q){resultsBox.style.display='none';return}const res=await fetch(`/api/resellers?q=${encodeURIComponent(q)}`);const rows=await res.json();if(!rows.length){resultsBox.style.display='none';return}resultsBox.innerHTML=rows.map(r=>`<div class="res-item" data-id="${r.id}" data-name="${r.store_name.replace(/"/g,'&quot;')}">${escapeHtml(r.store_name)}</div>`).join('');resultsBox.style.display='block';resultsBox.querySelectorAll('.res-item').forEach(el=>{el.addEventListener('click',()=>{pickReseller(el.getAttribute('data-id'),el.getAttribute('data-name'))})})});
 function pickReseller(id,name){selectedReseller={id,name};resellerInput.value=name;resultsBox.style.display='none'}
 async function saveSale(){const qty=parseInt(document.getElementById('qtyInput').value)||0;const name=resellerInput.value.trim();const totalVal=parseFloat(document.getElementById('totalAmount').value);const statusEl=document.getElementById('statusMsg');if(!name||qty<=0){statusEl.textContent='Enter reseller';statusEl.className='status err';return}const saleDate = document.getElementById('saleDateInput').value || todayManila();
   const saleTime = document.getElementById('saleTimeInput').value || nowManilaTimeHHMM();
@@ -915,7 +926,7 @@ async function loadPeriodSales(period, subVal=null){
       const timeStr = r.time_only || (r.created_at ? new Date(r.created_at).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'}) : '');
       const dateTime = `${r.sales_date||''} ${timeStr}`.trim();
       const badge = `<span style="font-size:9px;background:#dcfce7;color:#166534;padding:3px 6px;border-radius:10px">${r.order_status||'Delivered'}</span>`;
-      return `<tr><td style="font-size:10px">${dateTime}<br><small style="color:#888">${r.timestamp||''}</small></td><td>${r.reseller_name}</td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td>${badge}<br><div style="display:flex;gap:4px;margin-top:4px"><button class="icon-btn edit" style="width:26px;height:26px;font-size:12px" onclick="editSale('${r.id}');" title="Edit">✏️</button><button class="icon-btn del" style="width:26px;height:26px;font-size:12px" onclick="deleteSale('${r.id}')" title="Delete">🗑️</button></div></td></tr>`;
+      return `<tr><td style="font-size:10px">${dateTime}<br><small style="color:#888">${r.timestamp||''}</small></td><td>${escapeHtml(r.reseller_name)}</td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td>${badge}<br><div style="display:flex;gap:4px;margin-top:4px"><button class="icon-btn edit" style="width:26px;height:26px;font-size:12px" onclick="editSale('${r.id}');" title="Edit">✏️</button><button class="icon-btn del" style="width:26px;height:26px;font-size:12px" onclick="deleteSale('${r.id}')" title="Delete">🗑️</button></div></td></tr>`;
     }).join('');
     summary.textContent = `Total: ${rows.length} trans | ${data.total_kg||0}kg | ₱${(data.total_peso||0).toLocaleString()} | Showing ${period}`;
   }catch(e){
@@ -1012,11 +1023,36 @@ async function loadRecent(customDate=null){
         try{ timeDisplay = formatTimestamp(r.created_at); }catch{ timeDisplay = r.created_at; }
       } else if(r.delivered_at){ timeDisplay = r.delivered_at.split('T')[1]?.substring(0,5) || r.delivered_at; }
       const deliveredInfo = `<div style="font-size:9px;color:#666">${timeDisplay}</div>`;
-      return `<tr><td style="font-size:11px">${r.sales_date||''}${deliveredInfo}</td><td>${r.reseller_name}<br><small style="font-size:9px;color:#888">${timeDisplay}</small></td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td>${badge}</td><td><div style="display:flex;gap:4px"><button class="icon-btn edit" onclick="editSale('${r.id}')" title="Edit">✏️</button><button class="icon-btn del" onclick="deleteSale('${r.id}')" title="Delete">🗑️</button></div></td></tr>`;
+      return `<tr><td style="font-size:11px">${r.sales_date||''}${deliveredInfo}</td><td>${escapeHtml(r.reseller_name)}<br><small style="font-size:9px;color:#888">${timeDisplay}</small></td><td>${r.quantity}</td><td>${r.kg_size}</td><td>₱${r.total_sales}</td><td>${badge}</td><td><div style="display:flex;gap:4px"><button class="icon-btn edit" onclick="editSale('${r.id}')" title="Edit">✏️</button><button class="icon-btn del" onclick="deleteSale('${r.id}')" title="Delete">🗑️</button></div></td></tr>`;
     }).join('');
   }catch(e){document.getElementById('recentBody').innerHTML=`<tr><td colspan=7 style="color:#c0392b">Error: ${e.message} <a href="/login">Login</a></td></tr>`;}
 }
-async function deleteSale(id){if(!confirm('Delete?'))return;await fetch(`/api/sale/${id}`,{method:'DELETE'});loadRecent();loadToday();}
+async function deleteSale(id){
+  if(!confirm('Delete?')) return;
+  // BUG FIX: this used to fire-and-forget the DELETE request (no error
+  // check) and then ALWAYS refresh only the daily Recent list + top card -
+  // so deleting a row from the Weekly/Monthly/Quarterly/Yearly table never
+  // refreshed that table, and the deleted row just stayed on screen
+  // looking like the delete didn't work (even when it actually succeeded).
+  try{
+    const res = await fetch(`/api/sale/${id}`, {method:'DELETE'});
+    if(res.status===401){window.location.href='/login';return;}
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok || data.ok === false){
+      alert('Delete failed: ' + (data.error || res.status));
+      return;
+    }
+  }catch(e){
+    alert('Delete failed: ' + e.message);
+    return;
+  }
+  if(cashierPeriod === 'daily'){
+    loadRecent(selectedDailyDate);
+  } else {
+    loadPeriodSales(cashierPeriod, selectedSubPeriod);
+  }
+  loadToday();
+}
 
 
 
@@ -1531,12 +1567,36 @@ def api_setup():
     existing = fb_get("staff")
     if existing:
         return jsonify({"ok": False, "message": "Already setup"})
-    staff = {
-        "staff1": {"name": "Tatay/Nanay", "position": "Co-Owner", "pin": "1928", "status": "Active"},
-        "staff2": {"name": "Yhel", "position": "Staff", "pin": "0615", "status": "Active"},
-        "staff3": {"name": "OMEGA", "position": "ADMIN", "pin": "0519", "status": "Active"},
-        "staff4": {"name": "ISESMO", "position": "Manager/Owner", "pin": "0712", "status": "Active"},
+    # CRITICAL SECURITY FIX (Sept 19): the real, working staff PINs used to
+    # be hardcoded here in plain text, in the SAME source file that gets
+    # copied/shared/uploaded around (as it just was, multiple times, in this
+    # conversation). Anyone with a copy of this file had every staff PIN.
+    # PINs now come from environment variables (set in Render > Environment,
+    # never committed to the file) - setup refuses to run if they're not all
+    # set, instead of silently falling back to a hardcoded value.
+    #
+    # IMPORTANT: since the old hardcoded PINs (1928/0615/0519/0712) have
+    # already been exposed in this file, change all 4 staff PINs in Firebase
+    # (or via this env-var-driven setup, if you're allowing a re-setup) as
+    # soon as possible - the code fix alone doesn't invalidate PINs already
+    # handed out.
+    pin_env = {
+        "staff1": ("STAFF1_NAME", "STAFF1_PIN", "Co-Owner"),
+        "staff2": ("STAFF2_NAME", "STAFF2_PIN", "Staff"),
+        "staff3": ("STAFF3_NAME", "STAFF3_PIN", "ADMIN"),
+        "staff4": ("STAFF4_NAME", "STAFF4_PIN", "Manager/Owner"),
     }
+    staff = {}
+    missing = []
+    for key, (name_var, pin_var, default_position) in pin_env.items():
+        name = os.environ.get(name_var, "").strip()
+        pin = os.environ.get(pin_var, "").strip()
+        if not name or not (pin.isdigit() and len(pin) == 4):
+            missing.append(f"{name_var}/{pin_var}")
+            continue
+        staff[key] = {"name": name, "position": os.environ.get(f"{key.upper()}_POSITION", default_position), "pin": pin, "status": "Active"}
+    if missing:
+        return jsonify({"ok": False, "error": "Missing/invalid env vars (need 4-digit PIN each): " + ", ".join(missing)}), 400
     fb_put("staff", staff)
     fb_put("price_settings/REGULAR", {"kg1": 10, "kg5": 50, "kg10": 100, "kg25": 250, "type": "REGULAR"})
     fb_put("price_settings/PICKUP", {"kg1": 9, "kg5": 45, "kg10": 90, "kg25": 230, "type": "PICKUP"})
@@ -2124,7 +2184,26 @@ def api_delete_sale(sale_id):
         except:
             return jsonify({"ok": False}), 400
     try:
-        requests.delete(f"{FIREBASE_URL}/daily_sales/{sale_id}.json", timeout=10)
+        # TRUE ROOT CAUSE FOUND (Sept 19): this used to hit the Firebase REST
+        # API directly with plain `requests.delete()` - no auth token at all.
+        # Your Realtime Database rules are locked down (.read/.write: false),
+        # so that unauthenticated call was being REJECTED by Firebase every
+        # time (401/403) and the code didn't even check the response, so it
+        # silently reported {"ok": True} anyway. That's the actual reason
+        # Delete looked broken. Switched to fb_delete(), which goes through
+        # the Firebase Admin SDK (the same authenticated service-account
+        # connection fb_get/fb_post/fb_patch already use) - it's allowed to
+        # write regardless of the public .read/.write rules, the same way
+        # the rest of this app already saves and edits sales.
+        ok = fb_delete(f"daily_sales/{sale_id}")
+        if not ok:
+            return jsonify({"ok": False, "error": "Firebase delete failed - check server logs"}), 502
+        # Clear the 10-sec dashboard cache so Today/period totals drop the
+        # deleted sale immediately instead of up to 10s later.
+        for kk in list(globals().keys()):
+            if kk.startswith("_dashboard_cache_"):
+                try: del globals()[kk]
+                except: pass
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -2651,17 +2730,27 @@ loadLogs();
 # ---------- Machine routes ----------
 
 @app.route("/debug/machines")
+@login_required
 def debug_machines():
+    # CRITICAL SECURITY FIX (Sept 19): this route had NO login check at all -
+    # publicly readable by anyone on the internet with the URL, and it leaked
+    # the actual Firebase database URL plus all machine data. Locked to
+    # logged-in staff, and stopped returning the DB URL (that belongs in
+    # server env vars/logs only, never in an API response).
     raw = fb_get("machines")
     return jsonify({
-        "firebase_url": FIREBASE_URL,
         "online": is_online(),
         "raw_machines_node": raw,
         "count": len(raw) if isinstance(raw, dict) else (0 if raw is None else "not a dict - see raw_machines_node")
     })
 
 @app.route("/debug/resellers")
+@login_required
 def debug_resellers():
+    # CRITICAL SECURITY FIX (Sept 19): this had NO login check - anyone with
+    # the URL could dump every customer's phone number, address, credit
+    # balance, and password hash. Locked to logged-in staff, and the
+    # password hash is stripped out even for staff (never needed here).
     raw = fb_get("resellers") or {}
     # group by store_name to surface duplicates clearly
     by_name = {}
@@ -2669,7 +2758,8 @@ def debug_resellers():
         if not val:
             continue
         name = (val.get("store_name") or "").strip()
-        by_name.setdefault(name, []).append({"firebase_key": key, **val})
+        safe_val = {k: v for k, v in val.items() if k != "password_hash"}
+        by_name.setdefault(name, []).append({"firebase_key": key, **safe_val})
     duplicates = {name: entries for name, entries in by_name.items() if len(entries) > 1}
     return jsonify({
         "total_resellers": len(raw),
@@ -2679,6 +2769,7 @@ def debug_resellers():
 
 
 @app.route("/debug/fix_reseller_duplicates")
+@login_required
 def fix_reseller_duplicates():
     """
     One-time cleanup: the migration script created a second, sparse
@@ -2694,6 +2785,12 @@ def fix_reseller_duplicates():
     Safe to run more than once - if there are no more duplicates,
     it does nothing.
     """
+    # CRITICAL SECURITY FIX (Sept 19): this MUTATES data (merges/deletes
+    # reseller records, re-points sales) and had NO login check at all -
+    # publicly triggerable by anyone. Restricted to ISESMO only, same as
+    # the other one-time admin cleanup routes in this file.
+    if (session.get("staff_name") or "").lower() not in ["isesmo", "isesmo gamboa"]:
+        return jsonify({"ok": False, "error": "Only ISESMO"}), 403
     resellers = fb_get("resellers") or {}
     sales = fb_get("daily_sales") or {}
 
@@ -2736,8 +2833,9 @@ def fix_reseller_duplicates():
                 keep_bal = keep_val.get("credit_balance") or 0
                 fb_patch(f"resellers/{keep_key}", {"credit_balance": keep_bal + remove_bal})
 
-            # delete the sparse duplicate
-            requests.delete(f"{FIREBASE_URL}/resellers/{remove_key}.json", timeout=10)
+            # delete the sparse duplicate (fb_delete = authenticated Admin SDK,
+            # not the raw unauthenticated REST call - see api_delete_sale for why)
+            fb_delete(f"resellers/{remove_key}")
 
             report.append({
                 "store_name": name,
@@ -2839,12 +2937,15 @@ def api_update_machine(machine_id):
 @login_required
 def api_delete_machine(machine_id):
     try:
-        requests.delete(f"{FIREBASE_URL}/machines/{machine_id}.json", timeout=10)
+        # Same root-cause bug as api_delete_sale: raw unauthenticated REST
+        # delete was silently rejected by the locked-down Firebase rules.
+        # fb_delete() uses the authenticated Admin SDK connection instead.
+        fb_delete(f"machines/{machine_id}")
         # also remove its logs
         logs = fb_get("machine_logs") or {}
         for lid, lg in logs.items():
             if lg and lg.get("machine_id") == machine_id:
-                requests.delete(f"{FIREBASE_URL}/machine_logs/{lid}.json", timeout=10)
+                fb_delete(f"machine_logs/{lid}")
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -3410,6 +3511,13 @@ def customer_dashboard_page(reseller_id):
 def customer_order_page(reseller_id):
     if not session.get("customer_id") and not session.get("staff_name"):
         return redirect(url_for("customer_login_page"))
+    # SECURITY FIX (Sept 19): missing the same store-match check the
+    # dashboard page already has - a logged-in customer for Store A could
+    # browse Store B's order page just by editing the URL. The underlying
+    # API calls are now locked down too (place_order/orders), but the page
+    # itself should redirect the same way the dashboard already does.
+    if session.get("customer_id") and session.get("customer_id") != reseller_id and not session.get("staff_name"):
+        return redirect(f"/customer/{session.get('customer_id')}/order")
     return render_template_string(CUSTOMER_ORDER_HTML, reseller_id=reseller_id)
 
 @app.route("/api/customer/login", methods=["POST"])
@@ -3470,10 +3578,26 @@ def api_customer_request_otp():
         if sent_ok:
             return jsonify({"ok": True, "message": "OTP sent via SMS. Valid 5 mins."})
         else:
-            # SMS not configured or failed - fall back to showing OTP so the flow still works,
-            # but flag it clearly so staff know SMS isn't actually going out.
-            return jsonify({"ok": True, "otp": otp, "sms_sent": False, "sms_error": sms_info,
-                             "message": "SMS could not be sent - showing OTP here as fallback. Check SEMAPHORE_API_KEY / SMS credits."})
+            # CRITICAL SECURITY FIX (Sept 19): this used to return the actual
+            # OTP straight in the public API response whenever SMS sending
+            # failed. Since request_otp needs no login, ANYONE who knew a
+            # registered phone number could request an OTP, and if SMS
+            # happened to fail (per the old comment here, apparently common
+            # with this SEMAPHORE setup), the OTP came right back to them -
+            # no need to ever receive the SMS. That OTP resets the password,
+            # so this was a full account-takeover path on any phone number.
+            #
+            # Fix: never put the OTP in the response. Only a logged-in staff
+            # member can see it (so they can read it off the server and
+            # relay it manually over the phone, same as before) - everyone
+            # else just gets told to contact staff, matching how the rest of
+            # this app already handles "no working password reset" cases.
+            print(f"[OTP fallback - SMS failed] phone={phone} otp={otp} reason={sms_info}")
+            if session.get("staff_name"):
+                return jsonify({"ok": True, "otp": otp, "sms_sent": False, "sms_error": sms_info,
+                                 "message": "SMS could not be sent - showing OTP here (staff view only). Check SEMAPHORE_API_KEY / SMS credits."})
+            return jsonify({"ok": False, "sms_sent": False,
+                             "message": "SMS could not be sent right now. Please contact staff for your OTP."}), 503
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -3527,6 +3651,15 @@ def api_customer_verify_otp():
 
 @app.route("/api/customer/<reseller_id>/orders")
 def api_customer_orders(reseller_id):
+    # CRITICAL SECURITY FIX (Sept 19): this had NO session check at all -
+    # anyone, logged in or not, could hit this URL for ANY reseller_id and
+    # see that store's full order history and totals. Now matches the same
+    # "must be logged in AND (this store or staff)" pattern already used by
+    # bulk_update/archive_old elsewhere in this file.
+    if session.get("customer_id") and session.get("customer_id") != reseller_id:
+        return jsonify({"ok": False, "error": "Not allowed"}), 403
+    if not session.get("customer_id") and not session.get("staff_name"):
+        return jsonify({"ok": False, "error": "Login required"}), 401
     try:
         reseller = fb_get(f"resellers/{reseller_id}") or {}
         sales = fb_get("daily_sales") or {}
@@ -3605,9 +3738,17 @@ def api_customer_orders(reseller_id):
 @app.route("/api/customer/<reseller_id>/place_order", methods=["POST"])
 def api_customer_place_order(reseller_id):
     try:
-        # Only logged customer can place for self, or staff
+        # CRITICAL SECURITY FIX (Sept 19): the old check only blocked a
+        # MISMATCH ("logged in as store A, targeting store B") but never
+        # required being logged in at all - session.get("customer_id") is
+        # None for an anonymous visitor, so the whole `if` was skipped and
+        # anyone, no login whatsoever, could POST fake orders as ANY store.
+        # Now also requires an actual session (customer OR staff), same
+        # pattern as bulk_update/archive_old/orders elsewhere in this file.
         if session.get("customer_id") and session.get("customer_id") != reseller_id:
             return jsonify({"ok": False, "error": "Not allowed"}), 403
+        if not session.get("customer_id") and not session.get("staff_name"):
+            return jsonify({"ok": False, "error": "Login required"}), 401
         d = request.json or {}
         qty = int(d.get("quantity",1))
         kg_size = d.get("kg_size","1Kg")
