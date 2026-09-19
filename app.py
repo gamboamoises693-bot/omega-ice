@@ -3293,38 +3293,11 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
 <button onclick="loadOrders()" style="padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">🔄 Refresh</button>
 <button onclick="bulkMarkDelivered()" style="padding:8px 12px;border-radius:20px;border:1px solid #86efac;background:#f0fdf4;color:#166534;font-size:11px">✅ Mark all Pending as Delivered</button>
-<span style="font-size:10px;color:#888;padding:8px">Staff will update to Preparing → Delivered</span>
+<a href="/customer/{{ reseller_id }}/history" style="padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#eef4fb;color:#00609C;font-size:11px;text-decoration:none;font-weight:600">📊 Sales History</a>
 </div>
+<div style="font-size:10px;color:#888;margin-top:6px">Staff will update to Preparing → Delivered</div>
 </div>
 <div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px;display:flex;justify-content:space-between"><span>Real-time Orders</span><span style="font-size:10px;color:#888" id="lastUpdate"></span></div><div id="ordersList">Loading orders...</div></div>
-
-<div class="card">
-  <div style="font-size:12px;font-weight:600;margin-bottom:10px">📊 Sales History</div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-    <button class="hist-period-btn active" data-p="daily" onclick="setHistPeriod('daily')" style="padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#00609C;color:#fff;font-size:11px">Daily</button>
-    <button class="hist-period-btn" data-p="weekly" onclick="setHistPeriod('weekly')" style="padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">Weekly</button>
-    <button class="hist-period-btn" data-p="monthly" onclick="setHistPeriod('monthly')" style="padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">Monthly</button>
-    <button class="hist-period-btn" data-p="quarterly" onclick="setHistPeriod('quarterly')" style="padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">Quarterly</button>
-    <button class="hist-period-btn" data-p="yearly" onclick="setHistPeriod('yearly')" style="padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">Yearly</button>
-    <button class="hist-period-btn" data-p="all" onclick="setHistPeriod('all')" style="padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">All</button>
-  </div>
-  <div id="histSubPicker" style="display:none;margin-bottom:10px;background:#eef4fb;border-radius:10px;padding:10px">
-    <label style="font-size:10px;color:#666;margin:0 0 6px;display:block" id="histSubLabel">Select</label>
-    <select id="histSubSelect" onchange="onHistSubChange()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cde;font-size:12px"></select>
-    <label style="font-size:10px;color:#666;margin:8px 0 4px;display:block">...or search by any date in that period</label>
-    <input type="date" id="histDateSearchInput" onchange="onHistDateSearch()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cde;font-size:12px">
-  </div>
-  <div id="histDailyPicker" style="display:none;margin-bottom:10px;background:#eef4fb;border-radius:10px;padding:10px">
-    <input type="date" id="histDailyDateInput" onchange="onHistDailyDateChange()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cde;font-size:12px">
-  </div>
-  <div style="font-size:11px;color:#888;margin-bottom:6px" id="histLabel"></div>
-  <div class="stat-grid" style="margin-bottom:10px">
-    <div><div class="stat-val" id="histKg" style="font-size:16px">0kg</div><div class="stat-lbl">TOTAL KG</div></div>
-    <div><div class="stat-val" id="histPeso" style="font-size:16px">₱0</div><div class="stat-lbl">TOTAL PESO</div></div>
-    <div><div class="stat-val" id="histCount" style="font-size:16px">0</div><div class="stat-lbl">TRANSACTIONS</div></div>
-  </div>
-  <div id="histList" style="font-size:11px"></div>
-</div>
 
 <div class="track-overlay" id="trackOverlay" onclick="if(event.target===this)closeTracking()">
   <div class="track-sheet">
@@ -3427,7 +3400,55 @@ function openTracking(orderId){
 }
 function closeTracking(){document.getElementById('trackOverlay').classList.remove('show');}
 
-// --- Sales History (dynamic period search) ---
+loadOrders();setInterval(loadOrders,10000);
+</script>
+</body></html>
+"""
+
+
+CUSTOMER_HISTORY_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sales History - Omega Ice</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.topbar h1{font-size:15px;color:#00609C;margin:0}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}.stat-val{font-size:18px;font-weight:700;color:#00609C}.stat-lbl{font-size:9px;color:#888}
+.btn{padding:10px 14px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px;text-decoration:none}
+.hist-period-btn{padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px}
+.hist-period-btn.active{background:#00609C;color:#fff}
+</style></head>
+<body>
+<div class="topbar"><div><h1>📊 Sales History</h1><div style="font-size:11px;color:#666" id="storeMeta"></div></div><a href="/customer/{{ reseller_id }}/dashboard" class="btn">← Back</a></div>
+
+<div class="card">
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+    <button class="hist-period-btn active" data-p="daily" onclick="setHistPeriod('daily')">Daily</button>
+    <button class="hist-period-btn" data-p="weekly" onclick="setHistPeriod('weekly')">Weekly</button>
+    <button class="hist-period-btn" data-p="monthly" onclick="setHistPeriod('monthly')">Monthly</button>
+    <button class="hist-period-btn" data-p="quarterly" onclick="setHistPeriod('quarterly')">Quarterly</button>
+    <button class="hist-period-btn" data-p="yearly" onclick="setHistPeriod('yearly')">Yearly</button>
+    <button class="hist-period-btn" data-p="all" onclick="setHistPeriod('all')">All</button>
+  </div>
+  <div id="histSubPicker" style="display:none;margin-bottom:10px;background:#eef4fb;border-radius:10px;padding:10px">
+    <label style="font-size:10px;color:#666;margin:0 0 6px;display:block" id="histSubLabel">Select</label>
+    <select id="histSubSelect" onchange="onHistSubChange()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cde;font-size:12px"></select>
+    <label style="font-size:10px;color:#666;margin:8px 0 4px;display:block">...or search by any date in that period</label>
+    <input type="date" id="histDateSearchInput" onchange="onHistDateSearch()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cde;font-size:12px">
+  </div>
+  <div id="histDailyPicker" style="display:none;margin-bottom:10px;background:#eef4fb;border-radius:10px;padding:10px">
+    <input type="date" id="histDailyDateInput" onchange="onHistDailyDateChange()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cde;font-size:12px">
+  </div>
+  <div style="font-size:11px;color:#888;margin-bottom:6px" id="histLabel"></div>
+  <div class="stat-grid" style="margin-bottom:10px">
+    <div><div class="stat-val" id="histKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div>
+    <div><div class="stat-val" id="histPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div>
+    <div><div class="stat-val" id="histCount">0</div><div class="stat-lbl">TRANSACTIONS</div></div>
+  </div>
+  <div id="histList" style="font-size:11px"></div>
+</div>
+
+<script>
+const resellerId="{{ reseller_id }}";
 // Same UTC-shift trick used on the staff/cashier side, so "today" always
 // means Manila's today, not wherever the customer's phone thinks it is.
 function todayManilaC(){
@@ -3454,9 +3475,7 @@ let histDailyDate = null;
 function setHistPeriod(p){
   histPeriod = p;
   document.querySelectorAll('.hist-period-btn').forEach(b=>{
-    const is = b.dataset.p===p;
-    b.style.background = is ? '#00609C' : '#fff';
-    b.style.color = is ? '#fff' : '#00609C';
+    b.classList.toggle('active', b.dataset.p===p);
   });
   populateHistSubPicker(p);
 }
@@ -3590,7 +3609,6 @@ async function loadHistory(){
   }
 }
 
-loadOrders();setInterval(loadOrders,10000);
 populateHistSubPicker('daily');
 </script>
 </body></html>
@@ -3711,6 +3729,14 @@ def customer_order_page(reseller_id):
     if session.get("customer_id") and session.get("customer_id") != reseller_id and not session.get("staff_name"):
         return redirect(f"/customer/{session.get('customer_id')}/order")
     return render_template_string(CUSTOMER_ORDER_HTML, reseller_id=reseller_id)
+
+@app.route("/customer/<reseller_id>/history")
+def customer_history_page(reseller_id):
+    if not session.get("customer_id") and not session.get("staff_name"):
+        return redirect(url_for("customer_login_page"))
+    if session.get("customer_id") and session.get("customer_id") != reseller_id and not session.get("staff_name"):
+        return redirect(f"/customer/{session.get('customer_id')}/history")
+    return render_template_string(CUSTOMER_HISTORY_HTML, reseller_id=reseller_id)
 
 @app.route("/api/customer/login", methods=["POST"])
 def api_customer_login():
