@@ -5286,29 +5286,321 @@ def api_today_sales():
     except: pass
     return jsonify({"total": total_peso, "total_kg": total_kg, "count": count, "breakdown": breakdown, "pending_total": pending_peso, "pending_kg": pending_kg, "pending_count": pending_count, "date": today_str, "start": today_str})
 
+SALES_ANALYTICS_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sales Analytics - Omega Ice</title>
+<link rel="manifest" href="/manifest_staff.json"><meta name="theme-color" content="#00609C"><link rel="apple-touch-icon" href="/icon-192.png">
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap}
+.topbar h1{font-size:15px;color:#00609C;margin:0;font-weight:700}
+.nav-pill{padding:7px 14px;border-radius:20px;font-size:11px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C;font-weight:600}
+.nav-pill.active{background:#00609C;color:#fff;border-color:#00609C}
+.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.hist-period-btn{padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px}
+.hist-period-btn.active{background:#00609C;color:#fff}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+.stat-val{font-size:19px;font-weight:700;color:#00609C}.stat-lbl{font-size:9px;color:#888}
+.stat-grid.pending .stat-val{color:#f59e0b}
+.status-pill{padding:3px 9px;border-radius:12px;font-size:9px;font-weight:700}
+.status-new{background:#fef3c7;color:#92400e}.status-pending{background:#fef3c7;color:#92400e}.status-preparing{background:#dbeafe;color:#1e40af}.status-out{background:#e0e7ff;color:#3730a3}.status-delivered{background:#dcfce7;color:#166534}.status-cancelled{background:#fee2e2;color:#c0392b}
+.breakdown-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;font-size:10px}
+.breakdown-chip{background:#f0f4f8;padding:5px 10px;border-radius:10px;color:#555}
+</style></head>
+<body>
+<div class="topbar">
+  <div style="display:flex;align-items:center;gap:8px"><img src="/icon-192.png" alt="" style="width:24px;height:24px;border-radius:6px"><h1>Sales Analytics</h1></div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444">🔴 Live Orders</a>
+    <a href="/cashier" class="nav-pill">Sales</a>
+    <a href="/customers" class="nav-pill">Customers</a>
+    <a href="/dashboard" class="nav-pill active">Analytics</a>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+    <button class="hist-period-btn active" data-p="daily" onclick="setHistPeriod('daily')">Daily</button>
+    <button class="hist-period-btn" data-p="weekly" onclick="setHistPeriod('weekly')">Weekly</button>
+    <button class="hist-period-btn" data-p="monthly" onclick="setHistPeriod('monthly')">Monthly</button>
+    <button class="hist-period-btn" data-p="quarterly" onclick="setHistPeriod('quarterly')">Quarterly</button>
+    <button class="hist-period-btn" data-p="yearly" onclick="setHistPeriod('yearly')">Yearly</button>
+    <button class="hist-period-btn" data-p="all" onclick="setHistPeriod('all')">All</button>
+  </div>
+  <div id="histSubPicker" style="display:none;margin-bottom:10px;background:#eef4fb;border-radius:10px;padding:10px">
+    <label style="font-size:10px;color:#666;margin:0 0 6px;display:block" id="histSubLabel">Select</label>
+    <select id="histSubSelect" onchange="onHistSubChange()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cde;font-size:12px"></select>
+    <label style="font-size:10px;color:#666;margin:8px 0 4px;display:block">...or search by any date in that period</label>
+    <input type="date" id="histDateSearchInput" onchange="onHistDateSearch()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cde;font-size:12px">
+  </div>
+  <div id="histDailyPicker" style="display:none;margin-bottom:10px;background:#eef4fb;border-radius:10px;padding:10px">
+    <input type="date" id="histDailyDateInput" onchange="onHistDailyDateChange()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cde;font-size:12px">
+  </div>
+  <div style="font-size:11px;color:#888;margin-bottom:6px" id="histLabel"></div>
+
+  <div style="font-size:10px;font-weight:700;color:#166534;margin-bottom:4px">✅ DELIVERED</div>
+  <div class="stat-grid" style="margin-bottom:10px">
+    <div><div class="stat-val" id="histKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div>
+    <div><div class="stat-val" id="histPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div>
+    <div><div class="stat-val" id="histCount">0</div><div class="stat-lbl">TRANSACTIONS</div></div>
+  </div>
+  <div style="font-size:10px;font-weight:700;color:#92400e;margin:10px 0 4px">⏳ PENDING (not yet Delivered)</div>
+  <div class="stat-grid pending">
+    <div><div class="stat-val" id="pendKg">0kg</div><div class="stat-lbl">PENDING KG</div></div>
+    <div><div class="stat-val" id="pendPeso">₱0</div><div class="stat-lbl">PENDING PESO</div></div>
+    <div><div class="stat-val" id="pendCount">0</div><div class="stat-lbl">PENDING</div></div>
+  </div>
+  <div id="breakdownRow" class="breakdown-row"></div>
+
+  <div id="histChartWrap" style="margin:14px 0;display:none"><canvas id="histChart" height="170"></canvas></div>
+
+  <div style="font-size:11px;font-weight:700;color:#333;margin:10px 0 6px">Recent transactions (latest 100)</div>
+  <div id="histList" style="font-size:11px"></div>
+</div>
+
+<script>
+function todayManilaC(){
+  const now = new Date();
+  return new Date(now.getTime() + 8*60*60000).toISOString().split('T')[0];
+}
+function getWeekNumberC(d){
+  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+  return Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
+}
+function escapeHtmlC(t){
+  const d = document.createElement('div');
+  d.textContent = (t===null||t===undefined) ? '' : String(t);
+  return d.innerHTML;
+}
+
+let histPeriod = 'daily';
+let histSubPeriod = null;
+let histDailyDate = null;
+let histChartInstance = null;
+
+// Groups the period's individual sales into chart-friendly buckets: by
+// exact date for daily/weekly/monthly (few enough points to read), by
+// month for quarterly/yearly/all (otherwise a year of daily bars would be
+// unreadable on a phone screen).
+function histBucketKey(period, dateStr){
+  if(!dateStr) return 'Unknown';
+  if(period==='quarterly'||period==='yearly'||period==='all') return dateStr.slice(0,7);
+  return dateStr.slice(0,10);
+}
+function renderHistChart(period, rows){
+  const wrap=document.getElementById('histChartWrap');
+  const delivered = rows.filter(o=>(o.order_status||'Delivered')==='Delivered');
+  if(!delivered.length || typeof Chart==='undefined'){ wrap.style.display='none'; return; }
+  const buckets={};
+  delivered.forEach(o=>{
+    const key=histBucketKey(period, o.sales_date||(o.created_at||'').slice(0,10));
+    if(!buckets[key]) buckets[key]={kg:0,peso:0};
+    let kgEach=0;
+    try{ kgEach=parseFloat(String(o.kg_size||'').toLowerCase().replace('kg','').trim())||0; }catch(e){}
+    buckets[key].kg += kgEach*(o.quantity||0);
+    buckets[key].peso += (+o.total_sales||0);
+  });
+  const labels=Object.keys(buckets).sort();
+  if(labels.length<2){ wrap.style.display='none'; return; }
+  wrap.style.display='block';
+  const pesoData=labels.map(k=>buckets[k].peso);
+  const kgData=labels.map(k=>buckets[k].kg);
+  if(histChartInstance) histChartInstance.destroy();
+  const ctx=document.getElementById('histChart').getContext('2d');
+  histChartInstance=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels,
+      datasets:[
+        {label:'Total Peso (₱)',data:pesoData,backgroundColor:'#00609C',yAxisID:'y'},
+        {label:'Total Kg',data:kgData,type:'line',borderColor:'#f59e0b',backgroundColor:'#f59e0b',yAxisID:'y1',tension:.3}
+      ]
+    },
+    options:{
+      responsive:true,
+      plugins:{legend:{labels:{font:{size:10}}}},
+      scales:{
+        y:{beginAtZero:true,position:'left',ticks:{font:{size:9}}},
+        y1:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},ticks:{font:{size:9}}},
+        x:{ticks:{font:{size:9}}}
+      }
+    }
+  });
+}
+
+function setHistPeriod(p){
+  histPeriod = p;
+  document.querySelectorAll('.hist-period-btn').forEach(b=>{
+    b.classList.toggle('active', b.dataset.p===p);
+  });
+  populateHistSubPicker(p);
+}
+
+function populateHistSubPicker(period){
+  const subPicker = document.getElementById('histSubPicker');
+  const dailyPicker = document.getElementById('histDailyPicker');
+  const select = document.getElementById('histSubSelect');
+  const label = document.getElementById('histSubLabel');
+  const dateSearchInp = document.getElementById('histDateSearchInput');
+  select.innerHTML = '';
+  if(dateSearchInp) dateSearchInp.value = '';
+  dailyPicker.style.display = 'none';
+  subPicker.style.display = 'none';
+
+  if(period==='daily'){
+    dailyPicker.style.display = 'block';
+    const dailyInput = document.getElementById('histDailyDateInput');
+    if(!dailyInput.value) dailyInput.value = todayManilaC();
+    histDailyDate = dailyInput.value;
+    loadHistory();
+    return;
+  } else if(period==='weekly'){
+    label.textContent = 'Select Week (WW01-WW52)';
+    const now = new Date();
+    const currentWeek = getWeekNumberC(now);
+    for(let i=1;i<=52;i++){
+      const opt=document.createElement('option');
+      const ww='WW'+String(i).padStart(2,'0');
+      opt.value=ww; opt.textContent = ww + (i===currentWeek?' (Current)':'');
+      if(i===currentWeek) opt.selected=true;
+      select.appendChild(opt);
+    }
+    histSubPeriod = 'WW'+String(currentWeek).padStart(2,'0');
+  } else if(period==='monthly'){
+    label.textContent = 'Select Month';
+    const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const nowM = new Date().getMonth();
+    for(let i=0;i<12;i++){
+      const opt=document.createElement('option');
+      opt.value=String(i+1).padStart(2,'0'); opt.textContent = months[i]+' - '+String(i+1).padStart(2,'0');
+      if(i===nowM) opt.selected=true;
+      select.appendChild(opt);
+    }
+    histSubPeriod = String(nowM+1).padStart(2,'0');
+  } else if(period==='quarterly'){
+    label.textContent = 'Select Quarter';
+    const quarters=['Q1 (Jan-Mar)','Q2 (Apr-Jun)','Q3 (Jul-Sep)','Q4 (Oct-Dec)'];
+    const nowQ = Math.floor(new Date().getMonth()/3);
+    for(let i=0;i<4;i++){
+      const opt=document.createElement('option');
+      opt.value='Q'+(i+1); opt.textContent=quarters[i];
+      if(i===nowQ) opt.selected=true;
+      select.appendChild(opt);
+    }
+    histSubPeriod = 'Q'+(nowQ+1);
+  } else if(period==='yearly'){
+    label.textContent = 'Select Year';
+    const nowY = new Date().getFullYear();
+    for(let y=nowY; y>=nowY-3; y--){
+      const opt=document.createElement('option');
+      opt.value=String(y); opt.textContent=String(y)+(y===nowY?' (Current)':'');
+      if(y===nowY) opt.selected=true;
+      select.appendChild(opt);
+    }
+    histSubPeriod = String(nowY);
+  } else {
+    histSubPeriod = null;
+    loadHistory();
+    return;
+  }
+  subPicker.style.display = 'block';
+  loadHistory();
+}
+
+function onHistSubChange(){
+  const sel = document.getElementById('histSubSelect');
+  histSubPeriod = sel.value;
+  const dateInp = document.getElementById('histDateSearchInput');
+  if(dateInp) dateInp.value = '';
+  loadHistory();
+}
+
+function onHistDateSearch(){
+  const inp = document.getElementById('histDateSearchInput');
+  if(!inp || !inp.value) return;
+  const picked = new Date(inp.value+'T00:00:00');
+  let sub = null;
+  if(histPeriod==='weekly') sub = 'WW'+String(getWeekNumberC(picked)).padStart(2,'0');
+  else if(histPeriod==='monthly') sub = String(picked.getMonth()+1).padStart(2,'0');
+  else if(histPeriod==='quarterly') sub = 'Q'+(Math.floor(picked.getMonth()/3)+1);
+  else if(histPeriod==='yearly') sub = String(picked.getFullYear());
+  else return;
+  histSubPeriod = sub;
+  const sel = document.getElementById('histSubSelect');
+  if(sel){ for(const opt of sel.options){ opt.selected = (opt.value===sub); } }
+  loadHistory();
+}
+
+function onHistDailyDateChange(){
+  histDailyDate = document.getElementById('histDailyDateInput').value;
+  loadHistory();
+}
+
+async function loadHistory(){
+  const listEl = document.getElementById('histList');
+  try{
+    let url = `/api/sales/by_period?period=${histPeriod}`;
+    if(histPeriod==='daily' && histDailyDate) url += '&date='+histDailyDate;
+    else if(histSubPeriod) url += '&sub='+encodeURIComponent(histSubPeriod);
+    const res = await fetch(url);
+    if(res.status===401){window.location.href='/login';return;}
+    const data = await res.json();
+    document.getElementById('histLabel').textContent = `${data.label} (${data.start} to ${data.end||data.start})`;
+    const rows = data.sales||[];
+
+    // Split delivered vs everything-else (pending/preparing/etc) client
+    // side from the same rows - /api/sales/by_period already gives us
+    // order_status per row, no need for a second request.
+    const delivered = rows.filter(o=>(o.order_status||'Delivered')==='Delivered');
+    const pending = rows.filter(o=>(o.order_status||'Delivered')!=='Delivered' && o.order_status!=='Cancelled');
+    function kgOf(o){
+      let k=0; try{ k=parseFloat(String(o.kg_size||'').toLowerCase().replace('kg','').trim())||0; }catch(e){}
+      return k*(o.quantity||0);
+    }
+    const delKg = delivered.reduce((s,o)=>s+kgOf(o),0);
+    const delPeso = delivered.reduce((s,o)=>s+(+o.total_sales||0),0);
+    const pendKg = pending.reduce((s,o)=>s+kgOf(o),0);
+    const pendPeso = pending.reduce((s,o)=>s+(+o.total_sales||0),0);
+
+    document.getElementById('histKg').textContent = delKg.toLocaleString()+'kg';
+    document.getElementById('histPeso').textContent = '₱'+delPeso.toLocaleString();
+    document.getElementById('histCount').textContent = delivered.length;
+    document.getElementById('pendKg').textContent = pendKg.toLocaleString()+'kg';
+    document.getElementById('pendPeso').textContent = '₱'+pendPeso.toLocaleString();
+    document.getElementById('pendCount').textContent = pending.length;
+
+    const breakdown = {'1Kg':0,'5Kg':0,'10Kg':0,'25Kg':0};
+    delivered.forEach(o=>{ if(breakdown.hasOwnProperty(o.kg_size)) breakdown[o.kg_size] += (o.quantity||0); });
+    document.getElementById('breakdownRow').innerHTML = Object.entries(breakdown).map(([k,v])=>`<span class="breakdown-chip">${k}: ${v}</span>`).join('');
+
+    if(!rows.length){
+      document.getElementById('histChartWrap').style.display='none';
+      listEl.innerHTML = '<div style="color:#888;text-align:center;padding:10px">No transactions for this period</div>';
+      return;
+    }
+    renderHistChart(histPeriod, rows);
+    listEl.innerHTML = rows.map(o=>{
+      const statusColor = {'Delivered':'#166534','Cancelled':'#c0392b'}[o.order_status] || '#92400e';
+      return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f4f8"><div><div>${escapeHtmlC(o.reseller_name||'')} • ${o.sales_date||''} • ${o.quantity}x ${escapeHtmlC(o.kg_size)}</div><div style="font-size:9px;color:${statusColor}">${escapeHtmlC(o.order_status)}</div></div><div style="font-weight:600">₱${o.total_sales}</div></div>`;
+    }).join('');
+  }catch(e){
+    listEl.innerHTML = `<div style="color:red">Error: ${escapeHtmlC(e.message)}</div>`;
+  }
+}
+
+populateHistSubPicker('daily');
+</script>
+</body></html>
+"""
+
 @app.route("/dashboard")
 @login_required
 def dashboard_page():
-    html = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard</title>
-<style>*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.topbar h1{font-size:16px;color:#00609C;margin:0}.nav-pill{padding:7px 14px;border-radius:20px;font-size:12px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C}.nav-pill.active{background:#00609C;color:#fff}.period-btn{padding:8px 12px;border-radius:20px;border:1px solid #cde;background:#fff;font-size:11px;color:#00609C}.period-btn.active{background:#00609C;color:#fff}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:12px}.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center}.stat-val{font-size:20px;font-weight:700;color:#00609C}</style></head>
-<body>
-<div class="topbar"><h1>OMEGA ICE</h1><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444">🔴 Live Orders</a><a href="/cashier" class="nav-pill">Sales</a> <a href="/customers" class="nav-pill">Customers</a> <a href="/dashboard" class="nav-pill active">Dashboard</a></div></div>
-<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-<button class="period-btn active" data-p="daily" onclick="setPeriod('daily')">Daily</button>
-<button class="period-btn" data-p="weekly" onclick="setPeriod('weekly')">Weekly</button>
-<button class="period-btn" data-p="monthly" onclick="setPeriod('monthly')">Monthly</button>
-<button class="period-btn" data-p="quarterly" onclick="setPeriod('quarterly')">Quarterly</button>
-<button class="period-btn" data-p="yearly" onclick="setPeriod('yearly')">Yearly</button>
-<button class="period-btn" data-p="all" onclick="setPeriod('all')">All Time</button>
-</div>
-<div class="card"><div style="font-size:11px;color:#666;margin-bottom:8px">✅ DELIVERED SALES (Real Sales)</div><div class="stat-grid"><div><div class="stat-val" id="totalKg">0kg</div><div class="stat-lbl">TOTAL KG</div></div><div><div class="stat-val" id="totalPeso">₱0</div><div class="stat-lbl">TOTAL PESO</div></div><div><div class="stat-val" id="totalCount">0</div><div class="stat-lbl">DELIVERED</div></div></div><div style="margin-top:12px;padding-top:12px;border-top:1px dashed #ccd"><div style="font-size:11px;color:#92400e;margin-bottom:6px">⏳ PENDING FOR DELIVERY (1600 pending)</div><div class="stat-grid"><div><div class="stat-val" id="pendingKg" style="color:#f59e0b">0kg</div><div class="stat-lbl">PENDING KG</div></div><div><div class="stat-val" id="pendingPeso" style="color:#f59e0b">₱0</div><div class="stat-lbl">PENDING PESO</div></div><div><div class="stat-val" id="pendingCount" style="color:#f59e0b">0</div><div class="stat-lbl">PENDING</div></div></div></div><div id="breakdown" style="font-size:11px;margin-top:10px;text-align:center"></div></div>
-<script>
-let currentPeriod='daily';
-async function setPeriod(p){currentPeriod=p;document.querySelectorAll('.period-btn').forEach(b=>b.classList.toggle('active',b.dataset.p===p));loadDashboard();}
-async function loadDashboard(){const res=await fetch('/api/sales/dashboard?period='+currentPeriod);const data=await res.json();document.getElementById('totalKg').textContent=(data.total_kg||0).toLocaleString()+'kg';document.getElementById('totalPeso').textContent='₱'+(data.total||0).toLocaleString();document.getElementById('totalCount').textContent=data.count||0;document.getElementById('pendingKg').textContent=(data.pending_kg||0).toLocaleString()+'kg';document.getElementById('pendingPeso').textContent='₱'+(data.pending_total||0).toLocaleString();document.getElementById('pendingCount').textContent=data.pending_count||0;const b=data.breakdown||{};document.getElementById('breakdown').textContent=`Delivered: 1Kg:${b['1Kg']||0} 5Kg:${b['5Kg']||0} 10Kg:${b['10Kg']||0} 25Kg:${b['25Kg']||0} | Pending: ${data.pending_count||0} orders`;}loadDashboard();
-</script>
-</body></html>"""
-    return render_template_string(html)
+    return render_template_string(SALES_ANALYTICS_HTML)
 
 @app.route("/orders")
 @login_required
