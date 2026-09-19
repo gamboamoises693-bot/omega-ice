@@ -3298,6 +3298,34 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 </div>
 <div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px;display:flex;justify-content:space-between"><span>Real-time Orders</span><span style="font-size:10px;color:#888" id="lastUpdate"></span></div><div id="ordersList">Loading orders...</div></div>
 
+<div class="card">
+  <div style="font-size:12px;font-weight:600;margin-bottom:10px">📊 Sales History</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+    <button class="hist-period-btn active" data-p="daily" onclick="setHistPeriod('daily')" style="padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#00609C;color:#fff;font-size:11px">Daily</button>
+    <button class="hist-period-btn" data-p="weekly" onclick="setHistPeriod('weekly')" style="padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">Weekly</button>
+    <button class="hist-period-btn" data-p="monthly" onclick="setHistPeriod('monthly')" style="padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">Monthly</button>
+    <button class="hist-period-btn" data-p="quarterly" onclick="setHistPeriod('quarterly')" style="padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">Quarterly</button>
+    <button class="hist-period-btn" data-p="yearly" onclick="setHistPeriod('yearly')" style="padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">Yearly</button>
+    <button class="hist-period-btn" data-p="all" onclick="setHistPeriod('all')" style="padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px">All</button>
+  </div>
+  <div id="histSubPicker" style="display:none;margin-bottom:10px;background:#eef4fb;border-radius:10px;padding:10px">
+    <label style="font-size:10px;color:#666;margin:0 0 6px;display:block" id="histSubLabel">Select</label>
+    <select id="histSubSelect" onchange="onHistSubChange()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cde;font-size:12px"></select>
+    <label style="font-size:10px;color:#666;margin:8px 0 4px;display:block">...or search by any date in that period</label>
+    <input type="date" id="histDateSearchInput" onchange="onHistDateSearch()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cde;font-size:12px">
+  </div>
+  <div id="histDailyPicker" style="display:none;margin-bottom:10px;background:#eef4fb;border-radius:10px;padding:10px">
+    <input type="date" id="histDailyDateInput" onchange="onHistDailyDateChange()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cde;font-size:12px">
+  </div>
+  <div style="font-size:11px;color:#888;margin-bottom:6px" id="histLabel"></div>
+  <div class="stat-grid" style="margin-bottom:10px">
+    <div><div class="stat-val" id="histKg" style="font-size:16px">0kg</div><div class="stat-lbl">TOTAL KG</div></div>
+    <div><div class="stat-val" id="histPeso" style="font-size:16px">₱0</div><div class="stat-lbl">TOTAL PESO</div></div>
+    <div><div class="stat-val" id="histCount" style="font-size:16px">0</div><div class="stat-lbl">TRANSACTIONS</div></div>
+  </div>
+  <div id="histList" style="font-size:11px"></div>
+</div>
+
 <div class="track-overlay" id="trackOverlay" onclick="if(event.target===this)closeTracking()">
   <div class="track-sheet">
     <button class="track-close" onclick="closeTracking()">✕</button>
@@ -3399,7 +3427,171 @@ function openTracking(orderId){
 }
 function closeTracking(){document.getElementById('trackOverlay').classList.remove('show');}
 
+// --- Sales History (dynamic period search) ---
+// Same UTC-shift trick used on the staff/cashier side, so "today" always
+// means Manila's today, not wherever the customer's phone thinks it is.
+function todayManilaC(){
+  const now = new Date();
+  return new Date(now.getTime() + 8*60*60000).toISOString().split('T')[0];
+}
+function getWeekNumberC(d){
+  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+  return Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
+}
+function escapeHtmlC(t){
+  const d = document.createElement('div');
+  d.textContent = (t===null||t===undefined) ? '' : String(t);
+  return d.innerHTML;
+}
+
+let histPeriod = 'daily';
+let histSubPeriod = null;
+let histDailyDate = null;
+
+function setHistPeriod(p){
+  histPeriod = p;
+  document.querySelectorAll('.hist-period-btn').forEach(b=>{
+    const is = b.dataset.p===p;
+    b.style.background = is ? '#00609C' : '#fff';
+    b.style.color = is ? '#fff' : '#00609C';
+  });
+  populateHistSubPicker(p);
+}
+
+function populateHistSubPicker(period){
+  const subPicker = document.getElementById('histSubPicker');
+  const dailyPicker = document.getElementById('histDailyPicker');
+  const select = document.getElementById('histSubSelect');
+  const label = document.getElementById('histSubLabel');
+  const dateSearchInp = document.getElementById('histDateSearchInput');
+  select.innerHTML = '';
+  if(dateSearchInp) dateSearchInp.value = '';
+  dailyPicker.style.display = 'none';
+  subPicker.style.display = 'none';
+
+  if(period==='daily'){
+    dailyPicker.style.display = 'block';
+    const dailyInput = document.getElementById('histDailyDateInput');
+    if(!dailyInput.value) dailyInput.value = todayManilaC();
+    histDailyDate = dailyInput.value;
+    loadHistory();
+    return;
+  } else if(period==='weekly'){
+    label.textContent = 'Select Week (WW01-WW52)';
+    const now = new Date();
+    const currentWeek = getWeekNumberC(now);
+    for(let i=1;i<=52;i++){
+      const opt=document.createElement('option');
+      const ww='WW'+String(i).padStart(2,'0');
+      opt.value=ww; opt.textContent = ww + (i===currentWeek?' (Current)':'');
+      if(i===currentWeek) opt.selected=true;
+      select.appendChild(opt);
+    }
+    histSubPeriod = 'WW'+String(currentWeek).padStart(2,'0');
+  } else if(period==='monthly'){
+    label.textContent = 'Select Month';
+    const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const nowM = new Date().getMonth();
+    for(let i=0;i<12;i++){
+      const opt=document.createElement('option');
+      opt.value=String(i+1).padStart(2,'0'); opt.textContent = months[i]+' - '+String(i+1).padStart(2,'0');
+      if(i===nowM) opt.selected=true;
+      select.appendChild(opt);
+    }
+    histSubPeriod = String(nowM+1).padStart(2,'0');
+  } else if(period==='quarterly'){
+    label.textContent = 'Select Quarter';
+    const quarters=['Q1 (Jan-Mar)','Q2 (Apr-Jun)','Q3 (Jul-Sep)','Q4 (Oct-Dec)'];
+    const nowQ = Math.floor(new Date().getMonth()/3);
+    for(let i=0;i<4;i++){
+      const opt=document.createElement('option');
+      opt.value='Q'+(i+1); opt.textContent=quarters[i];
+      if(i===nowQ) opt.selected=true;
+      select.appendChild(opt);
+    }
+    histSubPeriod = 'Q'+(nowQ+1);
+  } else if(period==='yearly'){
+    label.textContent = 'Select Year';
+    const nowY = new Date().getFullYear();
+    for(let y=nowY; y>=nowY-3; y--){
+      const opt=document.createElement('option');
+      opt.value=String(y); opt.textContent=String(y)+(y===nowY?' (Current)':'');
+      if(y===nowY) opt.selected=true;
+      select.appendChild(opt);
+    }
+    histSubPeriod = String(nowY);
+  } else {
+    // "all" - no sub-picker needed
+    histSubPeriod = null;
+    loadHistory();
+    return;
+  }
+  subPicker.style.display = 'block';
+  loadHistory();
+}
+
+function onHistSubChange(){
+  const sel = document.getElementById('histSubSelect');
+  histSubPeriod = sel.value;
+  const dateInp = document.getElementById('histDateSearchInput');
+  if(dateInp) dateInp.value = '';
+  loadHistory();
+}
+
+// Dynamic date search: pick ANY date, backend figures out which week/
+// month/quarter/year it falls in (same resolve_period_range() logic the
+// staff dashboard uses) - no need to know the week number yourself.
+function onHistDateSearch(){
+  const inp = document.getElementById('histDateSearchInput');
+  if(!inp || !inp.value) return;
+  const picked = new Date(inp.value+'T00:00:00');
+  let sub = null;
+  if(histPeriod==='weekly') sub = 'WW'+String(getWeekNumberC(picked)).padStart(2,'0');
+  else if(histPeriod==='monthly') sub = String(picked.getMonth()+1).padStart(2,'0');
+  else if(histPeriod==='quarterly') sub = 'Q'+(Math.floor(picked.getMonth()/3)+1);
+  else if(histPeriod==='yearly') sub = String(picked.getFullYear());
+  else return;
+  histSubPeriod = sub;
+  const sel = document.getElementById('histSubSelect');
+  if(sel){ for(const opt of sel.options){ opt.selected = (opt.value===sub); } }
+  loadHistory();
+}
+
+function onHistDailyDateChange(){
+  histDailyDate = document.getElementById('histDailyDateInput').value;
+  loadHistory();
+}
+
+async function loadHistory(){
+  const listEl = document.getElementById('histList');
+  try{
+    let url = `/api/customer/${resellerId}/history?period=${histPeriod}`;
+    if(histPeriod==='daily' && histDailyDate) url += '&date='+histDailyDate;
+    else if(histSubPeriod) url += '&sub='+encodeURIComponent(histSubPeriod);
+    const res = await fetch(url);
+    if(res.status===401){window.location.href='/customer';return;}
+    const data = await res.json();
+    if(!data.ok){ listEl.innerHTML = `<div style="color:red">${data.error||'Error'}</div>`; return; }
+    document.getElementById('histLabel').textContent = `${data.label} (${data.start} to ${data.end||data.start})`;
+    document.getElementById('histKg').textContent = (data.total_kg||0).toLocaleString()+'kg';
+    document.getElementById('histPeso').textContent = '₱'+(data.total_peso||0).toLocaleString();
+    document.getElementById('histCount').textContent = data.count||0;
+    const rows = data.orders||[];
+    if(!rows.length){ listEl.innerHTML = '<div style="color:#888;text-align:center;padding:10px">No transactions for this period</div>'; return; }
+    listEl.innerHTML = rows.map(o=>{
+      const statusColor = {'Delivered':'#166534','Cancelled':'#c0392b'}[o.order_status] || '#92400e';
+      return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f4f8"><div><div>${o.sales_date||''} • ${o.quantity}x ${escapeHtmlC(o.kg_size)}</div><div style="font-size:9px;color:${statusColor}">${escapeHtmlC(o.order_status)}</div></div><div style="font-weight:600">₱${o.total_sales}</div></div>`;
+    }).join('');
+  }catch(e){
+    listEl.innerHTML = `<div style="color:red">Error: ${escapeHtmlC(e.message)}</div>`;
+  }
+}
+
 loadOrders();setInterval(loadOrders,10000);
+populateHistSubPicker('daily');
 </script>
 </body></html>
 """
@@ -3734,6 +3926,94 @@ def api_customer_orders(reseller_id):
         return jsonify({"orders": orders[:50], "stats": stats, "reseller_name": reseller.get("store_name")})
     except Exception as e:
         return jsonify({"orders": [], "stats": {}, "error": str(e)}), 500
+
+@app.route("/api/customer/<reseller_id>/history")
+def api_customer_history(reseller_id):
+    """
+    Lets a customer backtrack their OWN sales by period (Daily/Weekly/
+    Monthly/Quarterly/Yearly/All), same as the staff cashier dashboard -
+    reuses resolve_period_range() so a picked week/month/date-search always
+    resolves to the exact same range the staff side would show. Separate
+    from /orders (which is the live-tracking list with 24h-pending-hide
+    logic) - this one shows the FULL history for the chosen period,
+    including old/completed/cancelled orders, since the whole point is
+    looking back.
+    """
+    if session.get("customer_id") and session.get("customer_id") != reseller_id:
+        return jsonify({"ok": False, "error": "Not allowed"}), 403
+    if not session.get("customer_id") and not session.get("staff_name"):
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    try:
+        period = request.args.get("period", "monthly").lower()
+        sub = request.args.get("sub", "").strip() or request.args.get("week", "").strip() or request.args.get("month", "").strip() or ""
+        custom_date = request.args.get("date", "").strip()
+        try:
+            import pytz
+            manila = pytz.timezone('Asia/Manila')
+            now = datetime.now(manila)
+        except:
+            now = datetime.now()
+
+        rng = resolve_period_range(period, sub, now, custom_date)
+
+        reseller = fb_get(f"resellers/{reseller_id}") or {}
+        target_name = (reseller.get("store_name") or "").strip().lower()
+        sales = fb_get("daily_sales") or {}
+
+        def kg_val(s):
+            try: return float(str(s).lower().replace("kg","").strip())
+            except: return 0
+        def parse_date(d):
+            try: return datetime.strptime(d[:10], "%Y-%m-%d")
+            except: return None
+
+        total_kg = 0; total_peso = 0; count = 0
+        status_counts = {}
+        rows = []
+        for key, val in sales.items():
+            if not val or val.get("deleted"): continue
+            rid = val.get("reseller_id")
+            rname = (val.get("reseller_name") or "").strip().lower()
+            if rid != reseller_id and rname != target_name:
+                continue
+            check_date = parse_date(val.get("sales_date") or "") or parse_date((val.get("created_at") or "")[:10])
+            if not check_date:
+                continue
+            if rng["ww_mode"]:
+                try:
+                    iso_year, iso_week, _ = check_date.isocalendar()
+                    if iso_week != rng["target_week"]: continue
+                    if rng["target_year"] and iso_year != rng["target_year"]: continue
+                except:
+                    continue
+            else:
+                if rng["filter_start"] and check_date < rng["filter_start"].replace(tzinfo=None): continue
+                if period != "all" and rng["filter_end"] and check_date > rng["filter_end"].replace(tzinfo=None): continue
+
+            qty = int(val.get("quantity", 0) or 0)
+            kg_size = val.get("kg_size", "1Kg")
+            peso = float(val.get("total_sales", 0) or 0)
+            status = val.get("order_status") or "Delivered"
+            total_kg += qty * kg_val(kg_size)
+            total_peso += peso
+            count += 1
+            status_counts[status] = status_counts.get(status, 0) + 1
+            rows.append({
+                "id": key, "sales_date": val.get("sales_date"), "quantity": qty, "kg_size": kg_size,
+                "total_sales": peso, "order_status": status, "created_at": val.get("created_at") or "",
+            })
+
+        rows.sort(key=lambda x: x.get("created_at") or x.get("sales_date") or "", reverse=True)
+
+        return jsonify({
+            "ok": True, "period": period, "label": rng["label"],
+            "start": rng["range_start"].strftime("%Y-%m-%d") if rng["range_start"] else "All",
+            "end": rng["range_end"].strftime("%Y-%m-%d") if rng["range_end"] else "",
+            "total_kg": total_kg, "total_peso": total_peso, "count": count,
+            "status_counts": status_counts, "orders": rows[:100],
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/customer/<reseller_id>/place_order", methods=["POST"])
 def api_customer_place_order(reseller_id):
