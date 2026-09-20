@@ -3588,6 +3588,42 @@ async function doLogin(){
 // jsQR (no image upload to any server), then we just navigate to the
 // link the QR encodes; the actual login + validation (expired/revoked
 // token, etc.) is handled server-side by the existing /customer/qr route.
+// Draws the source image onto a canvas capped at maxW wide (keeping
+// aspect ratio) and returns its ImageData. A raw phone-camera photo can
+// be 4000px+ wide - decoding at full size is slow and, on weaker/older
+// devices (budget Android tablets etc.), can silently choke the canvas.
+// Downscaling first is also just how jsQR is meant to be fed: it scans
+// at a fixed internal resolution regardless, so handing it a huge image
+// buys nothing but risk.
+function getScaledImageData(img, maxW){
+  const scale = Math.min(1, maxW / img.naturalWidth);
+  const w = Math.max(1, Math.round(img.naturalWidth * scale));
+  const h = Math.max(1, Math.round(img.naturalHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, w, h);
+  return ctx.getImageData(0, 0, w, h);
+}
+
+function decodeQRFromImage(img){
+  // Try a few sizes - some QR photos decode better full-res (small QR
+  // in a big frame), others decode better downscaled (huge camera photo
+  // that's slow/blurry-at-full-res). attemptBoth also covers a QR that
+  // was screenshotted in an inverted/dark-mode viewer.
+  const sizesToTry = [1600, img.naturalWidth, 900, 500];
+  for(const maxW of sizesToTry){
+    if(!maxW || maxW <= 0) continue;
+    try{
+      const imgData = getScaledImageData(img, maxW);
+      const code = jsQR(imgData.data, imgData.width, imgData.height, {inversionAttempts: 'attemptBoth'});
+      if(code && code.data) return code.data;
+    }catch(err){ /* try next size */ }
+  }
+  return null;
+}
+
 function handleQRUpload(event){
   const file = event.target.files && event.target.files[0];
   const st = document.getElementById('status');
@@ -3607,19 +3643,17 @@ function handleQRUpload(event){
     };
     img.onload = function(){
       try{
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = (typeof jsQR === 'function') ? jsQR(imgData.data, imgData.width, imgData.height) : null;
-        if(!code || !code.data){
-          st.textContent = 'Hindi mabasa ang QR sa picture na yan. Subukan ng mas malinaw/mas malapit na photo.';
+        if(typeof jsQR !== 'function'){
+          st.textContent = 'Hindi ma-load ang QR reader. Siguraduhing may internet at i-refresh ang page.';
           st.className = 'status err';
           return;
         }
-        const decoded = code.data;
+        const decoded = decodeQRFromImage(img);
+        if(!decoded){
+          st.textContent = 'Hindi mabasa ang QR sa picture na yan. Gamitin yung QR file na na-download/na-send sa’yo (huwag kuhanan ulit ng photo), o piliing mas malinaw/hindi paikot na larawan.';
+          st.className = 'status err';
+          return;
+        }
         if(!decoded.includes('/customer/qr') || !decoded.includes('token=')){
           st.textContent = 'Hindi ito QR code ng Omega Ice. Gamitin yung QR na binigay ni ISESMO.';
           st.className = 'status err';
