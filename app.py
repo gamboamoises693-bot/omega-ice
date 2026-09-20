@@ -3497,6 +3497,7 @@ CUSTOMER_LOGIN_HTML = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Customer Login - Omega Ice</title>
 <link rel="manifest" href="/manifest.json"><meta name="theme-color" content="#00609C"><link rel="apple-touch-icon" href="/icon-192.png">
 <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js"></script>
 <style>
 *{box-sizing:border-box}body{font-family:sans-serif;background:linear-gradient(135deg,#00609C,#0096D6);margin:0;min-height:100vh;padding:16px;display:flex;align-items:center;justify-content:center}
 .card{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:380px;box-shadow:0 8px 30px rgba(0,0,0,.2)}
@@ -3519,6 +3520,10 @@ label{font-size:12px;color:#666;display:block;margin:12px 0 6px}input{width:100%
 <label>Password</label><input type="password" id="password" placeholder="Enter password">
 <button class="btn" onclick="doLogin()">🔐 Login</button>
 <p class="status" id="status"></p>
+<div style="display:flex;align-items:center;gap:8px;margin:16px 0"><div style="flex:1;height:1px;background:#e5e7eb"></div><span style="font-size:11px;color:#999">O KAYA</span><div style="flex:1;height:1px;background:#e5e7eb"></div></div>
+<input type="file" id="qrFileInput" accept="image/*" capture="environment" style="display:none" onchange="handleQRUpload(event)">
+<button class="btn" style="background:#1a8a4a" onclick="document.getElementById('qrFileInput').click()">📷 Upload QR Code</button>
+<p style="font-size:11px;color:#888;text-align:center;margin-top:6px">I-upload lang yung QR code na ibinigay sa'yo ni ISESMO - automatic na ang login.</p>
 <p style="font-size:12px;color:#888;text-align:center;margin-top:14px;border-top:1px solid #eee;padding-top:14px">Forgot your password?<br>Contact ISESMO to have it reset for you.</p>
 </div>
 <script>
@@ -3576,6 +3581,61 @@ async function doLogin(){
   const data=await res.json();
   if(data.ok){st.textContent='OK! 2026-09-06 - Tap Refresh';window.location.href=`/customer/${data.reseller_id}/dashboard`;}
   else{st.textContent=data.error||'Wrong phone or password';st.className='status err';}
+}
+
+// Lets a customer log in by uploading a saved/screenshotted QR code
+// image instead of scanning it live - decoded entirely on-device with
+// jsQR (no image upload to any server), then we just navigate to the
+// link the QR encodes; the actual login + validation (expired/revoked
+// token, etc.) is handled server-side by the existing /customer/qr route.
+function handleQRUpload(event){
+  const file = event.target.files && event.target.files[0];
+  const st = document.getElementById('status');
+  if(!file) return;
+  st.className = 'status';
+  st.textContent = 'Binabasa ang QR code...';
+  const reader = new FileReader();
+  reader.onerror = function(){
+    st.textContent = 'Hindi ma-open ang file. Subukan ulit.';
+    st.className = 'status err';
+  };
+  reader.onload = function(ev){
+    const img = new Image();
+    img.onerror = function(){
+      st.textContent = 'Hindi valid na image file.';
+      st.className = 'status err';
+    };
+    img.onload = function(){
+      try{
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = (typeof jsQR === 'function') ? jsQR(imgData.data, imgData.width, imgData.height) : null;
+        if(!code || !code.data){
+          st.textContent = 'Hindi mabasa ang QR sa picture na yan. Subukan ng mas malinaw/mas malapit na photo.';
+          st.className = 'status err';
+          return;
+        }
+        const decoded = code.data;
+        if(!decoded.includes('/customer/qr') || !decoded.includes('token=')){
+          st.textContent = 'Hindi ito QR code ng Omega Ice. Gamitin yung QR na binigay ni ISESMO.';
+          st.className = 'status err';
+          return;
+        }
+        st.textContent = 'QR na-detect! Nag-lo-login...';
+        st.className = 'status ok';
+        window.location.href = decoded;
+      }catch(err){
+        st.textContent = 'May error sa pagbasa ng QR. Subukan ulit.';
+        st.className = 'status err';
+      }
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
 }
 </script>
 </body></html>
