@@ -3521,7 +3521,7 @@ label{font-size:12px;color:#666;display:block;margin:12px 0 6px}input{width:100%
 <button class="btn" onclick="doLogin()">🔐 Login</button>
 <p class="status" id="status"></p>
 <div style="display:flex;align-items:center;gap:8px;margin:16px 0"><div style="flex:1;height:1px;background:#e5e7eb"></div><span style="font-size:11px;color:#999">O KAYA</span><div style="flex:1;height:1px;background:#e5e7eb"></div></div>
-<input type="file" id="qrFileInput" accept="image/*" capture="environment" style="display:none" onchange="handleQRUpload(event)">
+<input type="file" id="qrFileInput" accept="image/*" style="display:none" onchange="handleQRUpload(event)">
 <button class="btn" style="background:#1a8a4a" onclick="document.getElementById('qrFileInput').click()">📷 Upload QR Code</button>
 <p style="font-size:11px;color:#888;text-align:center;margin-top:6px">I-upload lang yung QR code na ibinigay sa'yo ni ISESMO - automatic na ang login.</p>
 <p style="font-size:12px;color:#888;text-align:center;margin-top:14px;border-top:1px solid #eee;padding-top:14px">Forgot your password?<br>Contact ISESMO to have it reset for you.</p>
