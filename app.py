@@ -40,6 +40,65 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8)
 )
 
+# --- Web Push (cashier "new order" / "status change" alarm that fires
+# even when the cashier PWA is closed / phone is locked) ---
+# Requires `pywebpush` in requirements.txt (see deployment notes). If it's
+# not installed, or the VAPID keys below aren't set, push is silently
+# disabled - the rest of the app keeps working normally either way.
+try:
+    from pywebpush import webpush, WebPushException
+    PUSH_LIB_AVAILABLE = True
+except ImportError:
+    PUSH_LIB_AVAILABLE = False
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
+# "sub" is a contact the push service (Google/Mozilla) can reach you at if
+# your app is misbehaving - it is NOT shown to customers. Override with
+# your own via the VAPID_CLAIMS_SUB env var if you want a real address.
+VAPID_CLAIMS_SUB = os.environ.get("VAPID_CLAIMS_SUB", "mailto:admin@omega-ice.onrender.com")
+PUSH_ENABLED = bool(PUSH_LIB_AVAILABLE and VAPID_PRIVATE_KEY and VAPID_PUBLIC_KEY)
+
+def send_push_to_cashiers(title, body, url="/orders", tag="omega-order"):
+    """Fire a Web Push notification to every subscribed cashier device -
+    shows up even if the PWA is closed / screen is locked (Android; on
+    iOS the PWA must be installed via Add to Home Screen, iOS 16.4+).
+    Best-effort: never raises, so a push failure can't break order flow."""
+    if not PUSH_ENABLED:
+        return
+    try:
+        subs = fb_get("push_subscriptions") or {}
+    except Exception as e:
+        print(f"send_push_to_cashiers: could not load subscriptions: {e}")
+        return
+    payload = json.dumps({"title": title, "body": body, "url": url, "tag": tag})
+    for key, sub in (subs or {}).items():
+        if not sub or not sub.get("endpoint"):
+            continue
+        try:
+            webpush(
+                subscription_info={"endpoint": sub.get("endpoint"), "keys": sub.get("keys") or {}},
+                data=payload,
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": VAPID_CLAIMS_SUB},
+            )
+        except WebPushException as e:
+            status = None
+            try:
+                status = e.response.status_code
+            except Exception:
+                pass
+            if status in (404, 410):
+                # Subscription is dead (app uninstalled, data cleared, etc.)
+                # - remove it so we stop wasting a push attempt on it.
+                try:
+                    fb_delete(f"push_subscriptions/{key}")
+                except Exception:
+                    pass
+            else:
+                print(f"send_push_to_cashiers: push failed for {key}: {e}")
+        except Exception as e:
+            print(f"send_push_to_cashiers: unexpected error for {key}: {e}")
+
 # Init Firebase Admin from env variable FIREBASE_CREDENTIALS (paste whole JSON as string) or file path
 firebase_creds_json = os.environ.get("FIREBASE_CREDENTIALS_JSON") or os.environ.get("FIREBASE_CREDENTIALS") or os.environ.get("FIREBASE_ADMIN_JSON") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 firebase_creds_path = None
@@ -280,6 +339,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 </style></head>
 <body>
 <div id="installBannerC"><span>📲 I-install ang app na ito para mas mabilis gamit tuwing shift.</span><button onclick="doInstallPromptC()">Install</button></div>
+<div id="pushBannerC" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:#991b1b;justify-content:space-between;align-items:center;gap:8px"><span>🔔 I-enable ang Order Alarm para may notification ka kahit closed ang app.</span><button onclick="enablePushAlerts()" style="padding:6px 12px;border-radius:8px;border:none;background:#c0392b;color:#fff;font-size:11px;font-weight:600;white-space:nowrap">Enable</button></div>
 <div class="topbar"><div style="display:flex;align-items:center;gap:8px"><img src="/icon-192.png" alt="" style="width:26px;height:26px;border-radius:6px"><h1 id="cashierTitle">OMEGA PURIFIED ICE</h1></div><div style="display:flex;align-items:center;gap:10px"><span class="staff">{{ staff_name }}</span><button class="logout" onclick="logout()">Logout</button></div></div>
 <button id="kioskBtn" onclick="toggleKiosk()" title="Kiosk mode">⛶</button>
 <div class="one-row">
@@ -1409,6 +1469,79 @@ async function doInstallPromptC(){
   document.getElementById('installBannerC').style.display='none';
 }
 
+// --- Push notifications ("order alarm" that fires even if the cashier
+// app/tab is fully closed or the phone is locked - Android Chrome
+// supports this everywhere; iOS Safari only after the PWA is installed
+// via Add to Home Screen, iOS 16.4+). This is separate from, and on top
+// of, the in-page red pulsing alarm that already runs while the app is
+// open - that one still works exactly as before with no changes here.
+const VAPID_PUBLIC_KEY_C = "{{ vapid_public_key }}";
+const PUSH_ENABLED_C = {{ 'true' if push_enabled else 'false' }};
+
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g,'+').replace(/_/g,'/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for(let i=0;i<rawData.length;i++) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+async function updatePushBannerUI(){
+  const banner = document.getElementById('pushBannerC');
+  if(!banner) return;
+  if(!PUSH_ENABLED_C || !('serviceWorker' in navigator) || !('PushManager' in window)){
+    banner.style.display = 'none';
+    return;
+  }
+  if(Notification.permission === 'granted'){
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      banner.style.display = sub ? 'none' : 'flex';
+    }catch(err){ banner.style.display = 'flex'; }
+  } else if(Notification.permission === 'denied'){
+    banner.style.display = 'none'; // browser already blocked it - nagging won't help, staff must fix it in browser settings
+  } else {
+    banner.style.display = 'flex';
+  }
+}
+
+async function enablePushAlerts(){
+  const banner = document.getElementById('pushBannerC');
+  try{
+    if(!PUSH_ENABLED_C){
+      alert('Hindi pa naka-configure ang push notifications sa server. Sabihin kay Isesmo na i-set up ang VAPID keys.');
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if(perm !== 'granted'){
+      alert('Kailangan payagan ang Notifications para gumana ang Order Alarm kahit closed ang app.');
+      return;
+    }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub){
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY_C)
+      });
+    }
+    const subJson = sub.toJSON();
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({endpoint: subJson.endpoint, keys: subJson.keys})
+    });
+    if(banner) banner.style.display = 'none';
+  }catch(err){
+    alert('Hindi na-enable ang push alerts: ' + err.message);
+  }
+}
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => { setTimeout(updatePushBannerUI, 1500); });
+}
+
 // --- Kiosk mode: for a dedicated cashier tablet/phone that should stay
 // locked on this app. Turning it ON is a plain tap on the floating ⛶
 // button (off by default, so a normal browser tab still behaves
@@ -1902,7 +2035,7 @@ def api_kiosk_verify_unlock():
 @app.route("/cashier")
 @login_required
 def cashier_page():
-    return render_template_string(CASHIER_HTML, staff_name=session.get("staff_name"), staff_position=session.get("staff_position"), kg_options=KG_OPTIONS)
+    return render_template_string(CASHIER_HTML, staff_name=session.get("staff_name"), staff_position=session.get("staff_position"), kg_options=KG_OPTIONS, vapid_public_key=VAPID_PUBLIC_KEY, push_enabled=PUSH_ENABLED)
 
 @app.route("/api/resellers")
 @login_required
@@ -4455,8 +4588,77 @@ def customer_service_worker():
         "  if(e.request.method!=='GET') return;\n"
         "  e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));\n"
         "});\n"
+        # A push arrives via the OS/browser's push service even while the
+        # PWA is fully closed - this handler is what lets it still show
+        # an alarm-style notification (with sound/vibration) in that case.
+        "self.addEventListener('push',e=>{\n"
+        "  let payload={};\n"
+        "  try{ payload = e.data ? e.data.json() : {}; }catch(err){ payload={title:'Omega Ice', body:(e.data?e.data.text():'May bagong update.')}; }\n"
+        "  const title = payload.title || 'Omega Ice';\n"
+        "  const options = {\n"
+        "    body: payload.body || '',\n"
+        "    icon: '/icon-192.png',\n"
+        "    badge: '/icon-192.png',\n"
+        "    tag: payload.tag || 'omega-notify',\n"
+        "    renotify: true,\n"
+        "    requireInteraction: true,\n"
+        "    vibrate: [300,150,300,150,300],\n"
+        "    data: { url: payload.url || '/orders' }\n"
+        "  };\n"
+        "  e.waitUntil(self.registration.showNotification(title, options));\n"
+        "});\n"
+        # Tapping the notification focuses an already-open tab on that
+        # page if there is one, otherwise opens a fresh one.
+        "self.addEventListener('notificationclick',e=>{\n"
+        "  e.notification.close();\n"
+        "  const targetUrl=(e.notification.data && e.notification.data.url) || '/orders';\n"
+        "  e.waitUntil(\n"
+        "    clients.matchAll({type:'window', includeUncontrolled:true}).then(list=>{\n"
+        "      for(const c of list){ if(c.url.includes(targetUrl) && 'focus' in c) return c.focus(); }\n"
+        "      if(clients.openWindow) return clients.openWindow(targetUrl);\n"
+        "    })\n"
+        "  );\n"
+        "});\n"
     )
     return Response(js, mimetype="application/javascript")
+
+@app.route("/api/push/subscribe", methods=["POST"])
+@login_required
+def api_push_subscribe():
+    try:
+        data = request.json or {}
+        endpoint = data.get("endpoint")
+        keys = data.get("keys") or {}
+        if not endpoint or not keys.get("p256dh") or not keys.get("auth"):
+            return jsonify({"ok": False, "error": "Invalid subscription"}), 400
+        # Key the record off a hash of the endpoint (unique per browser
+        # install) so re-subscribing the same device updates in place
+        # instead of piling up duplicate rows every time the page loads.
+        import hashlib
+        sub_id = hashlib.sha256(endpoint.encode()).hexdigest()[:32]
+        fb_put(f"push_subscriptions/{sub_id}", {
+            "endpoint": endpoint,
+            "keys": {"p256dh": keys.get("p256dh"), "auth": keys.get("auth")},
+            "staff_name": session.get("staff_name"),
+            "subscribed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/push/unsubscribe", methods=["POST"])
+@login_required
+def api_push_unsubscribe():
+    try:
+        data = request.json or {}
+        endpoint = data.get("endpoint")
+        if endpoint:
+            import hashlib
+            sub_id = hashlib.sha256(endpoint.encode()).hexdigest()[:32]
+            fb_delete(f"push_subscriptions/{sub_id}")
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # Customer routes
 
@@ -4890,6 +5092,15 @@ def api_customer_place_order(reseller_id):
             "notes": notes
         }
         fb_post("daily_sales", sale)
+        try:
+            send_push_to_cashiers(
+                title="🧊 Bagong Order!",
+                body=f"{reseller.get('store_name','Customer')} - {qty} x {kg_size} ({mode})",
+                url="/orders",
+                tag="omega-new-order",
+            )
+        except Exception as e:
+            print(f"push (new order) failed: {e}")
         return jsonify({"ok": True, "total": total})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -4933,6 +5144,16 @@ def api_update_order_status(order_id):
                 del globals()[k]
             except:
                 pass
+    try:
+        store_label = existing.get("reseller_name") or "Order"
+        send_push_to_cashiers(
+            title="📦 Order Status Updated",
+            body=f"{store_label} -> {new_status} (ni {session.get('staff_name') or 'staff'})",
+            url="/orders",
+            tag=f"omega-status-{order_id}",
+        )
+    except Exception as e:
+        print(f"push (status change) failed: {e}")
     return jsonify({"ok": True, "status": new_status, "sales_updated": new_status == "Delivered"})
 
 @app.route("/customers")
