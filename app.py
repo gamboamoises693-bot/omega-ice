@@ -4929,7 +4929,7 @@ async function loadQR(resellerId, regenerate){
     const data=await res.json();
     if(!data.ok){ wrap.innerHTML=`<span style="color:red">${escapeHtml(data.error||'Failed to generate QR')}</span>`; return; }
     document.getElementById('qrStoreName').textContent=`${data.store_name} (${data.phone})`;
-    wrap.innerHTML=`<img src="${data.qr_data_url}" alt="QR login" style="width:220px;height:220px">`;
+    wrap.innerHTML=`<img src="${data.qr_data_url}" alt="QR login" style="width:220px;height:auto">`;
     document.getElementById('qrExpiry').textContent='Valid until '+data.expires_at;
     document.getElementById('qrReusedNote').textContent=data.reused?'(existing QR - still the same one already printed/shared)':'✓ New QR generated';
     document.getElementById('qrDownloadBtn').href=data.qr_data_url;
@@ -5235,12 +5235,62 @@ def api_customer_qr(reseller_id):
         auto_link = f"{base_url}/customer/qr?token={token}"
         try:
             import qrcode, io
+            from PIL import Image, ImageDraw, ImageFont
             qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
             qr.add_data(auto_link)
             qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white")
+            qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+            qr_w, qr_h = qr_img.size
+
+            # Compose a bigger canvas so the customer's store name is
+            # printed right under the QR - so a printed/shared copy is
+            # self-identifying without needing a separate label.
+            pad = 24
+            label_h = 56
+            canvas_w = qr_w + pad * 2
+            canvas_h = qr_h + pad + label_h + pad
+            canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
+            canvas.paste(qr_img, (pad, pad))
+            draw = ImageDraw.Draw(canvas)
+
+            def _load_qr_font(size):
+                # Try common system truetype fonts first (crisper, bold);
+                # fall back to Pillow's built-in scalable font so this
+                # still works even on a host with no font packages
+                # installed, and finally to the old fixed bitmap font on
+                # very old Pillow versions that don't support sizing it.
+                for fp in (
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                ):
+                    try:
+                        return ImageFont.truetype(fp, size)
+                    except Exception:
+                        continue
+                try:
+                    return ImageFont.load_default(size=size)
+                except TypeError:
+                    return ImageFont.load_default()
+
+            label = (store_name or "Customer").strip()
+            font_size = 26
+            font = _load_qr_font(font_size)
+            max_text_w = canvas_w - pad * 2
+            bbox = draw.textbbox((0, 0), label, font=font)
+            # Shrink the font until the store name fits on one line
+            # instead of spilling past the QR's width.
+            while (bbox[2] - bbox[0]) > max_text_w and font_size > 12:
+                font_size -= 2
+                font = _load_qr_font(font_size)
+                bbox = draw.textbbox((0, 0), label, font=font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            text_x = (canvas_w - text_w) // 2
+            text_y = qr_h + pad + (label_h - text_h) // 2 - bbox[1]
+            draw.text((text_x, text_y), label, fill=(0, 96, 156), font=font)
+
             buf = io.BytesIO()
-            img.save(buf, format="PNG")
+            canvas.save(buf, format="PNG")
             b64 = base64.b64encode(buf.getvalue()).decode()
             data_url = f"data:image/png;base64,{b64}"
         except Exception as e:
