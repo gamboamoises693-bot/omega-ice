@@ -1,0 +1,393 @@
+"""
+Utang / Credit Collection module.
+
+Ported from the "UtangScreen" + "CreditCollectionHistoryScreen" ideas in
+the user's separate Kivy desktop app (OMEGA_PURIFIED.py), rewritten from
+scratch for the web app: that version drew its own buttons/cards with
+Kivy widgets and read/wrote a local SQLite `payments` table. Here it's a
+normal Flask page + JSON API, and it reads/writes Firebase instead - the
+SAME `resellers/<id>/credit_balance` field the rest of app.py already
+uses (customer orders bump it up), plus a NEW `credit_payments` node
+that is this module's own addition (a payment history log which nothing
+in app.py wrote before this).
+
+Routes:
+  GET  /credit                    - Utang page: resellers with outstanding balance + Collect button
+  GET  /credit/history            - Collection History page (filters: All/Today/Date/Search)
+  GET  /api/credit/outstanding    - JSON: resellers with credit_balance > 0
+  POST /api/credit/collect        - JSON: record a payment, decrement credit_balance
+  GET  /api/credit/history        - JSON: payment log, filterable
+"""
+from datetime import datetime
+
+from flask import Blueprint, request, jsonify, session, render_template_string
+
+from modules.shared import fb_get, fb_post, fb_patch, login_required, now_str, today_str
+
+credit_bp = Blueprint("credit", __name__)
+
+
+# ---------- Page: /credit ----------
+
+CREDIT_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Utang / Credit - Omega Ice</title>
+<link rel="manifest" href="/manifest_staff.json"><meta name="theme-color" content="#00609C"><link rel="apple-touch-icon" href="/icon-192.png">
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap}
+.topbar h1{font-size:15px;color:#00609C;margin:0;font-weight:700}
+.nav-pill{padding:7px 14px;border-radius:20px;font-size:11px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C;font-weight:600}
+.nav-pill.active{background:#00609C;color:#fff;border-color:#00609C}
+.total-card{background:linear-gradient(135deg,#c0392b,#e74c3c);color:#fff;border-radius:12px;padding:16px;margin-bottom:12px;text-align:center}
+.total-card .amt{font-size:26px;font-weight:700}.total-card .lbl{font-size:11px;opacity:.9}
+.card{background:#fff;border-radius:12px;padding:12px 14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.05);display:flex;justify-content:space-between;align-items:center;gap:10px}
+.card .name{font-weight:600;font-size:14px}.card .bal{font-size:12px;color:#c0392b;font-weight:600}
+.collect-btn{padding:9px 16px;border-radius:10px;border:none;background:#22c55e;color:#fff;font-size:12px;font-weight:700;white-space:nowrap}
+input#searchInp{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:13px;margin-bottom:10px}
+.empty{color:#888;text-align:center;padding:30px 10px;font-size:13px}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:center;justify-content:center;padding:16px}
+.overlay.show{display:flex}
+.modal{background:#fff;border-radius:14px;padding:20px;width:100%;max-width:360px}
+.modal h3{margin:0 0 4px;font-size:16px;color:#00609C}
+.modal .sub{font-size:12px;color:#888;margin-bottom:14px}
+.modal label{font-size:12px;color:#666;display:block;margin:10px 0 4px}
+.modal input,.modal textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:14px;font-family:inherit}
+.modal .btn-row{display:flex;gap:8px;margin-top:16px}
+.modal .btn-row button{flex:1;padding:11px;border-radius:9px;border:none;font-size:13px;font-weight:700}
+.modal .btn-cancel{background:#eee;color:#555}.modal .btn-confirm{background:#22c55e;color:#fff}
+.status{font-size:12px;text-align:center;margin-top:8px;min-height:16px}.status.err{color:#c0392b}.status.ok{color:#1a8a4a}
+</style></head>
+<body>
+<div class="topbar">
+  <h1>💳 Utang / Credit Collection</h1>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444">🔴 Live Orders</a>
+    <a href="/cashier" class="nav-pill">Sales</a>
+    <a href="/credit" class="nav-pill active">Utang</a>
+    <a href="/credit/history" class="nav-pill">History</a>
+  </div>
+</div>
+
+<div class="total-card"><div class="amt" id="totalOutstanding">₱0</div><div class="lbl">TOTAL OUTSTANDING UTANG</div></div>
+
+<input type="text" id="searchInp" placeholder="Search store name..." oninput="renderList()">
+<div id="listWrap">Loading...</div>
+
+<div class="overlay" id="collectOverlay">
+  <div class="modal">
+    <h3>Collect Payment</h3>
+    <div class="sub" id="collectStoreLabel"></div>
+    <label>Amount (₱)</label>
+    <input type="number" id="collectAmount" placeholder="0.00" step="0.01" min="0.01">
+    <label>Note (optional)</label>
+    <textarea id="collectNote" rows="2" placeholder="hal. bayad kalahati, weekly arrangement..."></textarea>
+    <p class="status" id="collectStatus"></p>
+    <div class="btn-row">
+      <button class="btn-cancel" onclick="closeCollect()">Cancel</button>
+      <button class="btn-confirm" onclick="submitCollect()">✅ Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let allResellers = [];
+let activeReseller = null;
+
+function escapeHtmlU(t){
+  const d = document.createElement('div');
+  d.textContent = (t===null||t===undefined) ? '' : String(t);
+  return d.innerHTML;
+}
+function peso(n){ return '₱' + (Number(n)||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+async function loadOutstanding(){
+  const wrap = document.getElementById('listWrap');
+  try{
+    const res = await fetch('/api/credit/outstanding');
+    if(res.status===401){ window.location.href='/login'; return; }
+    const data = await res.json();
+    if(!data.ok){ wrap.innerHTML = `<div class="empty">${escapeHtmlU(data.error||'Error')}</div>`; return; }
+    allResellers = data.rows || [];
+    document.getElementById('totalOutstanding').textContent = peso(data.total || 0);
+    renderList();
+  }catch(e){
+    wrap.innerHTML = `<div class="empty">Error: ${escapeHtmlU(e.message)}</div>`;
+  }
+}
+
+function renderList(){
+  const q = (document.getElementById('searchInp').value || '').toLowerCase().trim();
+  let rows = allResellers;
+  if(q) rows = rows.filter(r => (r.store_name||'').toLowerCase().includes(q));
+  const wrap = document.getElementById('listWrap');
+  if(!rows.length){
+    wrap.innerHTML = '<div class="empty">Walang natitirang utang na customer. 🎉</div>';
+    return;
+  }
+  wrap.innerHTML = rows.map(r => `
+    <div class="card">
+      <div>
+        <div class="name">${escapeHtmlU(r.store_name)}</div>
+        <div class="bal">${peso(r.credit_balance)} outstanding</div>
+      </div>
+      <button class="collect-btn" onclick='openCollect(${JSON.stringify(r.id)}, ${JSON.stringify(r.store_name)}, ${r.credit_balance})'>💵 Collect</button>
+    </div>
+  `).join('');
+}
+
+function openCollect(id, storeName, balance){
+  activeReseller = {id, storeName, balance};
+  document.getElementById('collectStoreLabel').textContent = `${storeName} - Outstanding: ${peso(balance)}`;
+  document.getElementById('collectAmount').value = '';
+  document.getElementById('collectNote').value = '';
+  document.getElementById('collectStatus').textContent = '';
+  document.getElementById('collectOverlay').classList.add('show');
+}
+function closeCollect(){
+  document.getElementById('collectOverlay').classList.remove('show');
+  activeReseller = null;
+}
+async function submitCollect(){
+  if(!activeReseller) return;
+  const amt = parseFloat(document.getElementById('collectAmount').value);
+  const note = document.getElementById('collectNote').value.trim();
+  const st = document.getElementById('collectStatus');
+  if(!amt || amt <= 0){ st.textContent = 'Ilagay ang valid na amount.'; st.className = 'status err'; return; }
+  st.textContent = 'Saving...'; st.className = 'status';
+  try{
+    const res = await fetch('/api/credit/collect', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({reseller_id: activeReseller.id, amount: amt, note: note})
+    });
+    const data = await res.json();
+    if(data.ok){
+      st.textContent = 'Na-record na ang payment!'; st.className = 'status ok';
+      setTimeout(() => { closeCollect(); loadOutstanding(); }, 700);
+    } else {
+      st.textContent = data.error || 'May error.'; st.className = 'status err';
+    }
+  }catch(e){
+    st.textContent = 'Error: ' + e.message; st.className = 'status err';
+  }
+}
+loadOutstanding();
+</script>
+</body></html>
+"""
+
+CREDIT_HISTORY_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Collection History - Omega Ice</title>
+<link rel="manifest" href="/manifest_staff.json"><meta name="theme-color" content="#00609C"><link rel="apple-touch-icon" href="/icon-192.png">
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}</script>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap}
+.topbar h1{font-size:15px;color:#00609C;margin:0;font-weight:700}
+.nav-pill{padding:7px 14px;border-radius:20px;font-size:11px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C;font-weight:600}
+.nav-pill.active{background:#00609C;color:#fff;border-color:#00609C}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.filter-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.filter-btn{padding:7px 12px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px}
+.filter-btn.active{background:#00609C;color:#fff}
+input#dateInp,input#searchInp2{padding:9px;border-radius:8px;border:1px solid #ccd;font-size:12px}
+.total-card{background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border-radius:12px;padding:14px;margin-bottom:10px;text-align:center}
+.total-card .amt{font-size:22px;font-weight:700}.total-card .lbl{font-size:11px;opacity:.9}
+.log-row{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #f0f4f8}
+.log-meta{font-size:9px;color:#aaa;margin-top:2px}
+.amt-pill{font-weight:700;color:#1a8a4a;white-space:nowrap}
+.empty{color:#888;text-align:center;padding:30px 10px;font-size:13px}
+</style></head>
+<body>
+<div class="topbar">
+  <h1>📜 Collection History</h1>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <a href="/credit" class="nav-pill active">Utang</a>
+    <a href="/cashier" class="nav-pill">Sales</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="filter-row">
+    <button class="filter-btn active" data-m="ALL" onclick="setMode('ALL')">ALL</button>
+    <button class="filter-btn" data-m="TODAY" onclick="setMode('TODAY')">TODAY</button>
+    <button class="filter-btn" data-m="DATE" onclick="setMode('DATE')">DATE</button>
+  </div>
+  <div class="filter-row">
+    <input type="date" id="dateInp" style="display:none" onchange="setMode('DATE')">
+    <input type="text" id="searchInp2" placeholder="Search store name..." style="flex:1" oninput="renderHistory()">
+  </div>
+</div>
+
+<div class="total-card"><div class="amt" id="totalCollected">₱0</div><div class="lbl">TOTAL COLLECTED (this view)</div></div>
+
+<div class="card" id="listWrap2">Loading...</div>
+
+<script>
+let currentMode = 'ALL';
+let allPayments = [];
+
+function escapeHtmlH(t){
+  const d = document.createElement('div');
+  d.textContent = (t===null||t===undefined) ? '' : String(t);
+  return d.innerHTML;
+}
+function peso2(n){ return '₱' + (Number(n)||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+function setMode(m){
+  currentMode = m;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.m===m));
+  document.getElementById('dateInp').style.display = (m==='DATE') ? 'block' : 'none';
+  loadHistory();
+}
+
+async function loadHistory(){
+  const wrap = document.getElementById('listWrap2');
+  wrap.textContent = 'Loading...';
+  try{
+    let url = `/api/credit/history?mode=${currentMode}`;
+    if(currentMode === 'DATE'){
+      const d = document.getElementById('dateInp').value;
+      if(!d){ wrap.innerHTML = '<div class="empty">Pumili ng date.</div>'; return; }
+      url += `&date=${d}`;
+    }
+    const res = await fetch(url);
+    if(res.status===401){ window.location.href='/login'; return; }
+    const data = await res.json();
+    if(!data.ok){ wrap.innerHTML = `<div class="empty">${escapeHtmlH(data.error||'Error')}</div>`; return; }
+    allPayments = data.rows || [];
+    renderHistory();
+  }catch(e){
+    wrap.innerHTML = `<div class="empty">Error: ${escapeHtmlH(e.message)}</div>`;
+  }
+}
+
+function renderHistory(){
+  const q = (document.getElementById('searchInp2').value || '').toLowerCase().trim();
+  let rows = allPayments;
+  if(q) rows = rows.filter(r => (r.store_name||'').toLowerCase().includes(q));
+  const total = rows.reduce((s,r) => s + (Number(r.amount)||0), 0);
+  document.getElementById('totalCollected').textContent = peso2(total);
+  const wrap = document.getElementById('listWrap2');
+  if(!rows.length){
+    wrap.innerHTML = '<div class="empty">Walang payment na nakita.</div>';
+    return;
+  }
+  wrap.innerHTML = rows.map(r => `
+    <div class="log-row">
+      <div>
+        <div style="font-weight:600">${escapeHtmlH(r.store_name)}</div>
+        ${r.note ? `<div class="log-meta">${escapeHtmlH(r.note)}</div>` : ''}
+        <div class="log-meta">${escapeHtmlH(r.collected_at)} • ni ${escapeHtmlH(r.collected_by||'-')}</div>
+      </div>
+      <div class="amt-pill">${peso2(r.amount)}</div>
+    </div>
+  `).join('');
+}
+loadHistory();
+</script>
+</body></html>
+"""
+
+
+# ---------- Routes ----------
+
+@credit_bp.route("/credit")
+@login_required
+def credit_page():
+    return render_template_string(CREDIT_HTML)
+
+
+@credit_bp.route("/credit/history")
+@login_required
+def credit_history_page():
+    return render_template_string(CREDIT_HISTORY_HTML)
+
+
+@credit_bp.route("/api/credit/outstanding")
+@login_required
+def api_credit_outstanding():
+    try:
+        resellers = fb_get("resellers") or {}
+        rows = []
+        total = 0.0
+        for key, val in resellers.items():
+            if not val:
+                continue
+            bal = float(val.get("credit_balance") or 0)
+            if bal > 0:
+                rows.append({"id": key, "store_name": val.get("store_name") or "(unnamed)", "credit_balance": bal})
+                total += bal
+        rows.sort(key=lambda r: r["credit_balance"], reverse=True)
+        return jsonify({"ok": True, "rows": rows, "total": total})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@credit_bp.route("/api/credit/collect", methods=["POST"])
+@login_required
+def api_credit_collect():
+    try:
+        data = request.json or {}
+        reseller_id = data.get("reseller_id")
+        try:
+            amount = float(data.get("amount"))
+        except (TypeError, ValueError):
+            amount = 0
+        note = (data.get("note") or "").strip()
+        if not reseller_id:
+            return jsonify({"ok": False, "error": "Missing reseller_id"}), 400
+        if amount <= 0:
+            return jsonify({"ok": False, "error": "Invalid amount"}), 400
+        reseller = fb_get(f"resellers/{reseller_id}") or {}
+        if not reseller:
+            return jsonify({"ok": False, "error": "Customer not found"}), 404
+        current_balance = float(reseller.get("credit_balance") or 0)
+        # Allowed to go to 0 or below (an overpayment becomes an advance
+        # credit for next time) rather than hard-capping at the current
+        # balance - simplest behavior, matches how small stores actually
+        # handle "sobra ang bayad" in practice.
+        new_balance = round(current_balance - amount, 2)
+        fb_patch(f"resellers/{reseller_id}", {"credit_balance": new_balance})
+        payment = {
+            "reseller_id": reseller_id,
+            "store_name": reseller.get("store_name") or "(unnamed)",
+            "amount": amount,
+            "note": note,
+            "balance_before": current_balance,
+            "balance_after": new_balance,
+            "collected_by": session.get("staff_name"),
+            "collected_at": today_str(),
+            "timestamp": now_str(),
+        }
+        fb_post("credit_payments", payment)
+        return jsonify({"ok": True, "new_balance": new_balance})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@credit_bp.route("/api/credit/history")
+@login_required
+def api_credit_history():
+    try:
+        mode = (request.args.get("mode") or "ALL").upper()
+        date_filter = request.args.get("date") or ""
+        payments = fb_get("credit_payments") or {}
+        rows = []
+        for key, val in payments.items():
+            if not val:
+                continue
+            row = dict(val)
+            row["id"] = key
+            rows.append(row)
+        if mode == "TODAY":
+            today = today_str()
+            rows = [r for r in rows if (r.get("collected_at") or "").startswith(today)]
+        elif mode == "DATE" and date_filter:
+            rows = [r for r in rows if (r.get("collected_at") or "").startswith(date_filter)]
+        # Newest first
+        rows.sort(key=lambda r: r.get("timestamp") or "", reverse=True)
+        return jsonify({"ok": True, "rows": rows})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
