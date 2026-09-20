@@ -38,13 +38,21 @@ Design decisions made after reading the source (ExpensesScreen class,
     handled above). So categories stay a fixed list here too - no need
     for a category-admin screen.
 
-  - The "AUTO HATIIN BILL" (bill-splitting-across-2-months) button in
-    the original only ever showed a preview label - `_hatiin_cache` is
-    computed but nothing in save_new_expense() ever reads it, so it
-    never actually saved a split. It's dead functionality. We replicate
-    the same *preview* (days spanned + per-day rate) client-side purely
-    as a helpful readout, since it's cheap - but there's no "apply
-    split" because the original never had one either.
+  - UPDATE: "AUTO HATIIN BILL" (bill-splitting-across-2-months) was
+    dead functionality in the original - `_hatiin_cache` was computed
+    but nothing in save_new_expense() ever read it, so a bill spanning
+    e.g. Aug 12 - Sep 9 was always recorded as ONE lump entry, in
+    whichever month it happened to get saved. The user asked for this
+    to actually work here, since it throws off monthly totals (a bill
+    covering mostly August was landing entirely in September, etc).
+    So when bill_start and bill_end fall in two different (adjacent)
+    calendar months, we now really do split it: the same day-count
+    formula the dead preview used (days remaining in the start month
+    vs days elapsed in the end month) is applied to kwh/base/
+    current_bill, producing TWO Firebase entries - one dated at the
+    end of the start month, one dated at bill_end - so each month's
+    total only carries its own share of the bill. See
+    _split_electricity_portions() below.
 
   - Per-category fields & auto-computed values (server recomputes all
     of these itself - never trusts client math, same principle as the
@@ -73,6 +81,7 @@ Routes:
   PUT    /api/expenses/<id>           - JSON: edit an entry (any logged-in staff, like the original)
   DELETE /api/expenses/<id>           - ISESMO only: remove an entry (e.g. a mistake/test entry)
 """
+from calendar import monthrange
 from datetime import datetime
 
 from flask import Blueprint, request, jsonify, session, render_template_string
@@ -135,6 +144,12 @@ def _compute_fields(category, data):
         entry.update({"description": item, "quantity": liters, "price": price, "unit_price": unit})
 
     elif category == "Electricity":
+        # Electricity is special-cased in the route handlers instead
+        # (it can produce ONE or TWO entries - see
+        # _split_electricity_portions()). _compute_fields() still
+        # validates the raw inputs here so both POST and PUT share the
+        # same validation, but the caller must use
+        # _split_electricity_portions() to actually build the entry/ies.
         bill_start = (data.get("bill_start") or "").strip() or None
         bill_end = (data.get("bill_end") or "").strip() or None
         kwh = _safe_float(data.get("kwh"))
@@ -165,6 +180,94 @@ def _compute_fields(category, data):
         return None, "Invalid category."
 
     return entry, None
+
+
+def _parse_date(s):
+    try:
+        return datetime.strptime((s or "").strip(), "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return None
+
+
+def _split_electricity_portions(electricity_entry):
+    """
+    Given a validated Electricity entry (from _compute_fields), returns a
+    LIST of 1 or 2 entry dicts ready to save:
+
+      - If bill_start/bill_end are missing, invalid, or fall in the SAME
+        calendar month -> returns the entry unchanged, as a list of 1.
+
+      - If they fall in two ADJACENT calendar months (the normal case for
+        a ~30-day billing cycle, e.g. Aug 12 -> Sep 9) -> splits kwh,
+        base and current_bill proportionally by day count between the
+        two months, same formula the original's dead "hatiin" preview
+        used:
+            days_in_start_month = days from bill_start to the end of
+                                   its month (inclusive)
+            days_in_end_month   = bill_end's day-of-month
+            ratio = each month's day count / total days
+        Each portion becomes its own entry, dated inside its own month
+        (so /api/expenses?month=YYYY-MM buckets each portion into the
+        right month), tagged with a shared bill_ref so they can be
+        traced back to the same original bill.
+
+      - If they span MORE than two calendar months (not a normal
+        billing cycle - almost certainly a typo), we don't guess: falls
+        back to a single entry dated at bill_end, same as before.
+    """
+    start_dt = _parse_date(electricity_entry.get("bill_start"))
+    end_dt = _parse_date(electricity_entry.get("bill_end"))
+
+    if not start_dt or not end_dt or end_dt <= start_dt:
+        return [electricity_entry]
+
+    same_month = (start_dt.year, start_dt.month) == (end_dt.year, end_dt.month)
+    months_apart = (end_dt.year - start_dt.year) * 12 + (end_dt.month - start_dt.month)
+
+    if same_month or months_apart != 1:
+        return [electricity_entry]
+
+    days_in_start_month = monthrange(start_dt.year, start_dt.month)[1]
+    days_start_month = days_in_start_month - start_dt.day + 1
+    days_end_month = end_dt.day
+    total_days = days_start_month + days_end_month
+    if total_days <= 0:
+        return [electricity_entry]
+
+    kwh = _safe_float(electricity_entry.get("kwh"))
+    base = _safe_float(electricity_entry.get("base"))
+    current_bill = _safe_float(electricity_entry.get("current_bill"))
+    bill_start = electricity_entry.get("bill_start")
+    bill_end = electricity_entry.get("bill_end")
+    bill_ref = "%s_to_%s" % (bill_start, bill_end)
+
+    end_of_start_month = "%04d-%02d-%02d" % (start_dt.year, start_dt.month, days_in_start_month)
+
+    portions = []
+    for label, ratio, portion_date, days in (
+        ("1/2", days_start_month / total_days, end_of_start_month, days_start_month),
+        ("2/2", days_end_month / total_days, bill_end, days_end_month),
+    ):
+        p_kwh = round(kwh * ratio, 4)
+        p_base = round(base * ratio, 2)
+        p_current = round(current_bill * ratio, 2)
+        p_kwph = round(p_base / p_kwh, 4) if p_kwh and p_base else 0
+        p_real_kwph = round(p_current / p_kwh, 4) if p_kwh and p_current else 0
+        p_price = p_current if p_current > 0 else p_base
+        portion = dict(electricity_entry)
+        portion.update({
+            "date": portion_date,
+            "description": "Elec %s KWH (hinati %s, %s araw ng %s-%s)" % (
+                round(p_kwh, 1), label, days, bill_start, bill_end
+            ),
+            "kwh": p_kwh, "base": p_base, "current_bill": p_current,
+            "kwph": p_kwph, "real_kwph": p_real_kwph, "price": p_price,
+            "bill_start": bill_start, "bill_end": bill_end,
+            "split_part": label, "split_days": days, "split_of_bill": bill_ref,
+        })
+        portions.append(portion)
+
+    return portions
 
 
 def _effective_amount(row):
@@ -306,7 +409,7 @@ function renderForm(prefill){
       <label>Current Bill / Final (₱)</label><input type="number" id="f_current_bill" step="0.01" value="${prefill.current_bill ?? ''}" oninput="updateComputation()">
       <label>₱/KWH from sub total (auto)</label><input type="text" id="f_kwph" disabled>
       <label>Real ₱/KWH from final bill (auto)</label><input type="text" id="f_real_kwph" disabled>
-      <div class="hatiin-hint" id="hatiinHint">Lagay Bill Start, End, KWH at Current Bill para makita ang days span.</div>
+      <div class="hatiin-hint" id="hatiinHint">Lagay Bill Start, End, KWH at Current Bill. Kung magkaiba ang buwan ng Start at End, AWTOMATIKONG mahahati ang bill sa dalawang buwan base sa bilang ng araw.</div>
     `;
   } else if(selectedCategory === 'Maintenance'){
     f.innerHTML = `
@@ -333,21 +436,37 @@ function updateComputation(){
     const real = (kwh && curr) ? (curr/kwh) : 0;
     document.getElementById('f_kwph').value = kwph ? kwph.toFixed(2) : '';
     document.getElementById('f_real_kwph').value = real ? real.toFixed(2) : '';
-    // "Hatiin" preview: days spanned + per-day rate (informational only, same as original)
+    // Live preview of the REAL auto-split the server will do, so staff
+    // sees the per-month breakdown before saving - mirrors
+    // _split_electricity_portions() in expenses.py exactly.
     const startS = document.getElementById('f_bill_start').value;
     const endS = document.getElementById('f_bill_end').value;
     const hint = document.getElementById('hatiinHint');
-    if(startS && endS && curr){
-      const sd = new Date(startS), ed = new Date(endS);
-      let days = Math.round((ed - sd) / 86400000);
-      if(days <= 0) days = 1;
-      const perDay = curr / days;
-      hint.textContent = `${days} days span • ₱${perDay.toFixed(0)}/day`;
+    if(!startS || !endS || !curr){
+      hint.textContent = 'Lagay Bill Start, End, KWH at Current Bill. Kung magkaiba ang buwan ng Start at End, AWTOMATIKONG mahahati ang bill sa dalawang buwan base sa bilang ng araw.';
     } else {
-      hint.textContent = 'Lagay Bill Start, End, KWH at Current Bill para makita ang days span.';
+      const [sy, sm, sd] = startS.split('-').map(Number);
+      const [ey, em, ed] = endS.split('-').map(Number);
+      if(sy === ey && sm === em){
+        hint.textContent = `Iisang buwan lang (${startS} - ${endS}) - hindi hahatiin, ${peso2(curr)} sa buwan na iyon.`;
+      } else {
+        const monthsApart = (ey - sy) * 12 + (em - sm);
+        if(monthsApart !== 1){
+          hint.textContent = `⚠️ Sobrang layo ng Start at End (${startS} - ${endS}) - hindi ito normal na 1-buwan na bill, kaya HINDI hahatiin. I-double check mo yung dates.`;
+        } else {
+          const daysInStartMonth = new Date(sy, sm, 0).getDate();
+          const daysStart = daysInStartMonth - sd + 1;
+          const daysEnd = ed;
+          const totalDays = daysStart + daysEnd;
+          const amtStart = curr * daysStart / totalDays;
+          const amtEnd = curr * daysEnd / totalDays;
+          hint.textContent = `Mahahati: ${sy}-${String(sm).padStart(2,'0')} (${daysStart}d) = ${peso2(amtStart)} • ${ey}-${String(em).padStart(2,'0')} (${daysEnd}d) = ${peso2(amtEnd)}`;
+        }
+      }
     }
   }
 }
+function peso2(n){ return '₱' + (Number(n)||0).toLocaleString('en-PH',{maximumFractionDigits:0}); }
 
 function startEdit(row){
   editId = row.id;
@@ -407,7 +526,8 @@ async function submitExpense(){
     });
     const data = await res.json();
     if(data.ok){
-      st.textContent = editId ? 'Na-update!' : 'Na-save!'; st.className = 'status ok';
+      st.textContent = editId ? 'Na-update!' : (data.split ? `Na-save! Nahati sa ${data.count} buwan.` : 'Na-save!');
+      st.className = 'status ok';
       cancelEdit();
       loadMonth();
     } else {
@@ -532,10 +652,16 @@ def api_expenses_add():
         entry, err = _compute_fields(category, data)
         if err:
             return jsonify({"ok": False, "error": err}), 400
-        entry["recorded_by"] = session.get("staff_name")
-        entry["created_at"] = now_str()
-        fb_post("expenses", entry)
-        return jsonify({"ok": True})
+
+        entries = _split_electricity_portions(entry) if category == "Electricity" else [entry]
+        recorded_by = session.get("staff_name")
+        created_at = now_str()
+        for e in entries:
+            e["recorded_by"] = recorded_by
+            e["created_at"] = created_at
+            fb_post("expenses", e)
+
+        return jsonify({"ok": True, "split": len(entries) > 1, "count": len(entries)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -543,6 +669,11 @@ def api_expenses_add():
 @expenses_bp.route("/api/expenses/<expense_id>", methods=["PUT"])
 @login_required
 def api_expenses_update(expense_id):
+    """Edits exactly the one record being edited - it never re-splits
+    across months. If a bill's date range is edited such that it now
+    should be split differently, delete it and add it again instead so
+    the split logic in POST runs fresh (safer than silently turning one
+    edited record into two, or deleting its sibling automatically)."""
     try:
         existing = fb_get(f"expenses/{expense_id}")
         if not existing:
