@@ -961,13 +961,24 @@ td:nth-child(2){white-space:normal}
       <a href="/assets">🏗️ Fixed Assets</a>
       <a href="/advance-orders">🎉 Advance Orders</a>
       <a href="/admin/duplicates">🔍 Duplicate Finder</a>
+      <a href="/dashboard">📊 Dashboard</a>
+{% if (staff_name or '')|lower in ['isesmo', 'isesmo gamboa'] %}
+      <!-- ISESMO-ONLY LINKS (boss's request, Sept 27: "yung mga walang
+           access sa UI na si isesmo lang nakakakita, wag ma ishow sa ibang
+           staff") - these all 403 on the server for anyone else already,
+           but showing the link itself still let other staff SEE a menu
+           item that always dead-ends for them, which just looked broken
+           and confusing. Gated here with the exact same
+           staff_name-in-['isesmo','isesmo gamboa'] check every one of
+           these routes already uses server-side, so the menu now matches
+           what's actually reachable. -->
 <a href="/prices">💰 Price Manager</a>
 <a href="/ai-sales">🤖 Ask AI</a>
-      <a href="/dashboard">📊 Dashboard</a>
       <a href="/customer_activity">🔐 Login Activity</a>
       <a href="/admin/stuck_orders">🧹 Purge Stuck Orders</a>
       <a href="/admin/rewards">🎁 Rewards Catalog</a>
       <a href="/admin/reseller_sales">📊 Reseller Sales Tracking</a>
+{% endif %}
       <a href="javascript:void(0)" onclick="toggleNavMenu();openAlarmModal();">⚙️🔊 Alarm Settings</a>
     </div>
   </div>
@@ -2741,6 +2752,84 @@ def award_loyalty_points(reseller_id, points, reason, ref_order_id=None, touch_a
     except Exception as e:
         print(f"award_loyalty_points error: {e}")
         return None
+
+# FREE SPIN (boss's request, Sept 27: "gusto ko may free spin sila kada
+# place order ng customer... max 2 points pwd nila makuha or better luck
+# next order"). One spin per order, weighted so the top prize (2) is the
+# rarest - tune these weights here if boss wants the odds adjusted later.
+# (points, weight) pairs; weight is relative, not a percentage.
+FREE_SPIN_WEIGHTS = [
+    (0, 55),   # "Better luck next order!" - most common
+    (1, 32),
+    (2, 13),   # max prize - rarest
+]
+
+# How long a customer has to claim their Free Spin AFTER an order is
+# marked Delivered by STAFF (not by the customer themselves). Boss's
+# follow-up, Sept 27: "pag si staff ang nag-trigger ng delivered ay
+# mawawala yung chance nila sa spin - bigyan sila ng window time na 30
+# mins" - so instead of losing the spin outright whenever staff (not the
+# customer) is the one who taps Delivered on /orders, the customer still
+# sees a "Free Spin available!" prompt on their dashboard for this many
+# minutes after delivered_at, before it expires unclaimed.
+FREE_SPIN_CLAIM_WINDOW_MINUTES = 30
+
+def spin_free_spin_prize():
+    """Weighted random pick for the Free Spin bonus (0/1/2 points),
+    shown after a customer's order is confirmed Delivered. See
+    FREE_SPIN_WEIGHTS above for the odds."""
+    import random
+    total = sum(w for _, w in FREE_SPIN_WEIGHTS)
+    r = random.uniform(0, total)
+    upto = 0
+    for points, weight in FREE_SPIN_WEIGHTS:
+        upto += weight
+        if r <= upto:
+            return points
+    return FREE_SPIN_WEIGHTS[-1][0]
+
+def compute_spin_eligibility(order_val):
+    """Whether ONE order currently has an unclaimed Free Spin available,
+    and (if so) how many seconds are left to claim it. Shared by the
+    customer orders list (so the dashboard can show a "Spin now!" button)
+    and api_customer_claim_spin (the actual claim), so both always agree
+    on the same rule:
+      - Never for a reward's own free-redemption order, and never twice
+        for the same order (spin_claimed).
+      - "Out for Delivery": always eligible, no clock yet - the customer
+        hasn't confirmed delivery themselves yet, so there's no
+        delivered_at to start a countdown from.
+      - "Delivered": eligible only within FREE_SPIN_CLAIM_WINDOW_MINUTES
+        of delivered_at. Covers BOTH the customer's own self-confirm
+        (which sets delivered_at right before this is checked, so the
+        full window is available) and a STAFF-triggered Delivered from
+        /orders (the 30-minute grace window described above).
+      - Any other status (New Order/Pending/Preparing/Cancelled/
+        Declined): no spin yet / not applicable.
+    Returns (can_spin: bool, seconds_left: int|None) - seconds_left is
+    None when there's no countdown yet (Out for Delivery) or no spin
+    available at all.
+    """
+    if not order_val or order_val.get("reward_redemption"):
+        return False, None
+    if order_val.get("spin_claimed"):
+        return False, None
+    status = order_val.get("order_status") or "New Order"
+    if status == "Out for Delivery":
+        return True, None
+    if status != "Delivered":
+        return False, None
+    delivered_at = order_val.get("delivered_at")
+    if not delivered_at:
+        return False, None
+    try:
+        delivered_dt = datetime.strptime(delivered_at, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return False, None
+    seconds_left = FREE_SPIN_CLAIM_WINDOW_MINUTES * 60 - (datetime.now() - delivered_dt).total_seconds()
+    if seconds_left <= 0:
+        return False, None
+    return True, int(seconds_left)
 
 DEFAULT_POINTS_EXPIRY_DAYS = 60
 
@@ -5423,9 +5512,18 @@ input{width:100%;padding:clamp(7px,1.5dvh,12px);border-radius:12px;border:1.5px 
 <button class="btn" onclick="doLogin()">🔐 Login</button>
 <p class="status" id="status"></p>
 <div style="display:flex;align-items:center;gap:8px;margin:8px 0"><div style="flex:1;height:1px;background:rgba(255,255,255,.25)"></div><span style="font-size:10px;color:#bcd9ee">O KAYA</span><div style="flex:1;height:1px;background:rgba(255,255,255,.25)"></div></div>
+<!-- LIVE QR SCAN (boss's request, Sept 27: "paano kung scan qr ilagay din
+     para scan nalang nila yung ibibigay kong printed QR sa customer auto
+     login na") - primary action now, since a customer holding a PRINTED
+     QR card just points their camera at it instead of needing to take a
+     photo first, save it, then upload that photo (the old 2-step flow).
+     "Upload QR Code" stays as a fallback button below for a saved/
+     screenshotted QR image, or for a device whose camera permission is
+     blocked. -->
+<button class="btn" style="background:#1fa35c;color:#fff" onclick="openQRScanner()">📷 I-scan ang QR Code</button>
 <input type="file" id="qrFileInput" accept="image/*" style="display:none" onchange="handleQRUpload(event)">
-<button class="btn" style="background:#1fa35c;color:#fff" onclick="document.getElementById('qrFileInput').click()">📷 Upload QR Code</button>
-<p style="font-size:10px;color:#bcd9ee;text-align:center;margin-top:4px">I-upload lang yung QR code na ibinigay sa'yo ni ISESMO - automatic na ang login.</p>
+<button class="btn" style="background:transparent;color:#eaf6ff;border:1.5px solid rgba(255,255,255,.35);margin-top:8px;box-shadow:none" onclick="document.getElementById('qrFileInput').click()">🖼️ I-upload na lang ang QR Image</button>
+<p style="font-size:10px;color:#bcd9ee;text-align:center;margin-top:4px">Itutok lang ang camera sa QR code na ibinigay sa'yo ni ISESMO - automatic na ang login.</p>
 <p style="font-size:11px;color:#cfe6f5;text-align:center;margin-top:8px;border-top:1px solid rgba(255,255,255,.15);padding-top:8px">Nakalimutan ang password?<br><button class="link-btn" onclick="openForgotModal()">🔑 I-reset gamit ang OTP</button></p>
 <div style="text-align:center;font-size:9px;color:#89a8bf;margin-top:6px">Developed by Moises Orio Gamboa</div>
 </div>
@@ -5462,6 +5560,26 @@ input{width:100%;padding:clamp(7px,1.5dvh,12px);border-radius:12px;border:1.5px 
         <button class="modal-btn-primary" onclick="confirmForgotReset()">I-reset ang Password</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- LIVE QR SCANNER modal (boss's request, Sept 27) - dark backdrop so the
+     camera feed reads clearly (unlike the Forgot Password modal above,
+     which stays white on purpose for OTP readability - this is a
+     different kind of content, so it gets its own overlay style instead
+     of reusing .modal-box). A dashed corner-bracket frame is drawn over
+     the video purely as a visual "aim here" guide - it has no effect on
+     the actual scan, which runs on the full video frame regardless. -->
+<div class="modal-overlay" id="qrScanModal" style="background:rgba(0,10,20,.88)">
+  <div style="background:#0a1f2e;border-radius:16px;padding:16px;max-width:380px;width:100%;text-align:center">
+    <h3 style="margin:0 0 10px;font-size:15px;color:#fff">📷 I-scan ang QR Code</h3>
+    <div style="position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:1/1">
+      <video id="qrScanVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:block"></video>
+      <div style="position:absolute;inset:12%;border:3px dashed rgba(255,255,255,.55);border-radius:14px;pointer-events:none"></div>
+    </div>
+    <canvas id="qrScanCanvas" style="display:none"></canvas>
+    <p class="status" id="qrScanStatus" style="color:#dcecf7;min-height:32px;margin:10px 0 4px"></p>
+    <button onclick="closeQRScanner()" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,.3);background:transparent;color:#fff;font-size:13px;font-weight:600">Cancel</button>
   </div>
 </div>
 
@@ -5712,6 +5830,102 @@ function handleQRUpload(event){
   };
   reader.readAsDataURL(file);
 }
+
+// --- LIVE QR SCANNER (boss's request, Sept 27: "scan nalang nila yung
+// ibibigay kong printed QR sa customer auto login na") - opens the phone's
+// rear camera and keeps decoding frames with jsQR (same library/on-device
+// decoding as the Upload flow above - no video or image ever leaves the
+// device) until a valid Omega Ice login QR is found, then navigates just
+// like a successful upload does. "Upload QR Code" stays as the fallback
+// for a saved/screenshotted QR image, or a device whose camera permission
+// is blocked/unavailable.
+let qrScanStream = null;
+let qrScanRAF = null;
+
+async function openQRScanner(){
+  const overlay = document.getElementById('qrScanModal');
+  const st = document.getElementById('qrScanStatus');
+  st.textContent = 'Kinukuha ang camera...';
+  st.className = 'status';
+  overlay.classList.add('open');
+  if(typeof jsQR !== 'function'){
+    st.textContent = 'Hindi ma-load ang QR reader. Siguraduhing may internet at i-refresh ang page.';
+    st.className = 'status err';
+    return;
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    st.textContent = 'Hindi supported ng browser na ito ang camera scan. Gamitin na lang ang "Upload QR Image" sa baba.';
+    st.className = 'status err';
+    return;
+  }
+  try{
+    // facingMode 'environment' = rear camera (where a printed QR would be
+    // pointed at), with 'ideal' so a phone with only one camera (or a
+    // laptop webcam, during testing) still gets a stream instead of
+    // failing outright.
+    qrScanStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    });
+    const video = document.getElementById('qrScanVideo');
+    video.srcObject = qrScanStream;
+    await video.play();
+    st.textContent = 'Itutok sa QR code...';
+    qrScanRAF = requestAnimationFrame(scanQRFrame);
+  }catch(err){
+    st.textContent = 'Hindi ma-access ang camera (' + (err && err.name ? err.name : 'error') + '). Siguraduhing pinayagan ang Camera permission, o gamitin na lang ang "Upload QR Image" sa baba.';
+    st.className = 'status err';
+  }
+}
+
+function closeQRScanner(){
+  const overlay = document.getElementById('qrScanModal');
+  overlay.classList.remove('open');
+  if(qrScanRAF){ cancelAnimationFrame(qrScanRAF); qrScanRAF = null; }
+  if(qrScanStream){
+    qrScanStream.getTracks().forEach(t => { try{ t.stop(); }catch(e){} });
+    qrScanStream = null;
+  }
+}
+
+function scanQRFrame(){
+  const video = document.getElementById('qrScanVideo');
+  if(!video || video.readyState !== video.HAVE_ENOUGH_DATA){
+    qrScanRAF = requestAnimationFrame(scanQRFrame);
+    return;
+  }
+  const canvas = document.getElementById('qrScanCanvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  try{
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(imgData.data, imgData.width, imgData.height, {inversionAttempts: 'attemptBoth'});
+    if(code && code.data){
+      handleScannedQR(code.data);
+      return;
+    }
+  }catch(err){ /* keep scanning - a mid-frame decode error is normal (motion blur, glare) */ }
+  qrScanRAF = requestAnimationFrame(scanQRFrame);
+}
+
+function handleScannedQR(decoded){
+  const st = document.getElementById('qrScanStatus');
+  if(!decoded.includes('/customer/qr') || !decoded.includes('token=')){
+    // Not our QR (e.g. some other poster briefly in frame) - say so but
+    // keep scanning instead of closing, since the right QR may just not
+    // be in view yet.
+    st.textContent = 'Hindi ito QR code ng Omega Ice. Itutok sa tamang QR na binigay ni ISESMO.';
+    st.className = 'status err';
+    qrScanRAF = requestAnimationFrame(scanQRFrame);
+    return;
+  }
+  st.textContent = 'QR na-detect! Nag-lo-login...';
+  st.className = 'status ok';
+  closeQRScanner();
+  window.location.href = decoded;
+}
 {% if show_snow %}
 // Seasonal snow (Sept-Dec only, see is_ber_months_season() server-side) -
 // same mechanism as the Staff Login page's snow layer.
@@ -5835,6 +6049,27 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 .star-row{display:flex;justify-content:center;gap:6px;margin:14px 0}
 .star-btn{font-size:32px;background:none;border:none;color:#dbe3ea;cursor:pointer;line-height:1;padding:2px}
 .star-btn.filled{color:#f59e0b}
+/* Free Spin modal (boss's request, Sept 27): "may free spin sila kada
+   place order... max 2 points pwd nila makuha or better luck next
+   order". The wheel's visual segments are decorative only - the actual
+   prize is decided server-side FIRST (POST to claim_spin), then this
+   just animates the wheel to land on whatever the server already
+   returned, so there's no mismatch between what's shown and what's
+   actually credited. */
+.spin-overlay{display:none;position:fixed;inset:0;background:rgba(10,25,45,.72);z-index:70;align-items:center;justify-content:center;padding:16px}
+.spin-overlay.show{display:flex}
+.spin-sheet{background:#fff;border-radius:18px;padding:22px 20px;max-width:340px;width:100%;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+.spin-wheel-wrap{position:relative;width:220px;height:220px;margin:8px auto 0}
+.spin-pointer{position:absolute;top:-8px;left:50%;transform:translateX(-50%);font-size:26px;color:#e63946;z-index:5;filter:drop-shadow(0 2px 2px rgba(0,0,0,.3))}
+.spin-wheel{position:relative;width:220px;height:220px;border-radius:50%;border:6px solid #00609C;overflow:hidden;transition:transform 4s cubic-bezier(.17,.67,.2,1);transform:rotate(0deg);background:conic-gradient(#eaf6ff 0deg 60deg,#ffe8b3 60deg 120deg,#eaf6ff 120deg 180deg,#b7f5c9 180deg 240deg,#eaf6ff 240deg 300deg,#ffe8b3 300deg 360deg)}
+.spin-seg{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:flex-start;justify-content:center;padding-top:16px;font-size:13px;font-weight:800;color:#0f2942;line-height:1.15;text-align:center}
+.spin-seg-0{transform:rotate(30deg)}
+.spin-seg-1{transform:rotate(90deg)}
+.spin-seg-2{transform:rotate(150deg)}
+.spin-seg-3{transform:rotate(210deg)}
+.spin-seg-4{transform:rotate(270deg)}
+.spin-seg-5{transform:rotate(330deg)}
+.spin-hub{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:34px;height:34px;border-radius:50%;background:#00609C;border:3px solid #fff;z-index:4;box-shadow:0 1px 4px rgba(0,0,0,.3)}
 #installBannerCu{background:#eef4fb;border:1px solid #cde;border-radius:10px;padding:10px;margin-bottom:12px;font-size:11px;color:#00609C;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 #installBannerCu button{padding:7px 12px;border-radius:8px;border:none;background:#00609C;color:#fff;font-size:11px;font-weight:600;white-space:nowrap}
 #manualInstallHint{display:none;width:100%;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px;margin-top:4px;font-size:10px;color:#92400e;text-align:left}
@@ -5960,6 +6195,33 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
     <textarea id="rateFeedback" rows="2" placeholder="Optional comment (e.g. mabilis dating, maayos yung packaging)" style="width:100%;padding:10px;border-radius:10px;border:1px solid #ccd;font-size:12px;resize:none"></textarea>
     <button onclick="submitRating()" style="width:100%;padding:12px;margin-top:12px;background:#00609C;color:#fff;border:none;border-radius:10px;font-weight:700">Submit Rating</button>
     <p id="rateStatus" style="font-size:11px;color:#c0392b;margin-top:6px"></p>
+  </div>
+</div>
+
+<!-- Free Spin modal (boss's request, Sept 27): shown right after a
+     customer taps "Natanggap ko na" on an order that's "Out for
+     Delivery", or from a "🎡 Free Spin available!" prompt on an order
+     staff already marked Delivered (30-min grace window - see
+     FREE_SPIN_CLAIM_WINDOW_MINUTES on the backend). -->
+<div class="spin-overlay" id="spinOverlay">
+  <div class="spin-sheet">
+    <div style="font-size:15px;font-weight:700;color:#0f2942">🎉 Salamat sa Order!</div>
+    <div style="font-size:11px;color:#888;margin:2px 0 4px">I-spin para sa FREE points bonus</div>
+    <div class="spin-wheel-wrap">
+      <div class="spin-pointer">▼</div>
+      <div class="spin-wheel" id="spinWheel">
+        <div class="spin-seg spin-seg-0">Better<br>Luck</div>
+        <div class="spin-seg spin-seg-1">+1</div>
+        <div class="spin-seg spin-seg-2">Better<br>Luck</div>
+        <div class="spin-seg spin-seg-3">+2</div>
+        <div class="spin-seg spin-seg-4">Better<br>Luck</div>
+        <div class="spin-seg spin-seg-5">+1</div>
+      </div>
+      <div class="spin-hub"></div>
+    </div>
+    <button id="spinBtn" onclick="startFreeSpin()" style="width:100%;padding:13px;margin-top:16px;background:#f5a300;color:#3a2600;border:none;border-radius:10px;font-weight:800;font-size:14px;letter-spacing:.5px;cursor:pointer">🎡 I-SPIN NA!</button>
+    <div id="spinResultMsg" style="font-size:13px;font-weight:700;margin-top:10px;min-height:20px"></div>
+    <button id="spinCloseBtn" onclick="closeSpinModal()" style="display:none;width:100%;padding:11px;margin-top:8px;background:transparent;color:#888;border:1px solid #ddd;border-radius:10px;font-size:12px;cursor:pointer">Isara</button>
   </div>
 </div>
 
@@ -6120,7 +6382,23 @@ async function loadOrders(){
         }
       }
       const declineBadge = (o.order_status==='Declined' && o.decline_reason) ? `<div style="margin-top:6px;font-size:11px;background:#fff1f2;color:#9f1239;border:1px solid #fecdd3;border-radius:8px;padding:6px 8px">🚫 ${o.decline_reason}</div>` : '';
-      return `<div class="order-card" data-order-id="${o.id}" onclick="openTracking('${o.id}')"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span style="font-size:11px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fmtOrderTime(o.sales_date,o.created_at)}</span><span class="status-pill status-${(o.order_status||'pending').toLowerCase().replace(/ /g,'-')}" style="flex-shrink:0">${o.order_status||'Pending'}</span></div><div style="display:grid;grid-template-columns:56px 1fr 64px;align-items:center;gap:6px;font-size:13px;margin-top:6px"><span style="font-weight:600">${o.quantity}x</span><span style="color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.kg_size} • ${o.mode}</span><span style="text-align:right;font-weight:600;color:#00609C">₱${(+o.total_sales||0).toLocaleString()}</span></div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px"><span style="font-size:10px;color:#888">Order ID: ${o.id.slice(0,8)} • Tap to track →</span>${reorderBtn}</div>${declineBadge}${ratingHtml}</div>`;
+      // FREE SPIN button (boss's request, Sept 27) - right on the order
+      // card itself, not buried inside the tracking modal, so it's
+      // visible from the account/dashboard the moment it's actionable.
+      // Two cases (see compute_spin_eligibility() on the backend):
+      //   - "Out for Delivery": customer confirms delivery themselves ->
+      //     "Natanggap ko na" button.
+      //   - "Delivered" (staff already marked it) + still within the
+      //     30-min grace window -> "Free Spin available!" prompt, with a
+      //     live-ish minutes-left countdown so it's clear it will expire.
+      let spinBtnHtml='';
+      if(o.can_spin && o.order_status==='Out for Delivery'){
+        spinBtnHtml=`<button onclick="event.stopPropagation();openSpinModal('${o.id}')" style="margin-top:6px;width:100%;font-size:11px;padding:8px 10px;border-radius:10px;border:none;background:#f5a300;color:#3a2600;font-weight:700">✅ Natanggap ko na - Tapos na!</button>`;
+      } else if(o.can_spin && o.order_status==='Delivered'){
+        const minsLeft = Math.max(1, Math.ceil((o.spin_seconds_left||0)/60));
+        spinBtnHtml=`<button onclick="event.stopPropagation();openSpinModal('${o.id}')" style="margin-top:6px;width:100%;font-size:11px;padding:8px 10px;border-radius:10px;border:1.5px dashed #f5a300;background:#fff8e8;color:#8a5a00;font-weight:700">🎡 Free Spin available! (${minsLeft}min left)</button>`;
+      }
+      return `<div class="order-card" data-order-id="${o.id}" onclick="openTracking('${o.id}')"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span style="font-size:11px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fmtOrderTime(o.sales_date,o.created_at)}</span><span class="status-pill status-${(o.order_status||'pending').toLowerCase().replace(/ /g,'-')}" style="flex-shrink:0">${o.order_status||'Pending'}</span></div><div style="display:grid;grid-template-columns:56px 1fr 64px;align-items:center;gap:6px;font-size:13px;margin-top:6px"><span style="font-weight:600">${o.quantity}x</span><span style="color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.kg_size} • ${o.mode}</span><span style="text-align:right;font-weight:600;color:#00609C">₱${(+o.total_sales||0).toLocaleString()}</span></div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px"><span style="font-size:10px;color:#888">Order ID: ${o.id.slice(0,8)} • Tap to track →</span>${reorderBtn}</div>${declineBadge}${ratingHtml}${spinBtnHtml}</div>`;
     }).join('');
   }catch(e){
     document.getElementById('ordersList').innerHTML=`<div style="color:red;padding:10px">Error loading: ${e.message}<br><button onclick="loadOrders()" style="padding:8px 14px;border-radius:20px;background:#00609C;color:#fff;border:none">Retry</button></div>`;
@@ -6238,6 +6516,16 @@ function openTracking(orderId){
       <button id="followUpBtn" onclick="customerFollowUp('${o.id}')" style="width:100%;padding:11px;border-radius:10px;border:1px solid #00609C;background:#fff;color:#00609C;font-weight:700;font-size:12.5px;cursor:pointer">📞 Wala pa order ko - Follow Up</button>
       <div id="followUpStatus" style="font-size:11px;color:#888;text-align:center;margin-top:4px"></div>
     </div>` : '';
+  // FREE SPIN (boss's request, Sept 27) - same button shown on the order
+  // card itself, repeated here inside Live Tracking so it's just as
+  // reachable from either place.
+  let spinHtml='';
+  if(o.can_spin && status==='Out for Delivery'){
+    spinHtml=`<div style="margin-top:10px"><button onclick="openSpinModal('${o.id}')" style="width:100%;padding:11px;border-radius:10px;border:none;background:#f5a300;color:#3a2600;font-weight:800;font-size:12.5px;cursor:pointer">✅ Natanggap ko na - Tapos na!</button></div>`;
+  } else if(o.can_spin && status==='Delivered'){
+    const minsLeft = Math.max(1, Math.ceil((o.spin_seconds_left||0)/60));
+    spinHtml=`<div style="margin-top:10px"><button onclick="openSpinModal('${o.id}')" style="width:100%;padding:11px;border-radius:10px;border:1.5px dashed #f5a300;background:#fff8e8;color:#8a5a00;font-weight:800;font-size:12.5px;cursor:pointer">🎡 Free Spin available! (${minsLeft}min left)</button></div>`;
+  }
   body.innerHTML=`
     <div class="track-head">
       <div class="track-head-left"><div class="track-icon">📡</div><div><p class="track-title">LIVE TRACKING</p><p class="track-sub">#${o.id.slice(0,8).toUpperCase()} • ${o.quantity}x ${o.kg_size}</p></div></div>
@@ -6246,6 +6534,7 @@ function openTracking(orderId){
     <div class="track-progress"><div class="track-dots">${dotsHtml}</div></div>
     <div class="track-pills">${pillsHtml}</div>
     <div class="track-timeline">${tlHtml}</div>
+    ${spinHtml}
     ${followUpHtml}`;
   document.getElementById('trackOverlay').classList.add('show');
 }
@@ -6267,6 +6556,87 @@ async function customerFollowUp(orderId){
   }catch(e){
     if(statusEl){ statusEl.textContent='May error sa koneksyon, subukan ulit.'; statusEl.style.color='#c0392b'; }
     if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='📞 Wala pa order ko - Follow Up'; }
+  }
+}
+
+// --- FREE SPIN (boss's request, Sept 27) ---
+// Segment values around the wheel, in the SAME order as the 6 .spin-seg
+// divs in the HTML above - purely decorative/visual. The actual prize is
+// decided by the server (claim_spin), this just animates the wheel to
+// stop on whichever segment matches that already-decided result.
+const SPIN_SEG_VALUES=[0,1,0,2,0,1];
+let _spinTargetOrderId=null;
+let _spinInFlight=false;
+
+function openSpinModal(orderId){
+  _spinTargetOrderId=orderId;
+  _spinInFlight=false;
+  const wheel=document.getElementById('spinWheel');
+  wheel.style.transition='none';
+  wheel.style.transform='rotate(0deg)';
+  document.getElementById('spinResultMsg').textContent='';
+  const btn=document.getElementById('spinBtn');
+  btn.style.display='block'; btn.disabled=false; btn.style.opacity='1'; btn.textContent='🎡 I-SPIN NA!';
+  document.getElementById('spinCloseBtn').style.display='none'; // spin first, then close
+  document.getElementById('spinOverlay').classList.add('show');
+}
+function closeSpinModal(){
+  document.getElementById('spinOverlay').classList.remove('show');
+}
+async function startFreeSpin(){
+  if(_spinInFlight) return;
+  _spinInFlight=true;
+  const btn=document.getElementById('spinBtn');
+  const msg=document.getElementById('spinResultMsg');
+  btn.disabled=true; btn.style.opacity='0.6'; btn.textContent='Sino-spin...';
+  msg.textContent='';
+  try{
+    const res=await fetch(`/api/customer/${resellerId}/order/${_spinTargetOrderId}/claim_spin`, {method:'POST'});
+    const data=await res.json();
+    if(!data.ok){
+      msg.style.color='#c0392b';
+      msg.textContent=data.error || 'May error, subukan ulit mamaya.';
+      btn.disabled=false; btn.style.opacity='1'; btn.textContent='🎡 I-SPIN NA!';
+      document.getElementById('spinCloseBtn').style.display='block';
+      _spinInFlight=false;
+      return;
+    }
+    const points=data.spin_points||0;
+    // Pick a segment index whose visual value matches the ALREADY-DECIDED
+    // server result, so repeat spins on the same prize don't always stop
+    // at the exact same slice.
+    const candidates=SPIN_SEG_VALUES.map((v,i)=>({v,i})).filter(o=>o.v===points).map(o=>o.i);
+    const segIdx=candidates[Math.floor(Math.random()*candidates.length)];
+    const centerAngle=segIdx*60+30;
+    const jitter=(Math.random()*30)-15; // +-15deg so it doesn't look robotic
+    const finalRotation=(5*360)+(360-centerAngle)+jitter;
+    const wheel=document.getElementById('spinWheel');
+    wheel.style.transition='transform 4s cubic-bezier(.17,.67,.2,1)';
+    void wheel.offsetWidth; // force reflow so the transition re-applies from rotate(0)
+    wheel.style.transform=`rotate(${finalRotation}deg)`;
+    btn.style.display='none';
+    setTimeout(()=>{
+      if(points>0){
+        msg.style.color='#1a7a3c';
+        msg.textContent=`🎉 Nanalo ka ng +${points} point${points>1?'s':''}!`;
+      }else{
+        msg.style.color='#888';
+        msg.textContent='😅 Better luck next order! Subukan mo ulit sa susunod.';
+      }
+      document.getElementById('spinCloseBtn').style.display='block';
+      // Refresh so the Live Tracking/order list reflects the new
+      // Delivered status, and the rewards balance shows the new points
+      // (if any were won) without needing a manual reload.
+      try{ loadOrders(); }catch(e){}
+      try{ loadPoints(); }catch(e){}
+      _spinInFlight=false;
+    }, 4200);
+  }catch(e){
+    msg.style.color='#c0392b';
+    msg.textContent='Network error: '+e.message;
+    btn.disabled=false; btn.style.opacity='1'; btn.textContent='🎡 I-SPIN NA!';
+    document.getElementById('spinCloseBtn').style.display='block';
+    _spinInFlight=false;
   }
 }
 
@@ -8078,7 +8448,12 @@ def api_customer_orders(reseller_id):
             # it no longer sorts near the top of the list.
             if not (status == "Declined" and is_order_stale(val.get("declined_at"))):
                 status_counts[status] = status_counts.get(status,0)+1
-            orders.append({"id": key, "sales_date": val.get("sales_date"), "quantity": qty, "kg_size": kg_size, "total_sales": peso, "mode": val.get("mode"), "payment": val.get("payment"), "order_status": status, "created_at": val.get("created_at"), "rating": val.get("rating"), "feedback": val.get("feedback"), "decline_reason": val.get("decline_reason") or "", "declined_at": val.get("declined_at") or ""})
+            # FREE SPIN (boss's request, Sept 27): pre-computed here (not
+            # left for the frontend to guess) so the dashboard's spin
+            # button/countdown always matches the same rule the actual
+            # claim endpoint enforces - see compute_spin_eligibility().
+            can_spin, spin_seconds_left = compute_spin_eligibility(val)
+            orders.append({"id": key, "sales_date": val.get("sales_date"), "quantity": qty, "kg_size": kg_size, "total_sales": peso, "mode": val.get("mode"), "payment": val.get("payment"), "order_status": status, "created_at": val.get("created_at"), "rating": val.get("rating"), "feedback": val.get("feedback"), "decline_reason": val.get("decline_reason") or "", "declined_at": val.get("declined_at") or "", "can_spin": can_spin, "spin_seconds_left": spin_seconds_left, "spin_claimed": bool(val.get("spin_claimed")), "spin_points": val.get("spin_points")})
         def status_priority_c(s):
             order = (s.get("order_status") or "Pending")
             priorities = {"New Order": 0, "Pending": 1, "Preparing": 2, "Out for Delivery": 3, "Declined": 4, "Delivered": 5, "Cancelled": 6}
@@ -8963,6 +9338,106 @@ def api_customer_redeem(reseller_id):
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+def apply_delivered_side_effects(order_id, existing):
+    """
+    Everything that must happen to an order's Firebase record the moment
+    it becomes "Delivered" - sales-date/archival bookkeeping, loyalty
+    points, and the referral bonus. Originally inline inside
+    api_update_order_status() (the staff path); extracted here so the
+    customer self-confirm path (api_customer_claim_spin(), boss's
+    request Sept 27: "may option na sila na sila ang mag done or
+    delivered") reuses the EXACT SAME logic instead of a second copy that
+    could quietly drift out of sync with the staff one. Returns a dict of
+    fields to merge into that order's fb_patch - the caller still does
+    the actual fb_patch/cache-clear/push, since those differ slightly
+    between the staff and customer trigger paths.
+    """
+    update_data = {}
+    try:
+        import pytz
+        manila = pytz.timezone('Asia/Manila')
+        now_manila = datetime.now(manila)
+        today = now_manila.strftime("%Y-%m-%d")
+        now_str = now_manila.strftime("%Y-%m-%d %H:%M:%S")
+    except:
+        today = datetime.now().strftime("%Y-%m-%d")
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    update_data["delivered_at"] = now_str
+    update_data["delivered_date"] = today
+    # Keep original order date for history
+    if existing.get("sales_date"):
+        update_data["original_sales_date"] = existing.get("sales_date")
+    update_data["sales_date"] = today  # Makes it count in TODAY sales + Recent
+    update_data["sales_updated_at"] = now_str
+    update_data["is_customer_order"] = True
+    # Ensure it is NOT archived so it shows in sales
+    update_data["archived"] = False
+    update_data["archived_for_daily_only"] = False
+
+    # LOYALTY POINTS (Sept 21): only award points when the RESELLER
+    # placed this order themselves through the customer app
+    # (order_source == "customer") - a sale the cashier typed in
+    # manually on /cashier never sets order_source at all, so it's
+    # excluded automatically, exactly as requested ("sa online order
+    # lang dapat applicable, pag manual input ko hindi dapat
+    # kumita"). Also excludes a reward's own free redemption order
+    # (reward_redemption=True) from earning MORE points on itself,
+    # and points_awarded guards against double-crediting if an
+    # order somehow gets marked Delivered more than once.
+    if (existing.get("order_source") == "customer"
+            and not existing.get("reward_redemption")
+            and not existing.get("points_awarded")
+            and existing.get("reseller_id")
+            and not is_loyalty_program_paused()):
+        pts = int(round(float(existing.get("total_sales") or 0)))
+        if pts > 0:
+            award_loyalty_points(existing.get("reseller_id"), pts, "Order delivered", order_id, touch_activity=True)
+            update_data["points_awarded"] = True
+            update_data["points_earned"] = pts
+
+        # REFERRAL BONUS (Sept 22): if this reseller was referred by
+        # another reseller, and THIS is their first-ever delivered
+        # online order, credit the referrer a one-time bonus. Gated
+        # the same way as the points award just above (order_source
+        # == "customer", never a reward's own redemption order), so
+        # it fires on exactly the same kind of order that starts
+        # earning the new reseller their own points too.
+        try:
+            new_reseller_id = existing.get("reseller_id")
+            reseller_rec = fb_get(f"resellers/{new_reseller_id}") or {}
+            referrer_id = reseller_rec.get("referred_by_id")
+            if referrer_id and not reseller_rec.get("referral_bonus_awarded"):
+                # "First order" = no OTHER delivered online order for
+                # this same reseller has awarded points before this
+                # one. Checked freshly against Firebase (not just
+                # trusting referral_bonus_awarded alone) so a flag
+                # write that failed earlier can't cause a double-pay
+                # later - the underlying order history is the source
+                # of truth.
+                all_sales = fb_get("daily_sales") or {}
+                already_had_a_delivered_order = any(
+                    v and v.get("reseller_id") == new_reseller_id
+                    and v.get("order_source") == "customer"
+                    and v.get("points_awarded")
+                    and k != order_id
+                    for k, v in all_sales.items()
+                )
+                if not already_had_a_delivered_order:
+                    bonus_pts = get_referral_bonus_points()
+                    if bonus_pts > 0:
+                        award_loyalty_points(
+                            referrer_id, bonus_pts,
+                            f"Referral bonus - {reseller_rec.get('store_name','')} unang order",
+                            order_id, touch_activity=False,
+                        )
+                    fb_patch(f"resellers/{new_reseller_id}", {"referral_bonus_awarded": True})
+        except Exception as referral_err:
+            # A referral-bonus hiccup must never block the order's
+            # own delivery/points flow - log and move on, same
+            # fire-and-forget philosophy as award_loyalty_points itself.
+            print(f"referral bonus check failed (non-fatal): {referral_err}")
+    return update_data
+
 @app.route("/api/order/<order_id>/status", methods=["POST"])
 @login_required
 def api_update_order_status(order_id):
@@ -9002,89 +9477,7 @@ def api_update_order_status(order_id):
         update_data["declined_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     # When marked as Delivered, update sales record so it counts as TODAY'S real sale + Recent Sales
     if new_status == "Delivered":
-        try:
-            import pytz
-            manila = pytz.timezone('Asia/Manila')
-            now_manila = datetime.now(manila)
-            today = now_manila.strftime("%Y-%m-%d")
-            now_str = now_manila.strftime("%Y-%m-%d %H:%M:%S")
-        except:
-            today = datetime.now().strftime("%Y-%m-%d")
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        update_data["delivered_at"] = now_str
-        update_data["delivered_date"] = today
-        # Keep original order date for history
-        if existing.get("sales_date"):
-            update_data["original_sales_date"] = existing.get("sales_date")
-        update_data["sales_date"] = today  # Makes it count in TODAY sales + Recent
-        update_data["sales_updated_at"] = now_str
-        update_data["is_customer_order"] = True
-        # Ensure it is NOT archived so it shows in sales
-        update_data["archived"] = False
-        update_data["archived_for_daily_only"] = False
-
-        # LOYALTY POINTS (Sept 21): only award points when the RESELLER
-        # placed this order themselves through the customer app
-        # (order_source == "customer") - a sale the cashier typed in
-        # manually on /cashier never sets order_source at all, so it's
-        # excluded automatically, exactly as requested ("sa online order
-        # lang dapat applicable, pag manual input ko hindi dapat
-        # kumita"). Also excludes a reward's own free redemption order
-        # (reward_redemption=True) from earning MORE points on itself,
-        # and points_awarded guards against double-crediting if an
-        # order somehow gets marked Delivered more than once.
-        if (existing.get("order_source") == "customer"
-                and not existing.get("reward_redemption")
-                and not existing.get("points_awarded")
-                and existing.get("reseller_id")
-                and not is_loyalty_program_paused()):
-            pts = int(round(float(existing.get("total_sales") or 0)))
-            if pts > 0:
-                award_loyalty_points(existing.get("reseller_id"), pts, "Order delivered", order_id, touch_activity=True)
-                update_data["points_awarded"] = True
-                update_data["points_earned"] = pts
-
-            # REFERRAL BONUS (Sept 22): if this reseller was referred by
-            # another reseller, and THIS is their first-ever delivered
-            # online order, credit the referrer a one-time bonus. Gated
-            # the same way as the points award just above (order_source
-            # == "customer", never a reward's own redemption order), so
-            # it fires on exactly the same kind of order that starts
-            # earning the new reseller their own points too.
-            try:
-                new_reseller_id = existing.get("reseller_id")
-                reseller_rec = fb_get(f"resellers/{new_reseller_id}") or {}
-                referrer_id = reseller_rec.get("referred_by_id")
-                if referrer_id and not reseller_rec.get("referral_bonus_awarded"):
-                    # "First order" = no OTHER delivered online order for
-                    # this same reseller has awarded points before this
-                    # one. Checked freshly against Firebase (not just
-                    # trusting referral_bonus_awarded alone) so a flag
-                    # write that failed earlier can't cause a double-pay
-                    # later - the underlying order history is the source
-                    # of truth.
-                    all_sales = fb_get("daily_sales") or {}
-                    already_had_a_delivered_order = any(
-                        v and v.get("reseller_id") == new_reseller_id
-                        and v.get("order_source") == "customer"
-                        and v.get("points_awarded")
-                        and k != order_id
-                        for k, v in all_sales.items()
-                    )
-                    if not already_had_a_delivered_order:
-                        bonus_pts = get_referral_bonus_points()
-                        if bonus_pts > 0:
-                            award_loyalty_points(
-                                referrer_id, bonus_pts,
-                                f"Referral bonus - {reseller_rec.get('store_name','')} unang order",
-                                order_id, touch_activity=False,
-                            )
-                        fb_patch(f"resellers/{new_reseller_id}", {"referral_bonus_awarded": True})
-            except Exception as referral_err:
-                # A referral-bonus hiccup must never block the order's
-                # own delivery/points flow - log and move on, same
-                # fire-and-forget philosophy as award_loyalty_points itself.
-                print(f"referral bonus check failed (non-fatal): {referral_err}")
+        update_data.update(apply_delivered_side_effects(order_id, existing))
     fb_patch(f"daily_sales/{order_id}", update_data)
     # Clear cache after delivered so dashboard updates instantly
     for k in list(globals().keys()):
@@ -9270,6 +9663,119 @@ def api_customer_order_follow_up(reseller_id, order_id):
         })
 
         return jsonify({"ok": True, "pushed": pushed, "follow_up_count": new_count})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/customer/<reseller_id>/order/<order_id>/claim_spin", methods=["POST"])
+def api_customer_claim_spin(reseller_id, order_id):
+    """Free Spin claim (boss's request, Sept 27: "gusto ko may free spin
+    sila kada place order ng customer... magtritriger lang pag pinindot
+    nila yung delivered... max 2 points pwd nila makuha or better luck
+    next order"). Handles BOTH ways an order reaches "Delivered":
+
+      1. CUSTOMER self-confirms from their own Live Tracking view (a
+         "Natanggap ko na" button, shown while the order is still "Out
+         for Delivery") - this call performs the Delivered transition
+         itself too (reusing apply_delivered_side_effects(), the EXACT
+         same sales/points/referral logic the staff path uses), then
+         immediately spins.
+
+      2. STAFF already marked the order Delivered from /orders before
+         the customer had a chance to tap anything. Boss's follow-up
+         (Sept 27): "pag si staff ang nag-trigger ng delivered ay
+         mawawala yung chance nila sa spin - bigyan sila ng window time
+         na 30 mins" - so instead of losing the spin outright, the
+         dashboard still offers it for FREE_SPIN_CLAIM_WINDOW_MINUTES
+         after delivered_at (see compute_spin_eligibility(), which both
+         this endpoint and the orders list use, so they always agree on
+         whether a spin is still open).
+
+    One spin per order either way (spin_claimed flag blocks a repeat
+    call), never on a reward's own free-redemption order, and never
+    outside the eligibility window - the real check is always done here,
+    server-side, never trusting whatever the client last displayed.
+
+    Auth: same pattern as every other customer-self route in this file -
+    either the matching logged-in customer, or any logged-in staff member.
+    """
+    if session.get("customer_id") and session.get("customer_id") != reseller_id:
+        return jsonify({"ok": False, "error": "Forbidden"}), 403
+    if not session.get("customer_id") and not session.get("staff_name"):
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    try:
+        existing = fb_get(f"daily_sales/{order_id}")
+        if not existing:
+            return jsonify({"ok": False, "error": "Order not found"}), 404
+        if existing.get("reseller_id") != reseller_id:
+            return jsonify({"ok": False, "error": "This order does not belong to this account"}), 403
+        if existing.get("reward_redemption"):
+            return jsonify({"ok": False, "error": "Walang Free Spin sa reward redemption order."}), 400
+        if existing.get("spin_claimed"):
+            return jsonify({"ok": False, "error": "Na-claim mo na ang Free Spin ng order na ito."}), 400
+
+        status = existing.get("order_status") or "New Order"
+        update_data = {}
+        self_confirming = (status == "Out for Delivery")
+        if self_confirming:
+            # Customer is confirming delivery themselves right now - do
+            # the SAME Delivered transition the staff path does.
+            update_data = {
+                "order_status": "Delivered",
+                "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "status_updated_by": "Customer (self-confirmed)",
+                "delivered_by_customer": True,
+            }
+            update_data.update(apply_delivered_side_effects(order_id, existing))
+            # So the eligibility re-check just below sees the delivered_at
+            # this same call just set, instead of the stale pre-update copy.
+            existing = {**existing, **update_data}
+        elif status != "Delivered":
+            return jsonify({"ok": False, "error": "Hindi pa pwedeng mag-Free Spin - hintayin munang maging 'Out for Delivery' ang order."}), 400
+
+        can_spin, _ = compute_spin_eligibility(existing)
+        if not can_spin:
+            return jsonify({"ok": False, "error": f"Lumipas na ang {FREE_SPIN_CLAIM_WINDOW_MINUTES}-minutong window para sa Free Spin ng order na ito."}), 400
+
+        spin_points = spin_free_spin_prize()
+        update_data["spin_points"] = spin_points
+        update_data["spin_claimed"] = True
+        update_data["spin_claimed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        fb_patch(f"daily_sales/{order_id}", update_data)
+
+        # Clear cache after delivered so dashboard updates instantly - same
+        # as api_update_order_status's Delivered branch.
+        for k in list(globals().keys()):
+            if k.startswith("_dashboard_cache_"):
+                try:
+                    del globals()[k]
+                except:
+                    pass
+
+        if self_confirming:
+            try:
+                send_push_to_cashiers(
+                    title="📦 Order Confirmed by Customer",
+                    body=f"{existing.get('reseller_name') or 'Customer'} confirmed their own order as Delivered.",
+                    url="/orders",
+                    tag=f"omega-status-{order_id}",
+                )
+            except Exception as e:
+                print(f"push (customer-confirmed delivered) failed: {e}")
+
+        fb_post("order_spins", {
+            "order_id": order_id,
+            "reseller_id": reseller_id,
+            "reseller_name": existing.get("reseller_name") or "",
+            "points_won": spin_points,
+            "triggered_by": "customer_confirm" if self_confirming else "staff_delivered_window",
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+        new_balance = None
+        if spin_points > 0:
+            new_balance = award_loyalty_points(reseller_id, spin_points, "🎡 Free Spin - order delivered", order_id)
+
+        return jsonify({"ok": True, "status": "Delivered", "spin_points": spin_points, "new_balance": new_balance})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -9927,15 +10433,24 @@ def api_customer_qr(reseller_id):
         try:
             import qrcode, io
             from PIL import Image, ImageDraw, ImageFont
+            # boss's follow-up, Sept 27 (after confirming the center-logo
+            # version still scanned fine): "Pwedeng sa baba nalang tabi ng
+            # store name?" - moved the logo OUT of the QR pattern entirely,
+            # next to the store name label below it instead. Simpler and
+            # zero-risk for scanning (nothing is pasted over the QR's own
+            # modules anymore), so this reverts to plain ERROR_CORRECT_L -
+            # the higher ERROR_CORRECT_H from the center-logo version was
+            # only ever needed to survive that center overlay.
             qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
             qr.add_data(auto_link)
             qr.make(fit=True)
             qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
             qr_w, qr_h = qr_img.size
 
-            # Compose a bigger canvas so the customer's store name is
-            # printed right under the QR - so a printed/shared copy is
-            # self-identifying without needing a separate label.
+            # Compose a bigger canvas so the customer's store name (and now
+            # the small Omega Ice logo beside it) is printed right under
+            # the QR - so a printed/shared copy is self-identifying without
+            # needing a separate label.
             pad = 24
             label_h = 56
             canvas_w = qr_w + pad * 2
@@ -9943,6 +10458,18 @@ def api_customer_qr(reseller_id):
             canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
             canvas.paste(qr_img, (pad, pad))
             draw = ImageDraw.Draw(canvas)
+
+            # Small logo badge for the label row (NOT pasted onto the QR
+            # itself - see the note above). Sized to comfortably fit the
+            # label strip's height with a little breathing room above/below.
+            logo_img = None
+            logo_size = int(label_h * 0.7)
+            try:
+                logo_bytes = base64.b64decode(_ICON_192_PNG_B64)
+                logo_img = Image.open(io.BytesIO(logo_bytes)).convert("RGBA")
+                logo_img = logo_img.resize((logo_size, logo_size), Image.LANCZOS)
+            except Exception as logo_err:
+                print(f"QR label logo skipped (non-fatal): {logo_err}")
 
             def _load_qr_font(size):
                 # Try common system truetype fonts first (crisper, bold);
@@ -9964,20 +10491,31 @@ def api_customer_qr(reseller_id):
                     return ImageFont.load_default()
 
             label = (store_name or "Customer").strip()
+            logo_gap = 10 if logo_img else 0
             font_size = 26
             font = _load_qr_font(font_size)
-            max_text_w = canvas_w - pad * 2
+            # Leave room for the logo + gap alongside the text, not just
+            # the text alone, so the pair together still fits on one line.
+            max_text_w = canvas_w - pad * 2 - (logo_size + logo_gap)
             bbox = draw.textbbox((0, 0), label, font=font)
-            # Shrink the font until the store name fits on one line
-            # instead of spilling past the QR's width.
+            # Shrink the font until the store name (plus the logo beside
+            # it) fits on one line instead of spilling past the QR's width.
             while (bbox[2] - bbox[0]) > max_text_w and font_size > 12:
                 font_size -= 2
                 font = _load_qr_font(font_size)
                 bbox = draw.textbbox((0, 0), label, font=font)
             text_w = bbox[2] - bbox[0]
             text_h = bbox[3] - bbox[1]
-            text_x = (canvas_w - text_w) // 2
-            text_y = qr_h + pad + (label_h - text_h) // 2 - bbox[1]
+            label_center_y = qr_h + pad + label_h // 2
+            group_w = text_w + logo_size + logo_gap
+            group_x = (canvas_w - group_w) // 2
+            if logo_img:
+                logo_y = label_center_y - logo_size // 2
+                canvas.paste(logo_img, (group_x, logo_y), logo_img)
+                text_x = group_x + logo_size + logo_gap
+            else:
+                text_x = group_x
+            text_y = label_center_y - text_h // 2 - bbox[1]
             draw.text((text_x, text_y), label, fill=(0, 96, 156), font=font)
 
             buf = io.BytesIO()
@@ -10607,9 +11145,17 @@ SALES_ANALYTICS_HTML = """<!DOCTYPE html>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;width:100%">
     <a href="/orders" class="nav-pill" style="background:#ff4444;color:#fff;border-color:#ff4444">🔴 Live Orders</a>
     <a href="/cashier" class="nav-pill">Sales</a>
+{% if (staff_name or '')|lower in ['isesmo', 'isesmo gamboa'] %}
+    <!-- ISESMO-ONLY (boss's request, Sept 27: "wag ma ishow sa ibang
+         staff" yung mga walang access) - /customers and /customer_activity
+         both 403 for anyone else server-side already; hiding the links
+         here too so other staff don't see a dead-end menu item. -->
     <a href="/customers" class="nav-pill">Customers</a>
     <a href="/credit" class="nav-pill">💳 Utang</a>
     <a href="/customer_activity" class="nav-pill">🔐 Login Activity</a>
+{% else %}
+    <a href="/credit" class="nav-pill">💳 Utang</a>
+{% endif %}
     <a href="/dashboard" class="nav-pill active">Analytics</a>
   </div>
 </div>
@@ -10895,7 +11441,7 @@ populateHistSubPicker('daily');
 @app.route("/dashboard")
 @login_required
 def dashboard_page():
-    return render_template_string(SALES_ANALYTICS_HTML)
+    return render_template_string(SALES_ANALYTICS_HTML, staff_name=session.get("staff_name"))
 
 @app.route("/orders")
 @login_required
