@@ -5888,12 +5888,31 @@ function handleQRUpload(event){
 let qrScanStream = null;
 let qrScanRAF = null;
 
+// Detects Facebook/Messenger/Instagram/Line "in-app browsers" - these
+// webviews silently block getUserMedia (camera access) on many Android
+// versions, with NO error thrown and NO permission prompt shown, so the
+// camera modal just stays black/empty forever with no clue why. Boss's
+// report (Sept 30): "nawala yung video" turned out to be exactly this -
+// customers tapping the QR-scan button after opening the login link from
+// a Facebook post/Messenger chat. Checking the user agent BEFORE even
+// trying getUserMedia lets us warn them clearly instead of showing a
+// silent blank screen.
+function isInAppBrowser(){
+  const ua = navigator.userAgent || navigator.vendor || '';
+  return /FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger|TikTok/i.test(ua);
+}
+
 async function openQRScanner(){
   const overlay = document.getElementById('qrScanModal');
   const st = document.getElementById('qrScanStatus');
+  overlay.classList.add('open');
+  if(isInAppBrowser()){
+    st.textContent = '⚠️ Hindi gumagana ang camera dito (Facebook/Messenger/Instagram browser). Sa taas-kanan, piliin ang "⋮" o "Open in Browser" para buksan sa Chrome, o gamitin na lang ang "Upload QR Image" sa baba.';
+    st.className = 'status err';
+    return;
+  }
   st.textContent = 'Kinukuha ang camera...';
   st.className = 'status';
-  overlay.classList.add('open');
   if(typeof jsQR !== 'function'){
     st.textContent = 'Hindi ma-load ang QR reader. Siguraduhing may internet at i-refresh ang page.';
     st.className = 'status err';
@@ -10068,7 +10087,7 @@ async function loadCustomers(){
     const q=document.getElementById('search').value.toLowerCase();
     const filtered=rows.filter(r=>(r.store_name||'').toLowerCase().includes(q)||(r.phone||'').includes(q));
     document.getElementById('tbody').innerHTML=filtered.map(r=>{
-      return `<tr><td><b>${escapeHtml(r.store_name)}</b><br><small style="color:#666">${escapeHtml(r.status||'active')}</small>${r.referred_by_name?`<br><small style="color:#0891b2">🤝 ref: ${escapeHtml(r.referred_by_name)}</small>`:''}</td><td>${escapeHtml(r.phone)}<br><small style="color:${r.password_hash?'green':'red'}">${r.password_hash?'Has password':'No password'}</small></td><td><small>${r.route?escapeHtml(r.route):'<span style="color:#bbb">—</span>'}</small></td><td><small style="color:${r.push_enabled?'green':'#bbb'}">${r.push_enabled?'🔔 Naka-enable':'🔕 Wala pa'}</small></td><td><small style="color:${r.app_installed?'green':'#bbb'}">${r.app_installed?'📲 Installed':'⬜ Wala pa'}</small></td><td>₱${r.credit_balance||0}</td><td><button class="btn" style="background:#22c55e;color:#fff" onclick="openEdit('${r.id}')">Edit</button> <button class="btn" style="background:#00609C;color:#fff" onclick="openQR('${r.id}')">📱 QR</button></td></tr>`;
+      return `<tr><td><b>${escapeHtml(r.store_name)}</b><br><small style="color:#666">${escapeHtml(r.status||'active')}</small>${r.referred_by_name?`<br><small style="color:#0891b2">🤝 ref: ${escapeHtml(r.referred_by_name)}</small>`:''}</td><td>${escapeHtml(r.phone)}<br><small style="color:${r.password_hash?'green':'red'}">${r.password_hash?'Has password':'No password'}</small></td><td><small>${r.route?escapeHtml(r.route):'<span style="color:#bbb">—</span>'}</small></td><td><small style="color:${r.push_enabled?'green':'#bbb'}">${r.push_enabled?'🔔 Naka-enable':'🔕 Wala pa'}</small></td><td><small style="color:${r.app_installed?'green':'#bbb'}">${r.app_installed?'📲 Installed':'⬜ Wala pa'}</small></td><td>₱${r.credit_balance||0}</td><td><button class="btn" style="background:#22c55e;color:#fff" onclick="openEdit('${r.id}')">Edit</button> <button class="btn" style="background:#00609C;color:#fff" onclick="openQR('${r.id}')">📱 QR</button> <button class="btn" style="background:#f0f4f8;color:#333" onclick="copyResellerId('${r.id}', this)" title="${r.id}">🆔 Copy ID</button></td></tr>`;
     }).join('');
   }catch(e){
     document.getElementById('customerCount').textContent='Error: '+e.message;
@@ -10088,6 +10107,42 @@ function openEdit(id){
   window.scrollTo({top:document.getElementById('editCard').offsetTop,behavior:'smooth'});
 }
 function closeEdit(){document.getElementById('editCard').style.display='none';}
+
+// Copies this reseller's Firebase ID to the clipboard (boss's request,
+// Oct 1: needed the ID to paste into the "Search Reseller Points" box on
+// /admin/rewards for manual point adjustments, but the ID was never
+// actually shown anywhere on this page - only buried inside the Edit/QR
+// button onclick handlers). navigator.clipboard requires a secure
+// context (https, which Render already gives us) - the execCommand
+// fallback covers older/in-app browsers where clipboard API is missing.
+function copyResellerId(id, btnEl){
+  const done = () => {
+    const original = btnEl.textContent;
+    btnEl.textContent = '✅ Copied!';
+    setTimeout(() => { btnEl.textContent = original; }, 1500);
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(id).then(done).catch(() => {
+      alert('Reseller ID: ' + id);
+    });
+  } else {
+    // Fallback: hidden textarea + execCommand('copy') for browsers
+    // without the modern clipboard API (older webviews).
+    try{
+      const ta = document.createElement('textarea');
+      ta.value = id;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      done();
+    }catch(e){
+      alert('Reseller ID: ' + id);
+    }
+  }
+}
 async function savePassword(){
   const phone=document.getElementById('editPhone').value.trim();
   const pwd=document.getElementById('editPassword').value.trim();
