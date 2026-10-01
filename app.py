@@ -9521,6 +9521,118 @@ def apply_delivered_side_effects(order_id, existing):
             print(f"referral bonus check failed (non-fatal): {referral_err}")
     return update_data
 
+@app.route("/api/order/<order_id>/edit_quantity", methods=["POST"])
+@login_required
+def api_order_edit_quantity(order_id):
+    """Lets staff correct an order's quantity/kg_size after it was placed
+    (boss's report, Oct 1: customer online-ordered 10kg then changed
+    their mind to 12kg before/after delivery) - there was previously NO
+    way to fix this short of deleting and recreating the whole order.
+
+    Works in both timing scenarios boss confirmed:
+      1. BEFORE Delivered - just corrects quantity/kg_size/total_sales on
+         the order. No points action needed here: apply_delivered_side_
+         effects() (called later, when staff taps "Done") always reads
+         total_sales FRESH from Firebase at that moment, so it naturally
+         awards points on the corrected amount, not the original.
+      2. AFTER Delivered (points already awarded) - same quantity/total
+         correction, PLUS a points adjustment for the DIFFERENCE only
+         (new total - old total), logged through the same
+         award_loyalty_points() ledger used everywhere else (manual
+         adjustments, referral bonuses, etc.) so it's never a silent,
+         untraceable balance change - boss confirmed points should
+         always reflect the final/correct quantity.
+
+    Cancelled/Declined orders are blocked - there's nothing to "correct"
+    on an order that never happened.
+    """
+    try:
+        data = request.json or {}
+        existing = fb_get(f"daily_sales/{order_id}")
+        if not existing:
+            return jsonify({"ok": False, "error": "Order not found"}), 404
+        if existing.get("order_status") in ("Cancelled", "Declined"):
+            return jsonify({"ok": False, "error": "Hindi na pwede i-edit ang Cancelled/Declined na order"}), 400
+
+        new_qty = int(data.get("quantity") or 0)
+        if new_qty <= 0:
+            return jsonify({"ok": False, "error": "Invalid quantity"}), 400
+        new_kg_size = (data.get("kg_size") or existing.get("kg_size") or "1Kg").strip()
+        reason = (data.get("reason") or "Quantity correction").strip()[:150]
+
+        old_qty = existing.get("quantity")
+        old_kg_size = existing.get("kg_size")
+        old_total = float(existing.get("total_sales") or 0)
+
+        # Unit price only gets RE-DERIVED (via the same fallback table
+        # api_customer_place_order uses) if the bag SIZE changed - if
+        # it's just the quantity that changed, keep the order's existing
+        # unit_price exactly as-is, in case it was ever hand-adjusted
+        # away from the fallback (e.g. a promo price).
+        if new_kg_size != old_kg_size:
+            fallback = {"1Kg": 10, "5Kg": 50, "10Kg": 100, "25Kg": 250}
+            unit_price = fallback.get(new_kg_size, existing.get("unit_price") or 10)
+        else:
+            unit_price = existing.get("unit_price") or 10
+
+        new_total = round(unit_price * new_qty, 2)
+
+        update_data = {
+            "quantity": new_qty,
+            "kg_size": new_kg_size,
+            "unit_price": unit_price,
+            "total_sales": new_total,
+            "qty_last_edited_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "qty_last_edited_by": session.get("staff_name"),
+        }
+
+        points_adjustment = 0
+        # Order already earned points (was already Delivered) - correct
+        # the DELTA only, never re-award the whole amount again.
+        if (existing.get("order_source") == "customer"
+                and existing.get("points_awarded")
+                and not existing.get("reward_redemption")):
+            old_points = existing.get("points_earned")
+            if old_points is None:
+                old_points = int(round(old_total))
+            new_points = int(round(new_total))
+            points_adjustment = new_points - old_points
+            if points_adjustment != 0 and existing.get("reseller_id"):
+                award_loyalty_points(
+                    existing.get("reseller_id"), points_adjustment,
+                    f"Order qty corrected: {old_qty}x{old_kg_size} → {new_qty}x{new_kg_size} ({reason})",
+                    order_id,
+                )
+                update_data["points_earned"] = new_points
+
+        fb_patch(f"daily_sales/{order_id}", update_data)
+        # Audit trail: every edit logged in its own append-only history,
+        # same pattern as the loyalty points ledger - never overwritten,
+        # so "sino at bakit binago" is always answerable later.
+        try:
+            fb_post(f"daily_sales/{order_id}/qty_edit_log", {
+                "old_qty": old_qty, "old_kg_size": old_kg_size, "old_total": old_total,
+                "new_qty": new_qty, "new_kg_size": new_kg_size, "new_total": new_total,
+                "reason": reason,
+                "edited_by": session.get("staff_name"),
+                "edited_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "points_adjustment": points_adjustment,
+            })
+        except Exception as log_err:
+            print(f"qty_edit_log write failed (non-fatal): {log_err}")
+
+        # Clear dashboard cache so corrected totals show immediately.
+        for k in list(globals().keys()):
+            if k.startswith("_dashboard_cache_"):
+                try:
+                    del globals()[k]
+                except Exception:
+                    pass
+
+        return jsonify({"ok": True, "new_total": new_total, "points_adjustment": points_adjustment})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @app.route("/api/order/<order_id>/status", methods=["POST"])
 @login_required
 def api_update_order_status(order_id):
@@ -11657,6 +11769,35 @@ def staff_orders_page():
   </div>
 </div>
 
+<!-- EDIT QUANTITY modal (boss's request, Oct 1: customer online-ordered
+     10kg then changed mind to 12kg - previously no way to fix this
+     besides deleting + recreating the whole order). Works on an order at
+     ANY stage except Cancelled/Declined, including already-Delivered,
+     since boss confirmed both timings can happen and points must always
+     reflect the FINAL/corrected quantity. -->
+<div class="modal-overlay" id="editQtyModal">
+  <div class="modal-box">
+    <h3>✏️ I-edit ang Quantity</h3>
+    <p style="font-size:12px;color:#666;margin:0 0 4px" id="editQtyCurrentLabel"></p>
+    <label style="font-size:11px;color:#0f2942;font-weight:600;display:block;margin-top:6px">Bagong Quantity</label>
+    <input type="number" min="1" id="editQtyInput" placeholder="Hal. 12" style="width:100%;padding:9px;border-radius:8px;border:1px solid #ccd;font-size:13px;margin-bottom:8px">
+    <label style="font-size:11px;color:#0f2942;font-weight:600;display:block">Bag Size</label>
+    <select id="editKgSizeInput" style="width:100%;padding:9px;border-radius:8px;border:1px solid #ccd;font-size:13px;margin-bottom:8px">
+      <option value="1Kg">1Kg</option>
+      <option value="5Kg">5Kg</option>
+      <option value="10Kg">10Kg</option>
+      <option value="25Kg">25Kg</option>
+    </select>
+    <label style="font-size:11px;color:#0f2942;font-weight:600;display:block">Dahilan (opsyonal)</label>
+    <textarea id="editQtyReasonInput" placeholder="Hal: Nagbago isip ang customer, dinagdagan ang order"></textarea>
+    <p style="font-size:11px;color:#888;margin:4px 0 0" id="editQtyPointsNote"></p>
+    <div class="modal-actions">
+      <button onclick="closeEditQtyModal()">Cancel</button>
+      <button class="modal-btn-confirm" onclick="confirmEditQty()">✅ I-save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let declineTargetId = null;
 function openDeclineModal(id){
@@ -11678,6 +11819,50 @@ async function confirmDecline(){
     const data = await res.json();
     if(data.ok){
       closeDeclineModal();
+      loadOrders();
+    } else {
+      alert(data.error||'Failed');
+    }
+  }catch(e){
+    alert('Network error: '+e.message);
+  }
+}
+
+// EDIT QUANTITY (boss's request, Oct 1) - lets staff correct an order's
+// quantity/bag-size at any stage (New Order through already-Delivered),
+// e.g. "10kg naging 12kg" after the customer changed their mind.
+// pointsAwarded is passed in so the modal can warn staff when the
+// correction will also adjust an already-credited points balance
+// (vs. a not-yet-delivered order, where points simply haven't been
+// awarded yet and nothing extra needs explaining).
+let editQtyTargetId = null;
+function openEditQtyModal(id, currentQty, currentKgSize, pointsAwarded){
+  editQtyTargetId = id;
+  document.getElementById('editQtyCurrentLabel').textContent = `Kasalukuyan: ${currentQty}x ${currentKgSize}`;
+  document.getElementById('editQtyInput').value = currentQty;
+  document.getElementById('editKgSizeInput').value = currentKgSize;
+  document.getElementById('editQtyReasonInput').value = '';
+  document.getElementById('editQtyPointsNote').textContent = pointsAwarded
+    ? '⚠️ Na-deliver na ang order na ito - awtomatikong ia-adjust din ang points base sa bagong quantity.'
+    : 'Hindi pa delivered - awtomatikong tama na ang points pag na-deliver.';
+  document.getElementById('editQtyModal').classList.add('open');
+}
+function closeEditQtyModal(){
+  editQtyTargetId = null;
+  document.getElementById('editQtyModal').classList.remove('open');
+}
+async function confirmEditQty(){
+  const qty = parseInt(document.getElementById('editQtyInput').value);
+  const kgSize = document.getElementById('editKgSizeInput').value;
+  const reason = document.getElementById('editQtyReasonInput').value.trim();
+  if(!qty || qty <= 0){ alert('Ilagay ang tamang quantity (dapat higit sa 0).'); return; }
+  if(!editQtyTargetId) return;
+  const id = editQtyTargetId;
+  try{
+    const res = await fetch(`/api/order/${id}/edit_quantity`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({quantity:qty, kg_size:kgSize, reason})});
+    const data = await res.json();
+    if(data.ok){
+      closeEditQtyModal();
       loadOrders();
     } else {
       alert(data.error||'Failed');
@@ -11790,7 +11975,12 @@ const list=document.getElementById('ordersList');
       const tatBlock = (isDelivered && o.created_at && o.delivered_at)
         ? `<div style="font-size:11px;color:#16a34a;margin-top:4px">⏱ Delivered in ${formatElapsed(o.created_at, o.delivered_at)}</div>`
         : '';
-      return `<div class="order-card" data-order-id="${o.id}" style="border-left-color:${borderColor};opacity:0.8"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}${deliveredBadge}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div>${tatBlock}${reasonBlock}<div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><span style="font-size:11px;color:${statusTextColor};font-weight:600">${statusLabel}</span><button class="btn" style="background:#fff;color:#ef4444;border-color:#fca5a5;flex:0 0 auto;padding:9px 14px" onclick="deleteOrder('${o.id}')">🗑️ Delete</button></div></div>`;
+      // Edit Qty stays available even after Delivered (boss's request,
+      // Oct 1) - but not on Cancelled/Declined, nothing to correct there.
+      const editQtyBtnFinished = isDelivered
+        ? `<button class="btn" style="background:#fff;color:#00609C;border-color:#cde;flex:0 0 auto;padding:9px 14px" onclick="openEditQtyModal('${o.id}', ${o.quantity}, '${o.kg_size}', ${!!o.points_awarded})">✏️ Edit Qty</button>`
+        : '';
+      return `<div class="order-card" data-order-id="${o.id}" style="border-left-color:${borderColor};opacity:0.8"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}${deliveredBadge}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div>${tatBlock}${reasonBlock}<div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><span style="font-size:11px;color:${statusTextColor};font-weight:600">${statusLabel}</span><div style="display:flex;gap:6px">${editQtyBtnFinished}<button class="btn" style="background:#fff;color:#ef4444;border-color:#fca5a5;flex:0 0 auto;padding:9px 14px" onclick="deleteOrder('${o.id}')">🗑️ Delete</button></div></div></div>`;
     }
     const rewardBadge = o.reward_redemption ? ` <span style="font-size:9px;background:#fde68a;color:#92400e;padding:2px 7px;border-radius:10px;font-weight:700">🎁 FREE REWARD${o.reward_label ? ' - '+o.reward_label : ''}</span>` : '';
     const priceLabel = o.reward_redemption ? 'FREE' : `₱${o.total_sales}`;
@@ -11842,7 +12032,8 @@ const list=document.getElementById('ordersList');
     const followUpCountBadge = o.follow_up_count > 0 ? ` (${o.follow_up_count}x)` : '';
     const followUpBtn = `<button type="button" class="btn" style="background:#fff;color:#00609C;border-color:#cde;flex:0 0 auto;padding:6px 12px;font-size:11px" onclick="followUpOrder('${o.id}')">📞 Follow Up${followUpCountBadge}</button>`;
     const metaRow = `<div style="margin-top:6px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">${elapsedBadge}${followUpBtn}</div>`;
-    return `<div class="order-card" data-order-id="${o.id}"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}${rewardBadge}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ${priceLabel} • ${o.sales_date}</div>${metaRow}<div class="order-actions">${stepButtonsHtml}<button class="btn btn-decline" onclick="openDeclineModal('${o.id}')">🚫 Decline</button><button class="btn" style="background:#fff;color:#ef4444;border-color:#fca5a5" onclick="deleteOrder('${o.id}')">🗑️ Delete</button></div></div>`;
+    const editQtyBtnActive = `<button class="btn" style="background:#fff;color:#00609C;border-color:#cde" onclick="openEditQtyModal('${o.id}', ${o.quantity}, '${o.kg_size}', ${!!o.points_awarded})">✏️ Edit Qty</button>`;
+    return `<div class="order-card" data-order-id="${o.id}"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}${rewardBadge}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ${priceLabel} • ${o.sales_date}</div>${metaRow}<div class="order-actions">${stepButtonsHtml}${editQtyBtnActive}<button class="btn btn-decline" onclick="openDeclineModal('${o.id}')">🚫 Decline</button><button class="btn" style="background:#fff;color:#ef4444;border-color:#fca5a5" onclick="deleteOrder('${o.id}')">🗑️ Delete</button></div></div>`;
   }).join('');
 }
 async function updateStatus(id,status){
@@ -11974,6 +12165,11 @@ def api_staff_customer_orders():
                 continue
                 
             orders.append({"id":key,"reseller_id":val.get("reseller_id") or "","reseller_name":val.get("reseller_name"),"quantity":val.get("quantity"),"kg_size":val.get("kg_size"),"total_sales":val.get("total_sales"),"mode":val.get("mode"),"sales_date":val.get("sales_date"),"order_status":val.get("order_status","New Order"),"created_at":val.get("created_at"),"delivered_at":val.get("delivered_at") or "","reward_redemption":bool(val.get("reward_redemption")),"reward_label":val.get("reward_label") or "","decline_reason":val.get("decline_reason") or "","declined_at":val.get("declined_at") or "",
+                # Edit Qty feature (boss's request, Oct 1) needs to know
+                # whether points were already credited for this order, so
+                # the edit modal can warn staff that a quantity correction
+                # will also adjust an already-awarded points balance.
+                "points_awarded":bool(val.get("points_awarded")),
                 # Follow Up feature (boss's request, Sept 26): a running
                 # count + last-followed-up timestamp, surfaced on the
                 # order card so staff can see "na-follow up ko na ba
