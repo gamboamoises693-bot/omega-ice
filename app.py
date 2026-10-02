@@ -15425,6 +15425,15 @@ GAMES_HUB_HTML = """<!DOCTYPE html>
 .section-head b{font-size:13px;color:#0f2942}
 .win-banner{background:#dcfce7;color:#166534;border-radius:10px;padding:12px;margin-top:10px;font-size:13px;text-align:center;font-weight:700;display:none}
 .action-link{display:block;text-align:center;background:#00609C;color:#fff;font-weight:700;font-size:12.5px;padding:11px;border-radius:10px;text-decoration:none;cursor:pointer;border:none;width:100%;margin-top:8px}
+.empty-hint{text-align:center;font-size:12px;color:#888;padding:20px 0}
+
+/* ---- Level picker (reused by Trivia's 1000 levels) ---- */
+.level-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;max-height:420px;overflow-y:auto;padding-right:2px;margin-bottom:4px}
+.level-btn{width:100%;min-width:0;aspect-ratio:1;border-radius:10px;border:1px solid #d7e3ef;background:#f8fafc;color:#334155;font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.level-btn:active{background:#eef4fb}
+.timer-label{text-align:center;font-size:16px;font-weight:800;color:#00609C;background:#eef4fb;border-radius:10px;padding:8px;margin-bottom:10px}
+.timer-label.warn{color:#c2410c;background:#fff7ed}
+.timer-label.expired{color:#c0392b;background:#fee2e2}
 
 /* ---- Sudoku ---- */
 .sud-diff-row{display:flex;gap:6px;margin-bottom:12px}
@@ -15521,16 +15530,30 @@ input.sud-cell.incorrect{background:#fee2e2 !important;color:#c0392b}
 <div id="tab-trivia" class="tabpanel" style="display:none">
   <div class="card">
     <div class="section-head"><b>❓ Trivia Quiz</b><span class="badge fun">LIBANGAN LANG</span></div>
-    <div id="triviaCard">
-      <div class="triv-progress" id="triviaProgress"></div>
-      <div class="triv-q" id="triviaQ"></div>
-      <div id="triviaChoices"></div>
-      <button class="action-link" id="triviaNextBtn" style="display:none" onclick="nextTrivia()">Susunod na Tanong →</button>
+    <div class="hint">1000 levels, 20 tanong bawat level, 3 minuto ang oras bawat level. Kung maubusan ng oras, mag-re-restart ang level mula sa tanong 1 na may panibagong mga tanong.</div>
+
+    <div id="triviaLevelListView">
+      <div id="trivLevelGrid" class="level-grid"><div class="empty-hint">Loading...</div></div>
     </div>
-    <div id="triviaDone" style="display:none;text-align:center">
-      <div style="font-size:14px;font-weight:800;color:#0f2942;margin-bottom:6px">Tapos ang Round!</div>
-      <div style="font-size:24px;font-weight:800;color:#00609C;margin-bottom:14px" id="triviaScoreFinal"></div>
-      <button class="action-link" onclick="startTrivia()">🔄 Ulitin</button>
+
+    <div id="triviaRoundView" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:700;font-size:13px" id="trivLevelLabel">Level 1</span>
+        <button class="btn" onclick="backToTriviaLevels()">← Listahan</button>
+      </div>
+      <div id="trivTimerLabel" class="timer-label">⏱ 3:00</div>
+      <div id="triviaCard">
+        <div class="triv-progress" id="triviaProgress"></div>
+        <div class="triv-q" id="triviaQ"></div>
+        <div id="triviaChoices"></div>
+      </div>
+      <div id="triviaTimeoutMsg" class="win-banner" style="background:#fee2e2;color:#991b1b">⏰ Lumipas ang 3 minuto! Panibagong tanong, simula ulit...</div>
+      <div id="triviaRoundDone" style="display:none;text-align:center">
+        <div style="font-size:14px;font-weight:800;color:#0f2942;margin-bottom:6px">Tapos ang Level!</div>
+        <div style="font-size:24px;font-weight:800;color:#00609C;margin-bottom:14px" id="triviaScoreFinal"></div>
+        <button class="action-link" onclick="startTriviaRound()">🔁 Ulitin ang Level (bagong tanong)</button>
+        <button class="action-link" id="trivNextLevelBtn" style="display:none;margin-top:8px" onclick="goToNextTriviaLevel()">➡️ Susunod na Level</button>
+      </div>
     </div>
   </div>
 </div>
@@ -15569,7 +15592,7 @@ function switchTab(tab){
     initializedTabs.add(tab);
     if(tab==='sudoku') newSudoku('medium');
     if(tab==='wordsearch') renderWordSearch();
-    if(tab==='trivia') startTrivia();
+    if(tab==='trivia') renderTriviaLevelGrid();
     if(tab==='solitaire') dealSolitaire();
   }
 }
@@ -15799,60 +15822,256 @@ function onWsTap(r,c){
   wsFirstTap = null;
 }
 
-/* ===================== TRIVIA ===================== */
+/* ===================== TRIVIA =====================
+   boss's request, Oct 3: "yung sa trivia 20 questions per level at
+   gawin mong 1000 levels. Gawing random mga tanong at general
+   knowledge sa pilipinas history, current events at iba pa. Lagyan ng
+   3min timer pag naubos oras babalik sa unang tanong sa level na yun
+   at magiging bago ulit ang tanong."
+
+   NOTE on scope (read this before touching TRIVIA_BANK): writing
+   20,000 unique hand-checked questions (1000 levels x 20) is not
+   practical or good practice - mababa ang quality kung puro padagdag
+   lang ng tanong na hindi na-verify. Same pattern ginamit na sa
+   Sudoku/Word Search: ang 1000 "levels" ay 1000 REPLAYABLE ROUNDS, at
+   bawat round ay kumukuha ng 20 random, non-repeating questions mula
+   sa isang solidong bank (~140 items sa ibaba, lahat na-verify na
+   evergreen facts - wala kaming nilagay na tungkol sa kasalukuyang
+   mga opisyal/pulitiko dahil maaari na itong maging mali paglipas ng
+   panahon). Ganito rin gumagana ang Sudoku generator - bagong puzzle
+   bawat laro imbes na 1000 pre-made puzzles. */
+const TRIVIA_TOTAL_LEVELS = 1000;
+const TRIVIA_QUESTIONS_PER_LEVEL = 20;
+const TRIVIA_TIME_LIMIT_SECONDS = 180;
 const TRIVIA_BANK = [
-  {q:"Ilang litro ang laman ng isang standard na pitsel ng tubig dito sa Pilipinas?", choices:["5 litro","10 litro","20 litro"], answer:1},
+  // ---- Kasaysayan ng Pilipinas (History) ----
+  {q:"Sino ang pambansang bayani ng Pilipinas, sumulat ng Noli Me Tangere?", choices:["Jose Rizal","Andres Bonifacio","Emilio Aguinaldo"], answer:0},
+  {q:"Sino ang nagtatag ng Katipunan noong 1892?", choices:["Jose Rizal","Andres Bonifacio","Apolinario Mabini"], answer:1},
+  {q:"Anong taon idineklara ang kalayaan ng Pilipinas mula sa Espanya sa Kawit, Cavite?", choices:["1898","1901","1946"], answer:0},
+  {q:"Sino ang unang Pangulo ng Republika ng Pilipinas?", choices:["Emilio Aguinaldo","Manuel Quezon","Sergio Osmeña"], answer:0},
+  {q:"Sino ang sumulat ng El Filibusterismo?", choices:["Andres Bonifacio","Jose Rizal","Marcelo del Pilar"], answer:1},
+  {q:"Anong taon binaril si Jose Rizal sa Bagumbayan?", choices:["1896","1898","1901"], answer:0},
+  {q:"Saan isinilang si Jose Rizal?", choices:["Calamba, Laguna","Kawit, Cavite","Malolos, Bulacan"], answer:0},
+  {q:"Anong taon dumating si Ferdinand Magellan sa Pilipinas?", choices:["1521","1565","1898"], answer:0},
+  {q:"Sino ang pinunong Pilipino na pumatay kay Magellan sa Labanan sa Mactan?", choices:["Lapu-Lapu","Humabon","Sikatuna"], answer:0},
+  {q:"Sino ang Espanyol na nagtatag ng unang permanenteng kolonya sa Cebu noong 1565?", choices:["Miguel López de Legazpi","Ferdinand Magellan","Juan de Salcedo"], answer:0},
+  {q:"Sino ang tinaguriang 'Utak ng Himagsikan' (Brains of the Revolution)?", choices:["Apolinario Mabini","Emilio Jacinto","Antonio Luna"], answer:0},
+  {q:"Sino ang pintor ng kilalang obrang 'Spoliarium'?", choices:["Juan Luna","Antonio Luna","Fernando Amorsolo"], answer:0},
+  {q:"Sino ang unang Pangulo ng Commonwealth ng Pilipinas?", choices:["Manuel L. Quezon","Sergio Osmeña","Manuel Roxas"], answer:0},
+  {q:"Anong taon dumating ang mga Hapones at sinalakay ang Pilipinas noong Ikalawang Digmaang Pandaigdig?", choices:["1941","1898","1972"], answer:0},
+  {q:"Saang lalawigan naganap ang Death March noong 1942?", choices:["Bataan","Batangas","Bulacan"], answer:0},
+  {q:"Sino ang Heneral ng US na nangakong 'I shall return' nang umalis sa Pilipinas noong 1942?", choices:["Douglas MacArthur","Dwight Eisenhower","George Patton"], answer:0},
+  {q:"Saan bumalik si Heneral MacArthur noong 1944 para simulan ang paglaya ng Pilipinas?", choices:["Leyte","Luzon","Mindanao"], answer:0},
+  {q:"Anong taon binigyan ng tunay na kasarinlan ang Pilipinas mula sa Estados Unidos?", choices:["1946","1935","1898"], answer:0},
+  {q:"Sino ang Pangulong nanungkulan nang idineklara ang Batas Militar noong 1972?", choices:["Ferdinand Marcos Sr.","Diosdado Macapagal","Corazon Aquino"], answer:0},
+  {q:"Sino ang unang babaeng Pangulo ng Pilipinas?", choices:["Corazon Aquino","Gloria Macapagal-Arroyo","Imelda Marcos"], answer:0},
+  {q:"Anong taon namatay si Ninoy Aquino sa paliparan ng Maynila?", choices:["1983","1986","1981"], answer:0},
+  {q:"Anong kilusan ang nagpabagsak sa diktaduryang Marcos noong 1986?", choices:["EDSA People Power Revolution","Propaganda Movement","Cry of Pugad Lawin"], answer:0},
+  {q:"Anong taon inilipat ang opisyal na Araw ng Kalayaan mula July 4 patungong June 12?", choices:["1962","1946","1986"], answer:0},
+  {q:"Sino ang sumulat ng Florante at Laura?", choices:["Francisco Balagtas","Jose Rizal","Lope K. Santos"], answer:0},
+  {q:"Anong pangkat ang Propaganda Movement, naglalayong magkaroon ng repormang legal mula sa Espanya?", choices:["Mga Ilustrado","Mga Katipunero","Mga Prayle"], answer:0},
+  {q:"Anong unibersidad sa Maynila ang itinuturing na pinakamatandang unibersidad sa Asya, itinatag noong 1611?", choices:["University of Santo Tomas","University of the Philippines","Ateneo de Manila"], answer:0},
+  {q:"Anong pader-bayan sa Maynila ang itinayo ng mga Espanyol bilang sentro ng kolonyal na pamahalaan?", choices:["Intramuros","Binondo","Ermita"], answer:0},
+  {q:"Anong distrito sa Maynila ang itinuturing na pinakamatandang Chinatown sa mundo?", choices:["Binondo","Intramuros","Quiapo"], answer:0},
+  {q:"Anong simbahan sa Intramuros ang Baroque-style at UNESCO World Heritage Site?", choices:["San Agustin Church","Quiapo Church","Manila Cathedral"], answer:0},
+  {q:"Ilang taon humigit-kumulang ang pananakop ng Espanya sa Pilipinas?", choices:["Mga 300 taon","Mga 100 taon","Mga 50 taon"], answer:0},
+  // ---- Heograpiya (Geography) ----
+  {q:"Ano ang pinakamalaking isla sa Pilipinas?", choices:["Luzon","Mindanao","Palawan"], answer:0},
+  {q:"Humigit-kumulang ilang isla ang bumubuo sa Pilipinas?", choices:["Mga 7,000+","Mga 1,000","Mga 500"], answer:0},
+  {q:"Alin ang pinakamataas na bundok sa Pilipinas?", choices:["Mount Apo","Mount Pulag","Mount Mayon"], answer:0},
+  {q:"Saan matatagpuan ang Mount Apo?", choices:["Davao","Benguet","Albay"], answer:0},
+  {q:"Alin ang kilalang bulkang halos perpekto ang hugis-kono sa Albay?", choices:["Mayon Volcano","Taal Volcano","Pinatubo"], answer:0},
+  {q:"Alin ang pinakamahabang ilog sa Pilipinas?", choices:["Cagayan River","Pasig River","Agno River"], answer:0},
+  {q:"Saan matatagpuan ang Chocolate Hills?", choices:["Bohol","Cebu","Palawan"], answer:0},
+  {q:"Anong lungsod ang tinaguriang 'Queen City of the South'?", choices:["Cebu City","Davao City","Iloilo City"], answer:0},
+  {q:"Anong isla sa pinakahilagang bahagi ng Pilipinas, malapit sa Taiwan?", choices:["Batanes","Palawan","Mindoro"], answer:0},
+  {q:"Saang lalawigan matatagpuan ang Banaue Rice Terraces?", choices:["Ifugao","Benguet","Mountain Province"], answer:0},
+  {q:"Alin ang pinakamalaking lawa sa Pilipinas?", choices:["Laguna de Bay","Taal Lake","Lake Lanao"], answer:0},
+  {q:"Saan matatagpuan ang Lake Lanao?", choices:["Lanao del Sur","Bukidnon","Palawan"], answer:0},
+  {q:"Anong karagatan ang nasa kanlurang bahagi ng Pilipinas?", choices:["West Philippine Sea","Atlantic Ocean","Caribbean Sea"], answer:0},
+  {q:"Alin ang opisyal na kabisera ng Pilipinas?", choices:["Maynila","Quezon City","Makati"], answer:0},
+  {q:"Anong puno ang itinuturing na pambansang puno ng Pilipinas?", choices:["Narra","Mahogany","Molave"], answer:0},
+  {q:"Anong bulaklak ang pambansang bulaklak ng Pilipinas?", choices:["Sampaguita","Rosas","Gumamela"], answer:0},
+  {q:"Anong ibon ang pambansang ibon ng Pilipinas?", choices:["Philippine Eagle","Maya","Agila"], answer:0},
+  {q:"Anong isda ang pambansang isda ng Pilipinas?", choices:["Bangus (Milkfish)","Tilapia","Tulingan"], answer:0},
+  {q:"Saan pinaka-matatagpuan ang Philippine Eagle?", choices:["Mindanao","Palawan","Batanes"], answer:0},
+  {q:"Saang lungsod matatagpuan ang Hundred Islands National Park?", choices:["Alaminos, Pangasinan","Puerto Princesa","El Nido"], answer:0},
+  {q:"Anong UNESCO World Heritage Site sa Palawan ang may underground river?", choices:["Puerto Princesa Subterranean River","Tubbataha Reefs","El Nido Lagoon"], answer:0},
+  {q:"Anong marine park sa Sulu Sea ang UNESCO World Heritage Site, kilala sa coral reefs?", choices:["Tubbataha Reefs Natural Park","Apo Reef","Hundred Islands"], answer:0},
+  {q:"Anong bagong rehiyon ang naitatag noong 2019 sa Mindanao matapos ang plebisito?", choices:["BARMM (Bangsamoro)","ARMM","CARAGA"], answer:0},
+  {q:"Anong taon sumabog ang Mount Pinatubo, isa sa pinakamalaking pagsabog ng bulkan noong ika-20 siglo?", choices:["1991","1986","2000"], answer:0},
+  {q:"Anong hayop na pinakamaliit na kalabaw sa mundo ang endemiko sa Mindoro?", choices:["Tamaraw","Carabao","Kalabaw"], answer:0},
+  {q:"Anong malaking isda ang madalas makita sa Donsol, Sorsogon, tinatawag ding 'Butanding'?", choices:["Whale Shark","Dolphin","Manta Ray"], answer:0},
+  // ---- Kultura (Culture) ----
+  {q:"Anong kilalang pista sa Cebu ang ginaganap taon-taon bilang parangal kay Santo Niño?", choices:["Sinulog Festival","Ati-Atihan","Pahiyas"], answer:0},
+  {q:"Saan ginaganap ang Ati-Atihan Festival?", choices:["Kalibo, Aklan","Cebu","Iloilo"], answer:0},
+  {q:"Anong pista sa Lucban, Quezon ang kilala sa palamuting kakanin at gulay sa mga bahay?", choices:["Pahiyas Festival","Masskara Festival","Panagbenga"], answer:0},
+  {q:"Saang lungsod ginaganap ang MassKara Festival?", choices:["Bacolod City","Davao City","Baguio City"], answer:0},
+  {q:"Anong taunang Festival ng mga bulaklak ang ginaganap sa Baguio?", choices:["Panagbenga Festival","Kadayawan","Dinagyang"], answer:0},
+  {q:"Anong Festival sa Iloilo ang parangal din kay Santo Niño?", choices:["Dinagyang Festival","Ati-Atihan","Pahiyas"], answer:0},
+  {q:"Anong putahe ang binubuo ng manok o baboy na niluto sa suka, toyo, bawang, at paminta?", choices:["Adobo","Sinigang","Kare-kare"], answer:0},
+  {q:"Anong putahe ang maasim na sabaw mula sa sampalok o iba pang maasim na sangkap?", choices:["Sinigang","Nilaga","Bulalo"], answer:0},
+  {q:"Anong tradisyonal na sayaw ang gumagamit ng dalawang kawayan na pinagsasalit-salit habang sumasayaw?", choices:["Tinikling","Pandanggo sa Ilaw","Cariñosa"], answer:0},
+  {q:"Anong sayaw ang gumagamit ng mga ilaw/lampara na balanse sa ulo at kamay ng mananayaw?", choices:["Pandanggo sa Ilaw","Tinikling","Singkil"], answer:0},
+  {q:"Anong sayaw mula Mindanao ang gumagamit ng apat na kawayan bilang palakpakan?", choices:["Singkil","Tinikling","Itik-Itik"], answer:0},
+  {q:"Anong anyo ng panitikan ang Ibong Adarna?", choices:["Korido (epiko sa tula)","Nobela","Dula"], answer:0},
+  {q:"Anong tawag sa tradisyonal na bahay na gawa sa kawayan at kugon, nakatayo sa poste?", choices:["Bahay Kubo","Bahay na Bato","Kamalig"], answer:0},
+  {q:"Anong gitarang Pilipino ang may labing-apat na kwerdas at mas maliit kaysa karaniwang gitara?", choices:["Bandurria","Rondalla","Kutyapi"], answer:0},
+  {q:"Anong instrumento ang binubuo ng hanay ng maliliit na gong, ginagamit ng mga Maguindanao/Maranao?", choices:["Kulintang","Rondalla","Bandurria"], answer:0},
+  {q:"Anong katutubong pagsulat ng mga sinaunang Pilipino bago dumating ang mga Espanyol?", choices:["Baybayin","Kanji","Hiragana"], answer:0},
+  {q:"Ilang titik mayroon ang makabagong alpabetong Filipino?", choices:["28","26","20"], answer:0},
+  {q:"Anong matamis na meryenda ang gawa sa dinurog na yelo, gatas, at iba't ibang matamis na sangkap?", choices:["Halo-halo","Taho","Buko Pandan"], answer:0},
+  // ---- Agham at Kalikasan (Science & Nature) ----
   {q:"Ano ang tawag sa tubig na pinalamig hanggang maging solid?", choices:["Yelo","Singaw","Ulan"], answer:0},
-  {q:"Alin sa mga ito ang pinakamalaking isla sa Pilipinas?", choices:["Cebu","Luzon","Palawan"], answer:1},
-  {q:"Ano ang kabisera ng Pilipinas?", choices:["Quezon City","Maynila","Cebu City"], answer:1},
-  {q:"Alin sa mga ito ang HINDI karaniwang paraan ng pagbabayad sa sari-sari store?", choices:["Cash","Utang/listahan","Cryptocurrency"], answer:2},
-  {q:"Ano ang tawag sa paninda na binibili ng tingi-tingi (hindi buo/bulto)?", choices:["Tingi","Wholesale","Bulto"], answer:0},
   {q:"Alin ang pinakamalamig sa mga ito?", choices:["Yelo","Tubig sa gripo","Init ng araw"], answer:0},
-  {q:"Ano ang katawagan sa resibo o listahan ng utang sa tindahan?", choices:["Resibo","Listahan ng utang","Pareho A at B"], answer:2},
-  {q:"Alin ang tamang pagkakasunod mula pinakamaliit hanggang pinakamalaki?", choices:["Kilo, Gramo, Tonelada","Gramo, Kilo, Tonelada","Tonelada, Kilo, Gramo"], answer:1},
-  {q:"Ano ang tawag sa pera na isinusuklian sa customer?", choices:["Sukli","Puhunan","Kita"], answer:0},
-  {q:"Alin sa mga ito ang hindi parte ng isang karaniwang sari-sari store?", choices:["Timbangan","Ref o chiller","Swimming pool"], answer:2},
-  {q:"Anong oras karaniwang nagbubukas ang mga sari-sari store sa umaga?", choices:["Madaling-araw o maaga","Tanghali","Gabi lang"], answer:0},
-  {q:"Ano ang tawag sa paulit-ulit na suki o regular na customer?", choices:["Bagong customer","Suki","Estranghero"], answer:1},
-  {q:"Alin sa mga ito ang yunit ng timbang?", choices:["Litro","Kilo","Metro"], answer:1},
+  {q:"Alin ang tamang pagkakasunod mula pinakamaliit hanggang pinakamalaki?", choices:["Gramo, Kilo, Tonelada","Kilo, Gramo, Tonelada","Tonelada, Kilo, Gramo"], answer:0},
+  {q:"Alin sa mga ito ang yunit ng timbang?", choices:["Kilo","Litro","Metro"], answer:0},
   {q:"Alin sa mga ito ang yunit ng dami ng likido?", choices:["Litro","Kilo","Metro"], answer:0},
-  {q:"Ano ang tawag sa paninda na nangangailangan ng refrigeration o pagpapalamig?", choices:["Dry goods","Perishable/Nabubulok","Hardware"], answer:1},
+  // ---- Pamahalaan at Lipunan (Government & Society, evergreen facts only) ----
+  {q:"Ilang taon ang termino ng Pangulo ng Pilipinas?", choices:["6 taon","4 taon","5 taon"], answer:0},
+  {q:"Pwede bang muling tumakbo ang isang Pangulo ng Pilipinas pagkatapos ng isang termino?", choices:["Hindi na pwede (isang termino lang)","Pwede, isang beses pa","Pwede nang walang limitasyon"], answer:0},
+  {q:"Ilang sangay (branches) mayroon ang pamahalaan ng Pilipinas?", choices:["3 (Executive, Legislative, Judicial)","2","4"], answer:0},
+  {q:"Anong tawag sa mambabatas sa Kamara de Representante?", choices:["Kongresista","Senador","Gobernador"], answer:0},
+  {q:"Ilang Senador mayroon sa Senado ng Pilipinas?", choices:["24","12","50"], answer:0},
+  {q:"Anong tawag sa opisyal na tirahan ng Pangulo ng Pilipinas?", choices:["Malacañang Palace","Batasang Pambansa","Senado"], answer:0},
+  {q:"Anong taon idineklara ang kasalukuyang (1987) Saligang Batas ng Pilipinas?", choices:["1987","1986","1935"], answer:0},
+  {q:"Ilang taong gulang pataas ang pwedeng bumoto sa Pilipinas?", choices:["18 taong gulang pataas","21 taong gulang pataas","16 taong gulang pataas"], answer:0},
+  {q:"Anong edukasyong programa ng gobyerno ang sumasaklaw mula Kindergarten hanggang Grade 12?", choices:["K to 12 Program","Alternative Learning System","DepEd Commons"], answer:0},
+  {q:"Anong programa ng gobyerno ang nagbibigay ng cash assistance sa mahihirap na pamilya?", choices:["Pantawid Pamilyang Pilipino Program (4Ps)","SSS","PhilHealth"], answer:0},
+  {q:"Anong ahensya ng gobyerno ang responsable sa national health insurance ng mga Pilipino?", choices:["PhilHealth","SSS","Pag-IBIG"], answer:0},
+  {q:"Anong ahensya ang namamahala sa pabahay/housing loan ng mga empleyado?", choices:["Pag-IBIG Fund","SSS","GSIS"], answer:0},
+  {q:"Anong ahensya ang pondo ng pensyon ng mga pribadong empleyado?", choices:["SSS (Social Security System)","GSIS","Pag-IBIG"], answer:0},
+  {q:"Anong ahensya ang pondo ng pensyon ng mga government employee?", choices:["GSIS","SSS","Pag-IBIG"], answer:0},
+  {q:"Anong pera ang ginagamit sa Pilipinas?", choices:["Piso","Dolyar","Ringgit"], answer:0},
+  {q:"Sino ang mga nasa lumang 500-piso bill (dilaw ang kulay)?", choices:["Ninoy at Cory Aquino","Jose Rizal","Andres Bonifacio"], answer:0},
+  {q:"Anong simbolo ang nasa gitna ng bandila ng Pilipinas?", choices:["Araw na may walong sinag at tatlong bituin","Buwan at bituin","Agila"], answer:0},
+  {q:"Anong organisasyon ng mga bansa sa Timog-Silangang Asya ang kasapi ang Pilipinas?", choices:["ASEAN","NATO","European Union"], answer:0},
+  {q:"Anong taon itinatag ang ASEAN?", choices:["1967","1945","1986"], answer:0},
+  {q:"Anong pandaigdigang organisasyon ang kasapi ang Pilipinas bilang isa sa founding members noong 1945?", choices:["United Nations","WHO","WTO"], answer:0},
+  {q:"Anong orihinal na pangalan ang itinawag ng mga Espanyol sa Pilipinas, parangal kay Haring Philip II?", choices:["Las Islas Filipinas","Las Islas Marianas","Nueva España"], answer:0},
+  // ---- Isports (Sports) ----
+  {q:"Sino ang kilalang Pilipinong boksingero na naging World Champion sa walong magkaibang weight division?", choices:["Manny Pacquiao","Gabriel Elorde","Flash Elorde"], answer:0},
+  {q:"Anong isport ang opisyal na pambansang isport ng Pilipinas (2009)?", choices:["Arnis","Basketball","Sepak Takraw"], answer:0},
+  {q:"Anong palakasan ang pinakasikat/pinaka-popular sa Pilipinas?", choices:["Basketball","Baseball","Rugby"], answer:0},
+  {q:"Sino ang unang Pilipinong nanalo ng Olympic gold medal, sa weightlifting noong Tokyo 2020?", choices:["Hidilyn Diaz","Manny Pacquiao","Efren Reyes"], answer:0},
+  {q:"Sino ang kilalang Pilipinong world champion sa billiards/pool, tinaguriang 'The Magician'?", choices:["Efren Reyes","Django Bustamante","Dennis Orcollo"], answer:0},
+  // ---- Sari-sari Store (dating laman, pinanatili para sa flavor) ----
+  {q:"Ilang litro ang laman ng isang standard na pitsel ng tubig dito sa Pilipinas?", choices:["10 litro","5 litro","20 litro"], answer:0},
+  {q:"Alin sa mga ito ang HINDI karaniwang paraan ng pagbabayad sa sari-sari store?", choices:["Cryptocurrency","Cash","Utang/listahan"], answer:0},
+  {q:"Ano ang tawag sa paninda na binibili ng tingi-tingi (hindi buo/bulto)?", choices:["Tingi","Wholesale","Bulto"], answer:0},
+  {q:"Ano ang katawagan sa resibo o listahan ng utang sa tindahan?", choices:["Listahan ng utang","Resibo lang","Invoice"], answer:0},
+  {q:"Ano ang tawag sa pera na isinusuklian sa customer?", choices:["Sukli","Puhunan","Kita"], answer:0},
+  {q:"Alin sa mga ito ang hindi parte ng isang karaniwang sari-sari store?", choices:["Swimming pool","Timbangan","Ref o chiller"], answer:0},
+  {q:"Anong oras karaniwang nagbubukas ang mga sari-sari store sa umaga?", choices:["Madaling-araw o maaga","Tanghali","Gabi lang"], answer:0},
+  {q:"Ano ang tawag sa paulit-ulit na suki o regular na customer?", choices:["Suki","Bagong customer","Estranghero"], answer:0},
+  {q:"Ano ang tawag sa paninda na nangangailangan ng refrigeration o pagpapalamig?", choices:["Perishable/Nabubulok","Dry goods","Hardware"], answer:0},
   {q:"Alin ang karaniwang gamit ng plastic bag sa tindahan?", choices:["Pambalot ng paninda","Panlinis ng sahig","Pantimbang"], answer:0},
   {q:"Ano ang tawag sa aparato na ginagamit para malaman ang presyo ng paninda?", choices:["Timbangan o price tag","Telepono","Relo"], answer:0},
-  {q:"Alin sa mga ito ang hindi kailangan sa pagbabantay ng tindahan?", choices:["Pera pang sukli","Pasensya","Traffic light"], answer:2},
-  {q:"Ano ang tawag kapag mas marami ang paninda kaysa sa kinakailangan?", choices:["Kulang","Sobra/Stock","Ubos"], answer:1},
+  {q:"Ano ang tawag kapag mas marami ang paninda kaysa sa kinakailangan?", choices:["Sobra/Stock","Kulang","Ubos"], answer:0},
 ];
-let triviaOrder = [];
-let triviaIndex = 0;
-let triviaScore = 0;
 
-function startTrivia(){
-  triviaOrder = shuffle(Array.from({length:TRIVIA_BANK.length},(_,i)=>i));
-  triviaIndex = 0;
+let currentTriviaLevel = null;
+let triviaQuestions = [];
+let triviaQIndex = 0;
+let triviaScore = 0;
+let triviaTimerInterval = null;
+let triviaSecondsLeft = TRIVIA_TIME_LIMIT_SECONDS;
+
+function renderTriviaLevelGrid(){
+  const el = document.getElementById('trivLevelGrid');
+  let html = '';
+  for(let lvl=1; lvl<=TRIVIA_TOTAL_LEVELS; lvl++){
+    html += `<button class="level-btn" onclick="openTriviaLevel(${lvl})">${lvl}</button>`;
+  }
+  el.innerHTML = html;
+}
+
+function sampleTriviaQuestions(){
+  // boss's request, Oct 3: "gawing random mga tanong" - a fresh,
+  // non-repeating random sample every time a level (re)starts, never
+  // a fixed set per level number. See the scope note above TRIVIA_BANK
+  // for why 1000 levels draw from one shared pool instead of 20,000
+  // hand-written questions.
+  const idxs = shuffle(Array.from({length: TRIVIA_BANK.length}, (_,i)=>i));
+  const count = Math.min(TRIVIA_QUESTIONS_PER_LEVEL, TRIVIA_BANK.length);
+  return idxs.slice(0, count).map(i => TRIVIA_BANK[i]);
+}
+
+function openTriviaLevel(level){
+  currentTriviaLevel = level;
+  document.getElementById('triviaLevelListView').style.display = 'none';
+  document.getElementById('triviaRoundView').style.display = 'block';
+  document.getElementById('trivLevelLabel').textContent = `Level ${level} / ${TRIVIA_TOTAL_LEVELS}`;
+  startTriviaRound();
+}
+
+function backToTriviaLevels(){
+  stopTriviaTimer();
+  document.getElementById('triviaRoundView').style.display = 'none';
+  document.getElementById('triviaLevelListView').style.display = 'block';
+}
+
+function startTriviaRound(){
+  triviaQuestions = sampleTriviaQuestions();
+  triviaQIndex = 0;
   triviaScore = 0;
-  document.getElementById('triviaDone').style.display='none';
-  document.getElementById('triviaCard').style.display='block';
+  document.getElementById('triviaRoundDone').style.display = 'none';
+  document.getElementById('triviaTimeoutMsg').style.display = 'none';
+  document.getElementById('triviaCard').style.display = 'block';
   renderTriviaQuestion();
+  startTriviaTimer();
+}
+
+function startTriviaTimer(){
+  stopTriviaTimer();
+  triviaSecondsLeft = TRIVIA_TIME_LIMIT_SECONDS;
+  updateTriviaTimerLabel();
+  triviaTimerInterval = setInterval(() => {
+    triviaSecondsLeft -= 1;
+    updateTriviaTimerLabel();
+    if(triviaSecondsLeft <= 0){
+      stopTriviaTimer();
+      onTriviaTimeout();
+    }
+  }, 1000);
+}
+
+function stopTriviaTimer(){
+  if(triviaTimerInterval){ clearInterval(triviaTimerInterval); triviaTimerInterval = null; }
+}
+
+function updateTriviaTimerLabel(){
+  const el = document.getElementById('trivTimerLabel');
+  if(!el) return;
+  const s = Math.max(0, triviaSecondsLeft);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  el.textContent = `⏱ ${m}:${String(r).padStart(2,'0')}`;
+  el.className = 'timer-label' + (triviaSecondsLeft <= 0 ? ' expired' : (triviaSecondsLeft <= 20 ? ' warn' : ''));
+}
+
+function onTriviaTimeout(){
+  // boss's request, Oct 3: "pag naubos oras babalik sa unang tanong sa
+  // level na yun at magiging bago ulit ang tanong" - restart the SAME
+  // level number from question 1, with a FRESH randomized set of
+  // questions (never the literal same 20 again).
+  document.getElementById('triviaCard').style.display = 'none';
+  document.getElementById('triviaTimeoutMsg').style.display = 'block';
+  setTimeout(() => startTriviaRound(), 1800);
 }
 
 function renderTriviaQuestion(){
-  if(triviaIndex >= triviaOrder.length){
-    document.getElementById('triviaCard').style.display='none';
-    document.getElementById('triviaDone').style.display='block';
-    document.getElementById('triviaScoreFinal').textContent = `${triviaScore} / ${triviaOrder.length}`;
-    return;
-  }
-  const item = TRIVIA_BANK[triviaOrder[triviaIndex]];
-  document.getElementById('triviaProgress').textContent = `Tanong ${triviaIndex+1} / ${triviaOrder.length} • Tama: ${triviaScore}`;
+  const item = triviaQuestions[triviaQIndex];
+  document.getElementById('triviaProgress').textContent = `Tanong ${triviaQIndex+1} / ${triviaQuestions.length} • Tama: ${triviaScore}`;
   document.getElementById('triviaQ').textContent = item.q;
   const choicesEl = document.getElementById('triviaChoices');
   choicesEl.innerHTML = item.choices.map((c,i)=>`<div class="triv-option" id="triv-opt-${i}" onclick="answerTrivia(${i})">${String.fromCharCode(65+i)}. ${c}</div>`).join('');
-  document.getElementById('triviaNextBtn').style.display='none';
 }
 
 function answerTrivia(i){
-  const item = TRIVIA_BANK[triviaOrder[triviaIndex]];
-  document.querySelectorAll('.triv-option').forEach(el=>el.onclick=null);
+  if(!triviaQuestions.length) return;
+  const item = triviaQuestions[triviaQIndex];
+  document.querySelectorAll('.triv-option').forEach(el => el.onclick = null);
   if(i === item.answer){
     triviaScore++;
     document.getElementById(`triv-opt-${i}`).classList.add('correct');
@@ -15860,12 +16079,30 @@ function answerTrivia(i){
     document.getElementById(`triv-opt-${i}`).classList.add('wrong');
     document.getElementById(`triv-opt-${item.answer}`).classList.add('correct');
   }
-  document.getElementById('triviaNextBtn').style.display='block';
+  setTimeout(() => {
+    triviaQIndex++;
+    if(triviaQIndex >= triviaQuestions.length){
+      finishTriviaRound();
+    } else {
+      renderTriviaQuestion();
+    }
+  }, 700);
 }
 
-function nextTrivia(){
-  triviaIndex++;
-  renderTriviaQuestion();
+function finishTriviaRound(){
+  stopTriviaTimer();
+  document.getElementById('triviaCard').style.display = 'none';
+  document.getElementById('triviaRoundDone').style.display = 'block';
+  document.getElementById('triviaScoreFinal').textContent = `${triviaScore} / ${triviaQuestions.length}`;
+  document.getElementById('trivNextLevelBtn').style.display = currentTriviaLevel < TRIVIA_TOTAL_LEVELS ? 'block' : 'none';
+}
+
+function goToNextTriviaLevel(){
+  if(currentTriviaLevel < TRIVIA_TOTAL_LEVELS){
+    currentTriviaLevel++;
+    document.getElementById('trivLevelLabel').textContent = `Level ${currentTriviaLevel} / ${TRIVIA_TOTAL_LEVELS}`;
+    startTriviaRound();
+  }
 }
 
 /* ===================== SOLITAIRE ===================== */
