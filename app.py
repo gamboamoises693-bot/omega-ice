@@ -14705,6 +14705,8 @@ CROSSWORD_HTML = """<!DOCTYPE html>
 .puzzle-wrap,.clue-section,.check-btn,.next-btn{transition:filter .15s}
 .blur-overlay{display:none;position:absolute;inset:0;z-index:5;background:rgba(255,255,255,.88);border-radius:10px;align-items:center;justify-content:center;flex-direction:column;text-align:center;font-size:13px;font-weight:700;color:#00609C;line-height:1.6}
 .blur-wrap.blurred .blur-overlay{display:flex}
+.watermark-layer{position:absolute;inset:0;z-index:4;overflow:hidden;pointer-events:none;display:flex;flex-wrap:wrap;align-content:space-around;justify-content:space-around;opacity:.14}
+.watermark-layer span{display:block;font-size:11px;font-weight:700;color:#00609C;transform:rotate(-28deg);white-space:nowrap;padding:10px}
 .empty-hint{text-align:center;font-size:12px;color:#888;padding:20px 0}
 </style></head>
 <body>
@@ -14732,6 +14734,12 @@ CROSSWORD_HTML = """<!DOCTYPE html>
          screenshot or another device's camera, this just makes
          switching-away-while-still-visible unhelpful. -->
     <div id="blurWrap" class="blur-wrap">
+      <!-- Traceability watermark (boss's request, Oct 2) - NOT a
+           block, just makes any screenshot/screen-recording of the
+           puzzle identifiable to whose account it came from and when,
+           since a website genuinely cannot detect or prevent the
+           screenshot itself (OS-level action, outside the browser). -->
+      <div class="watermark-layer" id="watermarkLayer"></div>
       <div class="blur-overlay" id="blurOverlay">🙈<br>Bumalik dito para makita ulit ang puzzle</div>
       <div class="puzzle-wrap"><table class="grid-table" id="gridTable"></table></div>
       <button class="check-btn" onclick="checkAnswers()">✅ I-check ang Sagot</button>
@@ -14795,13 +14803,41 @@ function setPuzzleBlur(on){
   const wrap = document.getElementById('blurWrap');
   if(wrap) wrap.classList.toggle('blurred', on);
 }
+// boss's request, Oct 2: "pag may screenshot sa record invalid points
+// agad" - a website can't detect an actual screenshot (OS-level,
+// outside the browser's reach), but switching away to another app/tab
+// to SHOW that screenshot to an AI needs exactly the signal below
+// (tab hidden / window unfocused). So the moment that happens, void
+// this level's points server-side - not just the visual blur, which
+// the player could otherwise shrug off and keep playing past.
+// voidedThisAttempt avoids spamming the endpoint on every focus
+// flicker - only needs to fire once per level-open.
+let voidedThisAttempt = false;
+function flagVoidOnce(){
+  if(voidedThisAttempt || !currentLevel) return;
+  voidedThisAttempt = true;
+  fetch(`/api/crossword/level/${currentLevel}/flag_void`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({})
+  }).catch(() => {});
+}
 function updateBlurFromFocus(){
   if(!currentLevel){ setPuzzleBlur(false); return; }
-  setPuzzleBlur(document.hidden || !document.hasFocus());
+  const shouldBlur = document.hidden || !document.hasFocus();
+  setPuzzleBlur(shouldBlur);
+  if(shouldBlur) flagVoidOnce();
 }
 document.addEventListener('visibilitychange', updateBlurFromFocus);
 window.addEventListener('blur', updateBlurFromFocus);
 window.addEventListener('focus', updateBlurFromFocus);
+// Traceability watermark (boss's request, Oct 2) - tiled, low-opacity,
+// identifies whose account the puzzle belongs to and when, so a
+// screenshot/recording is traceable even though it can't be blocked.
+function renderWatermark(level){
+  const el = document.getElementById('watermarkLayer');
+  if(!el) return;
+  const stamp = `${RESELLER_ID} • Lvl ${level} • ${new Date().toLocaleString('en-PH', {dateStyle:'short', timeStyle:'short'})}`;
+  el.innerHTML = Array.from({length: 9}).map(() => `<span>${stamp}</span>`).join('');
+}
 function updateTimerLabel(){
   const el = document.getElementById('timerLabel');
   if(!el) return;
@@ -14869,12 +14905,14 @@ async function openLevel(level){
     currentLevel = level;
     currentPuzzle = data;
     nextUnlockedAfterWin = null;
+    voidedThisAttempt = false; // reset the LOCAL dedupe flag only - the server-side void (if any) from an earlier open of this same unfinished level persists until it's completed
     setPuzzleBlur(false); // fresh level open - always starts unblurred regardless of any earlier state
     document.getElementById('levelListView').style.display = 'none';
     document.getElementById('puzzleView').style.display = 'block';
     document.getElementById('puzzleLevelLabel').textContent = `Level ${level} / ${TOTAL_LEVELS}`;
     document.getElementById('resultBanner').innerHTML = '';
     document.getElementById('nextLevelBtn').style.display = 'none';
+    renderWatermark(level);
     renderGrid(data);
     fillDraftAnswers(data); // boss's request, Oct 2: resume previously-typed letters, not a blank grid
     renderClues(data);
@@ -15046,6 +15084,10 @@ async function checkAnswers(){
       let pts;
       if(data.points_awarded > 0){
         pts = ` +${data.points_awarded} point!`;
+      } else if(data.newly_completed && data.voided){
+        // boss's request, Oct 2: distinct message when it's specifically
+        // the switch-away void (not just slowness) that cost the points.
+        pts = ' Na-void ang points - lumipat ka ng app/window habang bukas ang puzzle, pero naka-proceed ka na sa susunod na level.';
       } else if(data.newly_completed && !data.within_time){
         pts = ' Lumampas sa 3 minuto - wala points, pero naka-proceed ka na sa susunod na level.';
       } else {
@@ -15245,6 +15287,49 @@ def _crossword_clear_draft(reseller_id, level):
         print(f"_crossword_clear_draft error: {e}")
 
 
+def _crossword_flag_voided(reseller_id, level):
+    """Voids the points for THIS level attempt (boss's request, Oct 2:
+    "pag may screenshot sa record invalid points agad"). A real
+    screenshot can't be detected from a website - the OS intercepts
+    screenshot shortcuts/gestures before the browser ever sees them
+    (explained to boss already). What CAN be detected reliably is the
+    browser's own visibilitychange/blur events - the tab going to the
+    background or the window losing focus - and switching away to show
+    the puzzle to another app (an AI chat app, another device's camera
+    app, etc.) necessarily involves exactly that. So this reuses the
+    SAME switch-away signal that already triggers the visual blur
+    deterrent, and additionally voids this level's points server-side
+    the moment it fires - not just a visual effect the player could
+    otherwise ignore."""
+    try:
+        fb_put(f"customer_crossword_progress/{reseller_id}/voided_levels/{level}", True)
+    except Exception as e:
+        print(f"_crossword_flag_voided error: {e}")
+
+
+def _crossword_is_voided(reseller_id, level):
+    """Whether this level's current attempt has been voided by a
+    switch-away event. Fetched by this specific level's path, same
+    reasoning as _crossword_get_draft - never exposed to the Firebase
+    array-coercion quirk."""
+    try:
+        return bool(fb_get(f"customer_crossword_progress/{reseller_id}/voided_levels/{level}"))
+    except Exception as e:
+        print(f"_crossword_is_voided error: {e}")
+        return False
+
+
+def _crossword_clear_voided(reseller_id, level):
+    """Clears the void-flag once the level is actually completed (fresh
+    start if they ever replay/reopen a later level) or when a level is
+    freshly (re)opened - a NEW attempt shouldn't inherit a void flag
+    from whatever happened on a previous attempt at this same level."""
+    try:
+        fb_delete(f"customer_crossword_progress/{reseller_id}/voided_levels/{level}")
+    except Exception as e:
+        print(f"_crossword_clear_voided error: {e}")
+
+
 @app.route("/customer/<reseller_id>/crossword")
 def customer_crossword_page(reseller_id):
     if not session.get("customer_id") and not session.get("staff_name"):
@@ -15371,6 +15456,32 @@ def api_crossword_save_draft(level):
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/crossword/level/<int:level>/flag_void", methods=["POST"])
+def api_crossword_flag_void(level):
+    """boss's request, Oct 2: "pag may screenshot sa record invalid
+    points agad" - called by the frontend the INSTANT it detects the
+    tab/window losing focus or going to the background while a level
+    is open (the same signal that already triggers the visual blur -
+    see the crossword page's updateBlurFromFocus()). Voids this
+    level's points immediately, server-side - not just a visual cue the
+    player could otherwise ignore by switching back before finishing.
+    Staff previews are exempt (no real customer progress to void)."""
+    if not _crossword_auth_ok():
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    if level < 1 or level > CROSSWORD_TOTAL_LEVELS:
+        return jsonify({"ok": False, "error": "Invalid level"}), 404
+    data = request.json or {}
+    reseller_id = session.get("customer_id") or data.get("reseller_id")
+    if not reseller_id:
+        return jsonify({"ok": False, "error": "reseller_id required"}), 400
+    try:
+        if session.get("customer_id") and not session.get("staff_name"):
+            _crossword_flag_voided(reseller_id, level)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/crossword/level/<int:level>/check", methods=["POST"])
 def api_crossword_check(level):
     if not _crossword_auth_ok():
@@ -15398,10 +15509,20 @@ def api_crossword_check(level):
 
         elapsed = _crossword_elapsed_seconds(reseller_id, level)
         within_time = elapsed is not None and elapsed <= CROSSWORD_TIME_LIMIT_SECONDS
+        # boss's request, Oct 2: "pag may screenshot sa record invalid
+        # points agad" - voided is set the instant the frontend detects
+        # the tab/window losing focus while this level was open (see
+        # api_crossword_flag_void). within_time stays an HONEST report
+        # of the actual elapsed time (shown to the player as-is);
+        # points_eligible is the separate gate that actually decides
+        # whether points get awarded below.
+        voided = _crossword_is_voided(reseller_id, level)
+        points_eligible = within_time and not voided
         response = {
             "ok": True, "results": results, "all_correct": all_correct,
             "points_awarded": 0, "newly_completed": False,
             "within_time": within_time,
+            "voided": voided,
             "elapsed_seconds": int(elapsed) if elapsed is not None else None,
             "time_limit_seconds": CROSSWORD_TIME_LIMIT_SECONDS,
             "points_for_level": _crossword_points_for_level(level),
@@ -15425,7 +15546,7 @@ def api_crossword_check(level):
                 # slow. The POINT itself is only awarded when finished
                 # within the 3-minute window (and the loyalty program
                 # isn't paused) - too slow means 0 points, not a block.
-                if within_time and not is_loyalty_program_paused():
+                if points_eligible and not is_loyalty_program_paused():
                     points = _crossword_points_for_level(level)
                     award_loyalty_points(reseller_id, points, f"Crossword Level {level} cleared", ref_order_id=None, touch_activity=False)
                     response["points_awarded"] = points
@@ -15442,6 +15563,7 @@ def api_crossword_check(level):
                 response["newly_completed"] = True
                 response["unlocked_level"] = new_unlocked
                 _crossword_clear_draft(reseller_id, level)  # nothing left to resume - level is done
+                _crossword_clear_voided(reseller_id, level)  # attempt is over - clean slate for any future replay path
         return jsonify(response)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
