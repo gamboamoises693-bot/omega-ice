@@ -980,10 +980,15 @@ td:nth-child(2){white-space:normal}
       <a href="/admin/reseller_sales">📊 Reseller Sales Tracking</a>
       <a href="/admin/videos">🎬 Dashboard Videos</a>
 {% endif %}
+      <a href="/staff/games">🎮 Mini-Games</a>
+{% if (staff_name or '')|lower in ['isesmo', 'isesmo gamboa'] %}
+      <a href="/admin/staff_crossword_monitor">📈 Staff Puzzle Monitor</a>
+{% endif %}
       <a href="javascript:void(0)" onclick="toggleNavMenu();openAlarmModal();">⚙️🔊 Alarm Settings</a>
     </div>
   </div>
 </div>
+<a href="/staff/games" style="display:block;width:100%;text-align:center;padding:12px;border-radius:12px;background:linear-gradient(135deg,#00609C,#0084c7);color:#fff;font-weight:700;font-size:13px;text-decoration:none;margin-bottom:10px">🎮 Mini-Games (Libangan habang bantay)</a>
 <div class="today-card">
   <div style="display:flex;justify-content:space-between;align-items:center;">
     <div><div style="font-size:11px;opacity:.8;" id="todayLabel">TODAY'S SALES</div><div style="font-size:10px;opacity:.7;" id="todayDate">2026-09-06 - Tap Refresh</div></div>
@@ -6304,7 +6309,7 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 <button onclick="bulkMarkDelivered()" class="action-btn action-btn-success"><span class="action-btn-icon">✅</span>Mark all Pending as Delivered</button>
 <a href="/customer/{{ reseller_id }}/history" class="action-btn action-btn-accent"><span class="action-btn-icon">📊</span>Sales History</a>
 <a href="/customer/{{ reseller_id }}/trend" class="action-btn action-btn-accent"><span class="action-btn-icon">📈</span>Sales Trend</a>
-<a href="/customer/{{ reseller_id }}/crossword" class="action-btn action-btn-warn action-btn-wide"><span class="action-btn-icon">🧩</span>Crossword Puzzle (Laro + Points)</a>
+<a href="/customer/{{ reseller_id }}/games" class="action-btn action-btn-warn action-btn-wide"><span class="action-btn-icon">🎮</span>Mini-Games (Crossword may Points + Iba pang Libangan)</a>
 </div>
 <div style="font-size:10px;color:#888;margin-top:6px">Staff will update to Preparing → Delivered</div>
 </div>
@@ -15115,6 +15120,922 @@ loadProgress();
 </body></html>
 """
 
+# boss's request, Oct 3: "sa admin/staff account idagdag din yung
+# puzzle ... Wala silang makukuhang point pero gusto ko may hiwalay na
+# monitoring" - a SEPARATE, simplified puzzle page for staff/admin
+# accounts to pass time while minding the store. Deliberately NOT the
+# same template as CROSSWORD_HTML: no points, no timer, no
+# blur/watermark/void anti-cheat JS at all - there's nothing to cheat
+# FOR when no points are at stake, so none of that complexity is
+# needed here. Progress is tracked under a completely separate
+# Firebase path (staff_crossword_progress/{staff_name}) and rendered
+# via its own /api/staff/crossword/* endpoints - see those below -
+# so this can never mix with or affect real customer/loyalty data.
+STAFF_CROSSWORD_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Crossword Puzzle (Staff) - Omega Ice</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.topbar h1{font-size:15px;color:#00609C;margin:0}
+.btn{padding:9px 14px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:12px;text-decoration:none;cursor:pointer}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.hint{font-size:11px;color:#666;line-height:1.5;margin-bottom:10px}
+.level-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.level-btn{aspect-ratio:1;border-radius:10px;border:1px solid #d7e3ef;background:#f8fafc;color:#334155;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative}
+.level-btn.locked{background:#eef2f6;color:#aab4bf;cursor:not-allowed}
+.level-btn.locked::after{content:'🔒';position:absolute;font-size:9px;bottom:2px;right:3px}
+.level-btn.done{background:#dcfce7;border-color:#86efac;color:#166534}
+.puzzle-wrap{overflow-x:auto;padding-bottom:4px}
+.grid-table{border-collapse:collapse;margin:0 auto}
+.gcell{width:30px;height:30px;border:1px solid #cfd9e3;position:relative;background:#fff}
+.gcell.blank{border:none;background:transparent}
+.gcell input{width:100%;height:100%;border:none;text-align:center;font-size:14px;font-weight:700;text-transform:uppercase;color:#0f2942;background:transparent;padding:0}
+.gcell input:focus{outline:2px solid #00609C;outline-offset:-2px}
+.gcell.correct input{background:#dcfce7;color:#166534}
+.gcell.incorrect input{background:#fee2e2;color:#c0392b}
+.gnum{position:absolute;top:0;left:1px;font-size:7px;color:#7891a8;font-weight:700;line-height:1}
+.clue-section{margin-top:14px}
+.clue-section h4{font-size:12px;color:#00609C;margin:10px 0 6px}
+.clue-row{font-size:12px;color:#334155;padding:4px 0;border-bottom:1px solid #f0f4f8;cursor:pointer}
+.clue-row b{color:#0f2942}
+.check-btn{width:100%;padding:12px;border-radius:10px;border:none;background:#00609C;color:#fff;font-weight:700;font-size:13px;cursor:pointer;margin-top:14px}
+.result-banner{border-radius:10px;padding:12px;margin-top:10px;font-size:13px;text-align:center;font-weight:700}
+.result-banner.win{background:#dcfce7;color:#166534}
+.result-banner.try{background:#fef3c7;color:#92400e}
+.next-btn{width:100%;padding:12px;border-radius:10px;border:none;background:#16a34a;color:#fff;font-weight:700;font-size:13px;cursor:pointer;margin-top:8px}
+.empty-hint{text-align:center;font-size:12px;color:#888;padding:20px 0}
+</style></head>
+<body>
+<div class="topbar"><h1>🧩 Crossword (Staff)</h1><a href="/cashier" class="btn">← Sales</a></div>
+
+<div id="levelListView">
+  <div class="card">
+    <div class="hint">Panahunan lang habang nagbabantay ng tindahan - walang points dito, puro libangan lang. Hiwalay ito sa puzzle ng mga customer.</div>
+    <div id="levelGrid" class="level-grid"><div class="empty-hint">Loading...</div></div>
+  </div>
+</div>
+
+<div id="puzzleView" style="display:none">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="font-weight:700;font-size:13px" id="puzzleLevelLabel">Level 1</span>
+      <button class="btn" onclick="backToLevels()">← Listahan</button>
+    </div>
+    <div class="puzzle-wrap"><table class="grid-table" id="gridTable"></table></div>
+    <button class="check-btn" onclick="checkAnswers()">✅ I-check ang Sagot</button>
+    <div id="resultBanner"></div>
+    <button class="next-btn" id="nextLevelBtn" style="display:none" onclick="goToNextLevel()">➡️ Susunod na Level</button>
+    <div class="clue-section">
+      <h4>➡️ Across</h4>
+      <div id="acrossClues"></div>
+      <h4>⬇️ Down</h4>
+      <div id="downClues"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOTAL_LEVELS = {{ total_levels }};
+let progressState = {unlocked_level: 1, completed_levels: []};
+let currentLevel = null;
+let currentPuzzle = null;
+
+async function loadProgress(){
+  try{
+    const res = await fetch('/api/staff/crossword/progress');
+    const data = await res.json();
+    if(data.ok){ progressState = data; }
+  }catch(e){}
+  renderLevelGrid();
+}
+function renderLevelGrid(){
+  const el = document.getElementById('levelGrid');
+  const completedSet = new Set(progressState.completed_levels || []);
+  let html = '';
+  for(let lvl=1; lvl<=TOTAL_LEVELS; lvl++){
+    const locked = lvl > progressState.unlocked_level;
+    const done = completedSet.has(lvl);
+    const cls = locked ? 'level-btn locked' : (done ? 'level-btn done' : 'level-btn');
+    html += `<button class="${cls}" ${locked ? 'disabled' : `onclick="openLevel(${lvl})"`}>${done ? '✓' : lvl}</button>`;
+  }
+  el.innerHTML = html;
+}
+async function openLevel(level){
+  try{
+    const res = await fetch(`/api/staff/crossword/level/${level}`);
+    const data = await res.json();
+    if(!data.ok){ alert(data.error || 'Hindi mabuksan ang level na ito.'); return; }
+    currentLevel = level;
+    currentPuzzle = data;
+    document.getElementById('levelListView').style.display = 'none';
+    document.getElementById('puzzleView').style.display = 'block';
+    document.getElementById('puzzleLevelLabel').textContent = `Level ${level} / ${TOTAL_LEVELS}`;
+    document.getElementById('resultBanner').innerHTML = '';
+    document.getElementById('nextLevelBtn').style.display = 'none';
+    renderGrid(data);
+    renderClues(data);
+  }catch(e){
+    alert('Network error: ' + (e && e.message ? e.message : e));
+  }
+}
+function backToLevels(){
+  document.getElementById('puzzleView').style.display = 'none';
+  document.getElementById('levelListView').style.display = 'block';
+  loadProgress();
+}
+function renderGrid(data){
+  const cellMap = {};
+  data.words.forEach(w => {
+    for(let i=0; i<w.length; i++){
+      const r = w.direction==='D' ? w.row+i : w.row;
+      const c = w.direction==='A' ? w.col+i : w.col;
+      const key = `${r},${c}`;
+      if(!cellMap[key]) cellMap[key] = {};
+      if(i===0) cellMap[key].number = w.number;
+    }
+  });
+  let html = '';
+  for(let r=0; r<data.height; r++){
+    html += '<tr>';
+    for(let c=0; c<data.width; c++){
+      const key = `${r},${c}`;
+      if(cellMap[key]){
+        const num = cellMap[key].number;
+        html += `<td class="gcell" id="cellwrap-${r}-${c}">${num?`<span class="gnum">${num}</span>`:''}<input maxlength="1" id="cell-${r}-${c}" data-r="${r}" data-c="${c}" oninput="onCellInput(this)" onkeydown="onCellKey(event,this)"></td>`;
+      } else {
+        html += '<td class="gcell blank"></td>';
+      }
+    }
+    html += '</tr>';
+  }
+  document.getElementById('gridTable').innerHTML = html;
+}
+function collectAnswers(){
+  const answers = {};
+  if(!currentPuzzle) return answers;
+  currentPuzzle.words.forEach(w => {
+    let word = '';
+    for(let i=0; i<w.length; i++){
+      const r = w.direction==='D' ? w.row+i : w.row;
+      const c = w.direction==='A' ? w.col+i : w.col;
+      const input = document.getElementById(`cell-${r}-${c}`);
+      word += (input ? input.value : '') || '_';
+    }
+    answers[`${w.number}${w.direction}`] = word;
+  });
+  return answers;
+}
+function onCellInput(input){
+  input.value = input.value.toUpperCase().replace(/[^A-Z]/g, '');
+  if(input.value){
+    const r = +input.dataset.r, c = +input.dataset.c;
+    const right = document.getElementById(`cell-${r}-${c+1}`);
+    const down = document.getElementById(`cell-${r+1}-${c}`);
+    if(right) right.focus(); else if(down) down.focus();
+  }
+}
+function onCellKey(e, input){
+  const r = +input.dataset.r, c = +input.dataset.c;
+  let target = null;
+  if(e.key === 'ArrowRight') target = document.getElementById(`cell-${r}-${c+1}`);
+  else if(e.key === 'ArrowLeft') target = document.getElementById(`cell-${r}-${c-1}`);
+  else if(e.key === 'ArrowDown') target = document.getElementById(`cell-${r+1}-${c}`);
+  else if(e.key === 'ArrowUp') target = document.getElementById(`cell-${r-1}-${c}`);
+  else if(e.key === 'Backspace' && !input.value) target = document.getElementById(`cell-${r}-${c-1}`);
+  if(target){ e.preventDefault(); target.focus(); }
+}
+function renderClues(data){
+  const across = data.words.filter(w => w.direction === 'A').sort((a,b)=>a.number-b.number);
+  const down = data.words.filter(w => w.direction === 'D').sort((a,b)=>a.number-b.number);
+  document.getElementById('acrossClues').innerHTML = across.map(w =>
+    `<div class="clue-row" onclick="focusWord(${w.row},${w.col})"><b>${w.number}.</b> ${w.clue} (${w.length})</div>`
+  ).join('') || '<div class="clue-row">-</div>';
+  document.getElementById('downClues').innerHTML = down.map(w =>
+    `<div class="clue-row" onclick="focusWord(${w.row},${w.col})"><b>${w.number}.</b> ${w.clue} (${w.length})</div>`
+  ).join('') || '<div class="clue-row">-</div>';
+}
+function focusWord(row, col){
+  const el = document.getElementById(`cell-${row}-${col}`);
+  if(el) el.focus();
+}
+async function checkAnswers(){
+  if(!currentPuzzle) return;
+  const answers = collectAnswers();
+  const banner = document.getElementById('resultBanner');
+  banner.innerHTML = '<div class="result-banner try">Sinusuri...</div>';
+  try{
+    const res = await fetch(`/api/staff/crossword/level/${currentLevel}/check`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({answers})
+    });
+    const data = await res.json();
+    if(!data.ok){ banner.innerHTML = `<div class="result-banner try">${data.error || 'May error.'}</div>`; return; }
+    currentPuzzle.words.forEach(w => {
+      const key = `${w.number}${w.direction}`;
+      const correct = data.results[key];
+      for(let i=0; i<w.length; i++){
+        const r = w.direction==='D' ? w.row+i : w.row;
+        const c = w.direction==='A' ? w.col+i : w.col;
+        const wrap = document.getElementById(`cellwrap-${r}-${c}`);
+        if(wrap){ wrap.classList.remove('correct','incorrect'); wrap.classList.add(correct ? 'correct' : 'incorrect'); }
+      }
+    });
+    if(data.all_correct){
+      banner.innerHTML = '<div class="result-banner win">🎉 Tama lahat!</div>';
+      if(currentLevel < TOTAL_LEVELS){
+        document.getElementById('nextLevelBtn').style.display = 'block';
+      }
+    } else {
+      banner.innerHTML = '<div class="result-banner try">May mali pa - tingnan ang pulang kahon.</div>';
+    }
+  }catch(e){
+    banner.innerHTML = '<div class="result-banner try">Network error.</div>';
+  }
+}
+function goToNextLevel(){
+  if(currentLevel < TOTAL_LEVELS){
+    openLevel(currentLevel + 1);
+  }
+}
+loadProgress();
+</script>
+</body></html>
+"""
+
+ADMIN_STAFF_CROSSWORD_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Staff Puzzle Monitor - Omega Ice</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.topbar h1{font-size:15px;color:#00609C;margin:0}
+.btn{padding:9px 14px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:12px;text-decoration:none;cursor:pointer}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.hint{font-size:11px;color:#666;line-height:1.5;margin-bottom:10px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #f0f4f8}
+th{color:#00609C;font-size:11px}
+.empty-hint{text-align:center;font-size:12px;color:#888;padding:20px 0}
+</style></head>
+<body>
+<div class="topbar"><h1>🧩 Staff Puzzle Monitor</h1><a href="/cashier" class="btn">← Sales</a></div>
+<div class="card">
+  <div class="hint">Kung ilang puzzle na ang natapos ng bawat staff - HIWALAY ito sa customer crossword stats (walang points dito, libangan lang habang nagbabantay).</div>
+  <table>
+    <thead><tr><th>Staff</th><th>Completed Puzzles</th><th>Unlocked Up To</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="3" class="empty-hint">Loading...</td></tr></tbody>
+  </table>
+</div>
+<script>
+async function load(){
+  const el = document.getElementById('rows');
+  try{
+    const res = await fetch('/api/admin/staff_crossword_summary');
+    const data = await res.json();
+    if(!data.ok || !(data.staff || []).length){
+      el.innerHTML = '<tr><td colspan="3" class="empty-hint">Wala pang naglalaro.</td></tr>';
+      return;
+    }
+    el.innerHTML = data.staff.map(s => `<tr><td>${s.staff_name}</td><td>${s.completed_count}</td><td>${s.unlocked_level}</td></tr>`).join('');
+  }catch(e){
+    el.innerHTML = '<tr><td colspan="3" class="empty-hint">Network error.</td></tr>';
+  }
+}
+load();
+</script>
+</body></html>
+"""
+
+GAMES_HUB_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mini-Games - Omega Ice</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.topbar h1{font-size:15px;color:#00609C;margin:0}
+.topbar-sub{font-size:10px;color:#888;margin-bottom:12px}
+.btn{padding:9px 14px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:12px;text-decoration:none;cursor:pointer}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.hint{font-size:11px;color:#666;line-height:1.5;margin-bottom:10px}
+.tabs-row{display:flex;gap:7px;padding:4px 0 14px;overflow-x:auto}
+.tab-btn{white-space:nowrap;font-size:12px;font-weight:700;padding:9px 14px;border-radius:18px;border:1px solid #d7e3ef;background:#fff;color:#334155;cursor:pointer}
+.tab-btn.active{background:#00609C;border-color:#00609C;color:#fff}
+.badge{font-size:9px;font-weight:700;padding:3px 8px;border-radius:10px;display:inline-block}
+.badge.points{color:#166534;background:#dcfce7}
+.badge.fun{color:#475569;background:#f1f5f9}
+.section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.section-head b{font-size:13px;color:#0f2942}
+.win-banner{background:#dcfce7;color:#166534;border-radius:10px;padding:12px;margin-top:10px;font-size:13px;text-align:center;font-weight:700;display:none}
+.action-link{display:block;text-align:center;background:#00609C;color:#fff;font-weight:700;font-size:12.5px;padding:11px;border-radius:10px;text-decoration:none;cursor:pointer;border:none;width:100%;margin-top:8px}
+
+/* ---- Sudoku ---- */
+.sud-diff-row{display:flex;gap:6px;margin-bottom:12px}
+.sud-diff-btn{font-size:10.5px;font-weight:700;padding:6px 12px;border-radius:10px;border:1px solid #d7e3ef;background:#fff;color:#334155;cursor:pointer}
+.sud-diff-btn.active{background:#00609C;color:#fff;border-color:#00609C}
+.sud-grid{display:grid;grid-template-columns:repeat(9,1fr);gap:1px;background:#0f2942;padding:2px;border-radius:6px;margin-bottom:14px}
+.sud-cell{aspect-ratio:1;background:#fff;border:none;text-align:center;font-size:13px;font-weight:700;color:#00609C;display:flex;align-items:center;justify-content:center;padding:0;font-family:inherit}
+div.sud-cell{color:#0f2942;background:#f1f5f9}
+input.sud-cell.correct{background:#dcfce7 !important;color:#166534}
+input.sud-cell.incorrect{background:#fee2e2 !important;color:#c0392b}
+
+/* ---- Word Search ---- */
+.ws-grid{display:grid;gap:2px;margin-bottom:12px;user-select:none}
+.ws-cell{aspect-ratio:1;background:#f8fafc;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#334155;cursor:pointer}
+.ws-cell.selecting{background:#fef3c7}
+.ws-cell.found{background:#dcfce7;color:#166534}
+.ws-word-list{margin-bottom:10px}
+.ws-word{display:inline-block;font-size:11px;font-weight:700;color:#334155;background:#f1f5f9;padding:4px 9px;border-radius:8px;margin:2px}
+.ws-word.found{color:#166534;background:#dcfce7;text-decoration:line-through}
+
+/* ---- Trivia ---- */
+.triv-progress{font-size:10px;color:#64748b;margin-bottom:8px}
+.triv-q{font-size:12.5px;font-weight:700;color:#0f2942;margin-bottom:10px}
+.triv-option{background:#fff;border:1px solid #d7e3ef;border-radius:8px;padding:10px 11px;font-size:11.5px;margin-bottom:7px;cursor:pointer}
+.triv-option.correct{background:#dcfce7;border-color:#86efac;color:#166534;font-weight:700}
+.triv-option.wrong{background:#fee2e2;border-color:#fca5a5;color:#991b1b;font-weight:700}
+
+/* ---- Solitaire ---- */
+.sol-row{display:flex;gap:6px;margin-bottom:14px;align-items:flex-start}
+.sol-slot{width:13%;aspect-ratio:3/4;border-radius:6px;border:1px dashed #cbd5e1;display:flex;align-items:center;justify-content:center;background:#f8fafc;font-size:14px;color:#cbd5e1;cursor:pointer}
+.sol-spacer{flex:1}
+.sol-card{width:13%;aspect-ratio:3/4;border-radius:6px;background:#fff;border:1px solid #d7e3ef;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.12);cursor:pointer;position:relative}
+.sol-card.red{color:#c0392b}
+.sol-card.black{color:#0f2942}
+.sol-card.back{background:#00609C;border-color:#004b7a}
+.sol-card.selected{outline:2px solid #f59e0b;outline-offset:1px}
+.sol-tableau{display:flex;gap:4px}
+.sol-col{flex:1;min-width:0;min-height:50px;position:relative}
+.sol-col .sol-card{position:relative;width:100%}
+.empty-hint{text-align:center;font-size:12px;color:#888;padding:20px 0}
+</style></head>
+<body>
+<div class="topbar"><h1>🎮 Mini-Games</h1><a href="{{ back_url }}" class="btn">← {{ back_label }}</a></div>
+<div class="topbar-sub">{{ title_sub }}</div>
+
+<div class="tabs-row">
+  <button class="tab-btn active" id="tabbtn-crossword" onclick="switchTab('crossword')">🧩 Crossword</button>
+  <button class="tab-btn" id="tabbtn-sudoku" onclick="switchTab('sudoku')">🔢 Sudoku</button>
+  <button class="tab-btn" id="tabbtn-wordsearch" onclick="switchTab('wordsearch')">🔎 Word Search</button>
+  <button class="tab-btn" id="tabbtn-trivia" onclick="switchTab('trivia')">❓ Trivia</button>
+  <button class="tab-btn" id="tabbtn-solitaire" onclick="switchTab('solitaire')">🃏 Solitaire</button>
+</div>
+
+<!-- CROSSWORD TAB -->
+<div id="tab-crossword" class="tabpanel">
+  <div class="card">
+    <div class="section-head"><b>🧩 Crossword Puzzle</b><span class="badge {{ 'points' if show_points_badge else 'fun' }}">{{ crossword_badge_label }}</span></div>
+    <div class="hint">1000 levels ng crossword puzzle. {% if show_points_badge %}Tapusin sa loob ng 3 minuto para makakuha ng points - mas mahirap sa level 500+, mas malaki ang points.{% else %}Libangan lang - walang points dito, hiwalay ang progress sa customer.{% endif %}</div>
+    <div id="crosswordUnlocked" style="font-size:11px;color:#334155;margin-bottom:4px">Loading...</div>
+    <div id="crosswordDone" style="font-size:11px;color:#334155;margin-bottom:12px"></div>
+    <a href="{{ crossword_url }}" class="action-link">Buksan ang Crossword</a>
+  </div>
+</div>
+
+<!-- SUDOKU TAB -->
+<div id="tab-sudoku" class="tabpanel" style="display:none">
+  <div class="card">
+    <div class="section-head"><b>🔢 Sudoku</b><span class="badge fun">LIBANGAN LANG</span></div>
+    <div class="hint">Punuan ang bawat row, column, at 3x3 box ng numero 1-9, walang paulit-ulit.</div>
+    <div class="sud-diff-row">
+      <button class="sud-diff-btn" id="sud-diff-easy" onclick="newSudoku('easy')">Madali</button>
+      <button class="sud-diff-btn active" id="sud-diff-medium" onclick="newSudoku('medium')">Katamtaman</button>
+      <button class="sud-diff-btn" id="sud-diff-hard" onclick="newSudoku('hard')">Mahirap</button>
+    </div>
+    <div id="sudGrid" class="sud-grid"></div>
+    <button class="action-link" onclick="checkSudoku()">✅ I-check</button>
+    <div id="sudokuWinBanner" class="win-banner">🎉 Tama lahat! Galing mo!</div>
+  </div>
+</div>
+
+<!-- WORD SEARCH TAB -->
+<div id="tab-wordsearch" class="tabpanel" style="display:none">
+  <div class="card">
+    <div class="section-head"><b>🔎 Word Search</b><span class="badge fun">LIBANGAN LANG</span></div>
+    <div class="hint">I-tap ang unang letra, tapos i-tap ang huling letra ng salita (dapat tuwid - pahalang, patayo, o pahilis).</div>
+    <div id="wsWordList" class="ws-word-list"></div>
+    <div id="wsGrid" class="ws-grid"></div>
+    <button class="action-link" onclick="renderWordSearch()">🎲 Bagong Laro</button>
+    <div id="wsWinBanner" class="win-banner">🎉 Nahanap mo lahat ng salita!</div>
+  </div>
+</div>
+
+<!-- TRIVIA TAB -->
+<div id="tab-trivia" class="tabpanel" style="display:none">
+  <div class="card">
+    <div class="section-head"><b>❓ Trivia Quiz</b><span class="badge fun">LIBANGAN LANG</span></div>
+    <div id="triviaCard">
+      <div class="triv-progress" id="triviaProgress"></div>
+      <div class="triv-q" id="triviaQ"></div>
+      <div id="triviaChoices"></div>
+      <button class="action-link" id="triviaNextBtn" style="display:none" onclick="nextTrivia()">Susunod na Tanong →</button>
+    </div>
+    <div id="triviaDone" style="display:none;text-align:center">
+      <div style="font-size:14px;font-weight:800;color:#0f2942;margin-bottom:6px">Tapos ang Round!</div>
+      <div style="font-size:24px;font-weight:800;color:#00609C;margin-bottom:14px" id="triviaScoreFinal"></div>
+      <button class="action-link" onclick="startTrivia()">🔄 Ulitin</button>
+    </div>
+  </div>
+</div>
+
+<!-- SOLITAIRE TAB -->
+<div id="tab-solitaire" class="tabpanel" style="display:none">
+  <div class="card">
+    <div class="section-head"><b>🃏 Solitaire</b><span class="badge fun">LIBANGAN LANG</span></div>
+    <div class="hint">I-tap ang alas (A) o pinakamababang baraha sa ibabaw ng bawat tambak para pumili, tapos i-tap ang patutunguhan. Isang baraha lang ang pwedeng ilipat paisa-isa.</div>
+    <div class="sol-row">
+      <div id="solStock"></div>
+      <div id="solWaste"></div>
+      <div class="sol-spacer"></div>
+      <div id="solFoundations" style="display:flex;gap:6px"></div>
+    </div>
+    <div id="solTableau" class="sol-tableau"></div>
+    <button class="action-link" onclick="dealSolitaire()">🎲 Bagong Deal</button>
+    <div id="solWinBanner" class="win-banner">🎉 Panalo! Natapos mo ang Solitaire!</div>
+  </div>
+</div>
+
+<script>
+const IS_STAFF = {{ 'true' if is_staff else 'false' }};
+const CROSSWORD_PROGRESS_URL = "{{ crossword_progress_url }}";
+
+function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
+
+/* ===================== TAB SWITCHING ===================== */
+let initializedTabs = new Set();
+function switchTab(tab){
+  document.querySelectorAll('.tabpanel').forEach(el=>el.style.display='none');
+  document.getElementById('tab-'+tab).style.display='block';
+  document.querySelectorAll('.tab-btn').forEach(el=>el.classList.remove('active'));
+  document.getElementById('tabbtn-'+tab).classList.add('active');
+  if(!initializedTabs.has(tab)){
+    initializedTabs.add(tab);
+    if(tab==='sudoku') newSudoku('medium');
+    if(tab==='wordsearch') renderWordSearch();
+    if(tab==='trivia') startTrivia();
+    if(tab==='solitaire') dealSolitaire();
+  }
+}
+
+/* ===================== CROSSWORD PREVIEW ===================== */
+async function loadCrosswordPreview(){
+  try{
+    const res = await fetch(CROSSWORD_PROGRESS_URL);
+    const data = await res.json();
+    if(data.ok){
+      document.getElementById('crosswordUnlocked').textContent = `📍 Naka-unlock hanggang Level ${data.unlocked_level} / ${data.total_levels || 1000}`;
+      document.getElementById('crosswordDone').textContent = `✅ ${(data.completed_levels||[]).length} level(s) tapos na`;
+    } else {
+      document.getElementById('crosswordUnlocked').textContent = 'Simulan ang unang level!';
+    }
+  }catch(e){
+    document.getElementById('crosswordUnlocked').textContent = 'Simulan ang unang level!';
+  }
+}
+loadCrosswordPreview();
+
+/* ===================== SUDOKU ===================== */
+const SUDOKU_BASE = [
+  [5,3,4,6,7,8,9,1,2],
+  [6,7,2,1,9,5,3,4,8],
+  [1,9,8,3,4,2,5,6,7],
+  [8,5,9,7,6,1,4,2,3],
+  [4,2,6,8,5,3,7,9,1],
+  [7,1,3,9,2,4,8,5,6],
+  [9,6,1,5,3,7,2,8,4],
+  [2,8,7,4,1,9,6,3,5],
+  [3,4,5,2,8,6,1,7,9],
+];
+let sudokuState = null;
+
+function generateSolvedGrid(){
+  let grid = SUDOKU_BASE.map(row=>row.slice());
+  const digits = shuffle([1,2,3,4,5,6,7,8,9]);
+  grid = grid.map(row=>row.map(v=>digits[v-1]));
+  const bandOrder = shuffle([0,1,2]);
+  let rows = [];
+  bandOrder.forEach(b=>{
+    const within = shuffle([0,1,2]);
+    within.forEach(r=> rows.push(grid[b*3+r]));
+  });
+  grid = rows;
+  const stackOrder = shuffle([0,1,2]);
+  let colOrder = [];
+  stackOrder.forEach(s=>{
+    const within = shuffle([0,1,2]);
+    within.forEach(c=> colOrder.push(s*3+c));
+  });
+  grid = grid.map(row=> colOrder.map(c=>row[c]));
+  if(Math.random()<0.5){
+    const t = [];
+    for(let c=0;c<9;c++){ t.push(grid.map(row=>row[c])); }
+    grid = t;
+  }
+  return grid;
+}
+
+function makeSudokuPuzzle(difficulty){
+  const solution = generateSolvedGrid();
+  const removeCount = difficulty==='easy' ? 36 : (difficulty==='hard' ? 54 : 46);
+  const cells = shuffle(Array.from({length:81},(_,i)=>i));
+  const givens = solution.map(row=>row.slice());
+  for(let i=0;i<removeCount;i++){
+    const idx = cells[i];
+    const r = Math.floor(idx/9), c = idx%9;
+    givens[r][c] = 0;
+  }
+  return { solution, givens };
+}
+
+function newSudoku(difficulty){
+  sudokuState = makeSudokuPuzzle(difficulty);
+  document.querySelectorAll('.sud-diff-btn').forEach(b=>b.classList.remove('active'));
+  const btn = document.getElementById('sud-diff-'+difficulty);
+  if(btn) btn.classList.add('active');
+  renderSudokuGrid();
+  document.getElementById('sudokuWinBanner').style.display='none';
+}
+
+function renderSudokuGrid(){
+  const el = document.getElementById('sudGrid');
+  let html = '';
+  for(let r=0;r<9;r++){
+    for(let c=0;c<9;c++){
+      const given = sudokuState.givens[r][c];
+      let extra = '';
+      if(c%3===2 && c!==8) extra += 'border-right:2px solid #0f2942;';
+      if(r%3===2 && r!==8) extra += 'border-bottom:2px solid #0f2942;';
+      if(given){
+        html += `<div class="sud-cell" style="${extra}">${given}</div>`;
+      } else {
+        html += `<input class="sud-cell" maxlength="1" inputmode="numeric" id="sud-${r}-${c}" style="${extra}" oninput="onSudInput(this)">`;
+      }
+    }
+  }
+  el.innerHTML = html;
+}
+
+function onSudInput(input){
+  input.value = input.value.replace(/[^1-9]/g,'').slice(0,1);
+  input.classList.remove('correct','incorrect');
+}
+
+function checkSudoku(){
+  let allFilled = true, allCorrect = true;
+  for(let r=0;r<9;r++){
+    for(let c=0;c<9;c++){
+      if(sudokuState.givens[r][c]) continue;
+      const input = document.getElementById(`sud-${r}-${c}`);
+      const val = input.value ? parseInt(input.value,10) : null;
+      if(!val){ allFilled=false; continue; }
+      if(val === sudokuState.solution[r][c]){
+        input.classList.add('correct'); input.classList.remove('incorrect');
+      } else {
+        input.classList.add('incorrect'); input.classList.remove('correct');
+        allCorrect = false;
+      }
+    }
+  }
+  if(allFilled && allCorrect){
+    document.getElementById('sudokuWinBanner').style.display='block';
+  } else if(!allFilled){
+    alert('Punuan muna lahat ng kahon bago i-check.');
+  }
+}
+
+/* ===================== WORD SEARCH ===================== */
+const WS_WORD_POOL = ["YELO","TUBIG","ASIN","LAMIG","TINDA","PERA","SUKLI","BARYA","PRESKO","TIMBANG","PLASTIK","PAHINGA","DAMPOT","KULANG"];
+const WS_SIZE = 10;
+const WS_DIRS = [[0,1],[1,0],[1,1],[1,-1],[0,-1],[-1,0],[-1,-1],[-1,1]];
+let wsState = null;
+let wsFirstTap = null;
+
+function generateWordSearch(){
+  const words = shuffle(WS_WORD_POOL.slice()).slice(0,6).sort((a,b)=>b.length-a.length);
+  const grid = Array.from({length:WS_SIZE},()=>Array(WS_SIZE).fill(null));
+  const placed = [];
+  words.forEach(word=>{
+    let ok=false, tries=0;
+    while(!ok && tries<300){
+      tries++;
+      const dir = WS_DIRS[Math.floor(Math.random()*WS_DIRS.length)];
+      const row0 = Math.floor(Math.random()*WS_SIZE);
+      const col0 = Math.floor(Math.random()*WS_SIZE);
+      const endRow = row0 + dir[0]*(word.length-1);
+      const endCol = col0 + dir[1]*(word.length-1);
+      if(endRow<0||endRow>=WS_SIZE||endCol<0||endCol>=WS_SIZE) continue;
+      let fits = true;
+      for(let i=0;i<word.length;i++){
+        const r = row0+dir[0]*i, c = col0+dir[1]*i;
+        const existing = grid[r][c];
+        if(existing && existing !== word[i]){ fits=false; break; }
+      }
+      if(!fits) continue;
+      for(let i=0;i<word.length;i++){
+        const r = row0+dir[0]*i, c = col0+dir[1]*i;
+        grid[r][c] = word[i];
+      }
+      placed.push(word);
+      ok = true;
+    }
+  });
+  const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  for(let r=0;r<WS_SIZE;r++) for(let c=0;c<WS_SIZE;c++){
+    if(!grid[r][c]) grid[r][c] = ALPHA[Math.floor(Math.random()*ALPHA.length)];
+  }
+  return { grid, words: placed, foundSet: new Set() };
+}
+
+function renderWordSearch(){
+  wsState = generateWordSearch();
+  wsFirstTap = null;
+  document.getElementById('wsWinBanner').style.display='none';
+  const el = document.getElementById('wsGrid');
+  el.style.gridTemplateColumns = `repeat(${WS_SIZE}, 1fr)`;
+  let html = '';
+  for(let r=0;r<WS_SIZE;r++){
+    for(let c=0;c<WS_SIZE;c++){
+      html += `<div class="ws-cell" id="ws-${r}-${c}" onclick="onWsTap(${r},${c})">${wsState.grid[r][c]}</div>`;
+    }
+  }
+  el.innerHTML = html;
+  renderWsWordList();
+}
+
+function renderWsWordList(){
+  const el = document.getElementById('wsWordList');
+  el.innerHTML = wsState.words.map(w => `<span class="ws-word ${wsState.foundSet.has(w) ? 'found':''}">${w}</span>`).join(' ');
+}
+
+function onWsTap(r,c){
+  if(!wsFirstTap){
+    wsFirstTap = {r,c};
+    document.getElementById(`ws-${r}-${c}`).classList.add('selecting');
+    return;
+  }
+  const r0=wsFirstTap.r, c0=wsFirstTap.c;
+  const startEl = document.getElementById(`ws-${r0}-${c0}`);
+  if(startEl) startEl.classList.remove('selecting');
+  const dr = r-r0, dc = c-c0;
+  const steps = Math.max(Math.abs(dr), Math.abs(dc));
+  const valid = (dr===0 || dc===0 || Math.abs(dr)===Math.abs(dc)) && steps>0;
+  if(valid){
+    const stepR = dr===0?0:dr/Math.abs(dr);
+    const stepC = dc===0?0:dc/Math.abs(dc);
+    const cells = [];
+    for(let i=0;i<=steps;i++) cells.push({r:r0+stepR*i, c:c0+stepC*i});
+    const letters = cells.map(p=>wsState.grid[p.r][p.c]).join('');
+    const rev = letters.split('').reverse().join('');
+    const match = wsState.words.find(w => (w===letters || w===rev) && !wsState.foundSet.has(w));
+    if(match){
+      wsState.foundSet.add(match);
+      cells.forEach(p=>{
+        const cellEl = document.getElementById(`ws-${p.r}-${p.c}`);
+        if(cellEl) cellEl.classList.add('found');
+      });
+      renderWsWordList();
+      if(wsState.foundSet.size === wsState.words.length){
+        document.getElementById('wsWinBanner').style.display='block';
+      }
+    }
+  }
+  wsFirstTap = null;
+}
+
+/* ===================== TRIVIA ===================== */
+const TRIVIA_BANK = [
+  {q:"Ilang litro ang laman ng isang standard na pitsel ng tubig dito sa Pilipinas?", choices:["5 litro","10 litro","20 litro"], answer:1},
+  {q:"Ano ang tawag sa tubig na pinalamig hanggang maging solid?", choices:["Yelo","Singaw","Ulan"], answer:0},
+  {q:"Alin sa mga ito ang pinakamalaking isla sa Pilipinas?", choices:["Cebu","Luzon","Palawan"], answer:1},
+  {q:"Ano ang kabisera ng Pilipinas?", choices:["Quezon City","Maynila","Cebu City"], answer:1},
+  {q:"Alin sa mga ito ang HINDI karaniwang paraan ng pagbabayad sa sari-sari store?", choices:["Cash","Utang/listahan","Cryptocurrency"], answer:2},
+  {q:"Ano ang tawag sa paninda na binibili ng tingi-tingi (hindi buo/bulto)?", choices:["Tingi","Wholesale","Bulto"], answer:0},
+  {q:"Alin ang pinakamalamig sa mga ito?", choices:["Yelo","Tubig sa gripo","Init ng araw"], answer:0},
+  {q:"Ano ang katawagan sa resibo o listahan ng utang sa tindahan?", choices:["Resibo","Listahan ng utang","Pareho A at B"], answer:2},
+  {q:"Alin ang tamang pagkakasunod mula pinakamaliit hanggang pinakamalaki?", choices:["Kilo, Gramo, Tonelada","Gramo, Kilo, Tonelada","Tonelada, Kilo, Gramo"], answer:1},
+  {q:"Ano ang tawag sa pera na isinusuklian sa customer?", choices:["Sukli","Puhunan","Kita"], answer:0},
+  {q:"Alin sa mga ito ang hindi parte ng isang karaniwang sari-sari store?", choices:["Timbangan","Ref o chiller","Swimming pool"], answer:2},
+  {q:"Anong oras karaniwang nagbubukas ang mga sari-sari store sa umaga?", choices:["Madaling-araw o maaga","Tanghali","Gabi lang"], answer:0},
+  {q:"Ano ang tawag sa paulit-ulit na suki o regular na customer?", choices:["Bagong customer","Suki","Estranghero"], answer:1},
+  {q:"Alin sa mga ito ang yunit ng timbang?", choices:["Litro","Kilo","Metro"], answer:1},
+  {q:"Alin sa mga ito ang yunit ng dami ng likido?", choices:["Litro","Kilo","Metro"], answer:0},
+  {q:"Ano ang tawag sa paninda na nangangailangan ng refrigeration o pagpapalamig?", choices:["Dry goods","Perishable/Nabubulok","Hardware"], answer:1},
+  {q:"Alin ang karaniwang gamit ng plastic bag sa tindahan?", choices:["Pambalot ng paninda","Panlinis ng sahig","Pantimbang"], answer:0},
+  {q:"Ano ang tawag sa aparato na ginagamit para malaman ang presyo ng paninda?", choices:["Timbangan o price tag","Telepono","Relo"], answer:0},
+  {q:"Alin sa mga ito ang hindi kailangan sa pagbabantay ng tindahan?", choices:["Pera pang sukli","Pasensya","Traffic light"], answer:2},
+  {q:"Ano ang tawag kapag mas marami ang paninda kaysa sa kinakailangan?", choices:["Kulang","Sobra/Stock","Ubos"], answer:1},
+];
+let triviaOrder = [];
+let triviaIndex = 0;
+let triviaScore = 0;
+
+function startTrivia(){
+  triviaOrder = shuffle(Array.from({length:TRIVIA_BANK.length},(_,i)=>i));
+  triviaIndex = 0;
+  triviaScore = 0;
+  document.getElementById('triviaDone').style.display='none';
+  document.getElementById('triviaCard').style.display='block';
+  renderTriviaQuestion();
+}
+
+function renderTriviaQuestion(){
+  if(triviaIndex >= triviaOrder.length){
+    document.getElementById('triviaCard').style.display='none';
+    document.getElementById('triviaDone').style.display='block';
+    document.getElementById('triviaScoreFinal').textContent = `${triviaScore} / ${triviaOrder.length}`;
+    return;
+  }
+  const item = TRIVIA_BANK[triviaOrder[triviaIndex]];
+  document.getElementById('triviaProgress').textContent = `Tanong ${triviaIndex+1} / ${triviaOrder.length} • Tama: ${triviaScore}`;
+  document.getElementById('triviaQ').textContent = item.q;
+  const choicesEl = document.getElementById('triviaChoices');
+  choicesEl.innerHTML = item.choices.map((c,i)=>`<div class="triv-option" id="triv-opt-${i}" onclick="answerTrivia(${i})">${String.fromCharCode(65+i)}. ${c}</div>`).join('');
+  document.getElementById('triviaNextBtn').style.display='none';
+}
+
+function answerTrivia(i){
+  const item = TRIVIA_BANK[triviaOrder[triviaIndex]];
+  document.querySelectorAll('.triv-option').forEach(el=>el.onclick=null);
+  if(i === item.answer){
+    triviaScore++;
+    document.getElementById(`triv-opt-${i}`).classList.add('correct');
+  } else {
+    document.getElementById(`triv-opt-${i}`).classList.add('wrong');
+    document.getElementById(`triv-opt-${item.answer}`).classList.add('correct');
+  }
+  document.getElementById('triviaNextBtn').style.display='block';
+}
+
+function nextTrivia(){
+  triviaIndex++;
+  renderTriviaQuestion();
+}
+
+/* ===================== SOLITAIRE ===================== */
+const SUITS = ['♠','♥','♦','♣'];
+const SUIT_COLOR = ['black','red','red','black'];
+const RANK_LABELS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+let sol = null;
+
+function makeDeck(){
+  const deck = [];
+  for(let s=0;s<4;s++) for(let r=1;r<=13;r++) deck.push({suit:s, rank:r, faceUp:false});
+  return shuffle(deck);
+}
+
+function dealSolitaire(){
+  const deck = makeDeck();
+  const tableau = [[],[],[],[],[],[],[]];
+  let idx=0;
+  for(let col=0; col<7; col++){
+    for(let i=0;i<=col;i++){
+      const card = deck[idx++];
+      card.faceUp = (i===col);
+      tableau[col].push(card);
+    }
+  }
+  const stock = deck.slice(idx);
+  sol = { tableau, foundations:[[],[],[],[]], stock, waste:[], selected:null };
+  renderSolitaire();
+}
+
+function cardColor(card){ return SUIT_COLOR[card.suit]; }
+function cardLabel(card){ return RANK_LABELS[card.rank-1] + SUITS[card.suit]; }
+
+function isSelectedTableau(col){
+  return sol.selected && sol.selected.source==='tableau' && sol.selected.col===col;
+}
+function isSelectedWaste(){
+  return sol.selected && sol.selected.source==='waste';
+}
+
+function renderSolitaire(){
+  const fEl = document.getElementById('solFoundations');
+  fEl.innerHTML = sol.foundations.map((pile,i)=>{
+    const top = pile[pile.length-1];
+    return top
+      ? `<div class="sol-card ${cardColor(top)}" onclick="tapFoundation(${i})">${cardLabel(top)}</div>`
+      : `<div class="sol-slot" onclick="tapFoundation(${i})">${SUITS[i]}</div>`;
+  }).join('');
+
+  const stockEl = document.getElementById('solStock');
+  stockEl.innerHTML = sol.stock.length
+    ? `<div class="sol-card back" onclick="tapStock()"></div>`
+    : `<div class="sol-slot" onclick="tapStock()">↻</div>`;
+
+  const wasteEl = document.getElementById('solWaste');
+  const wtop = sol.waste[sol.waste.length-1];
+  wasteEl.innerHTML = wtop
+    ? `<div class="sol-card ${cardColor(wtop)} ${isSelectedWaste()?'selected':''}" onclick="tapWaste()">${cardLabel(wtop)}</div>`
+    : `<div class="sol-slot"></div>`;
+
+  const tEl = document.getElementById('solTableau');
+  tEl.innerHTML = sol.tableau.map((pile,ci) => {
+    if(pile.length===0){
+      return `<div class="sol-col"><div class="sol-slot" style="width:100%" onclick="tapTableauEmpty(${ci})">K</div></div>`;
+    }
+    let inner = pile.map((card,ri) => {
+      const style = `margin-top:${ri===0?0:-28}px`;
+      if(!card.faceUp){
+        return `<div class="sol-card back" style="${style}"></div>`;
+      }
+      const isTop = ri===pile.length-1;
+      const sel = isTop && isSelectedTableau(ci);
+      return `<div class="sol-card ${cardColor(card)} ${sel?'selected':''}" style="${style}" onclick="tapTableau(${ci},${ri})">${cardLabel(card)}</div>`;
+    }).join('');
+    return `<div class="sol-col">${inner}</div>`;
+  }).join('');
+
+  document.getElementById('solWinBanner').style.display = sol.foundations.every(p=>p.length===13) ? 'block':'none';
+}
+
+function tapStock(){
+  if(sol.stock.length){
+    const card = sol.stock.pop();
+    card.faceUp = true;
+    sol.waste.push(card);
+  } else if(sol.waste.length){
+    sol.stock = sol.waste.reverse().map(c=>({suit:c.suit, rank:c.rank, faceUp:false}));
+    sol.waste = [];
+  }
+  sol.selected = null;
+  renderSolitaire();
+}
+
+function tapWaste(){
+  if(!sol.waste.length) return;
+  if(sol.selected && sol.selected.source==='waste'){ sol.selected=null; renderSolitaire(); return; }
+  sol.selected = {source:'waste'};
+  renderSolitaire();
+}
+
+function tapTableau(ci, ri){
+  const pile = sol.tableau[ci];
+  const isTopCard = ri === pile.length-1;
+  if(!sol.selected){
+    if(!isTopCard || !pile[ri].faceUp) return;
+    sol.selected = {source:'tableau', col:ci};
+    renderSolitaire();
+    return;
+  }
+  if(sol.selected.source==='tableau' && sol.selected.col===ci){
+    sol.selected=null; renderSolitaire(); return;
+  }
+  attemptMoveTo({type:'tableau', col:ci});
+}
+
+function tapTableauEmpty(ci){
+  if(!sol.selected) return;
+  attemptMoveTo({type:'tableau', col:ci});
+}
+
+function tapFoundation(fi){
+  if(!sol.selected) return;
+  attemptMoveTo({type:'foundation', idx:fi});
+}
+
+function getSelectedCard(){
+  if(!sol.selected) return null;
+  if(sol.selected.source==='waste') return sol.waste[sol.waste.length-1];
+  if(sol.selected.source==='tableau') return sol.tableau[sol.selected.col][sol.tableau[sol.selected.col].length-1];
+  return null;
+}
+
+function removeSelectedCard(){
+  if(sol.selected.source==='waste') return sol.waste.pop();
+  if(sol.selected.source==='tableau'){
+    const pile = sol.tableau[sol.selected.col];
+    const card = pile.pop();
+    if(pile.length && !pile[pile.length-1].faceUp) pile[pile.length-1].faceUp = true;
+    return card;
+  }
+}
+
+function attemptMoveTo(dest){
+  const card = getSelectedCard();
+  if(!card){ sol.selected=null; renderSolitaire(); return; }
+  if(dest.type==='foundation'){
+    const pile = sol.foundations[dest.idx];
+    const top = pile[pile.length-1];
+    if(card.suit===dest.idx && ((!top && card.rank===1) || (top && card.rank===top.rank+1))){
+      removeSelectedCard();
+      pile.push(card);
+    }
+  } else if(dest.type==='tableau'){
+    const pile = sol.tableau[dest.col];
+    const top = pile[pile.length-1];
+    if(!top){
+      if(card.rank===13){ removeSelectedCard(); pile.push(card); }
+    } else if(top.faceUp && cardColor(top)!==cardColor(card) && card.rank===top.rank-1){
+      removeSelectedCard();
+      pile.push(card);
+    }
+  }
+  sol.selected = null;
+  renderSolitaire();
+}
+</script>
+</body></html>
+"""
+
+
 CROSSWORD_TOTAL_LEVELS = 1000  # boss's request, Oct 2: extended 200 -> 400 -> 1000 levels
 CROSSWORD_TIME_LIMIT_SECONDS = 180  # boss's request, Oct 2: 3-minute timer per level
 CROSSWORD_HARD_MODE_START_LEVEL = 500  # boss's request, Oct 2: "level 500 pataas 5 points, mahihirap na yung words"
@@ -15337,6 +16258,30 @@ def customer_crossword_page(reseller_id):
     if session.get("customer_id") and session.get("customer_id") != reseller_id and not session.get("staff_name"):
         return redirect(f"/customer/{session.get('customer_id')}/crossword")
     return render_template_string(CROSSWORD_HTML, reseller_id=reseller_id, total_levels=CROSSWORD_TOTAL_LEVELS)
+
+
+@app.route("/customer/<reseller_id>/games")
+def customer_games_page(reseller_id):
+    """Mini-Games Hub for customers (boss's request, Oct 3: "I add sa
+    omega ice app" the suggested sari-sari-store games). Crossword stays
+    the only one that earns loyalty points - Sudoku/Word Search/Trivia/
+    Solitaire are pure client-side libangan, no server calls at all, so
+    there's nothing here that can touch loyalty_points."""
+    if not session.get("customer_id") and not session.get("staff_name"):
+        return redirect(url_for("customer_login_page"))
+    if session.get("customer_id") and session.get("customer_id") != reseller_id and not session.get("staff_name"):
+        return redirect(f"/customer/{session.get('customer_id')}/games")
+    return render_template_string(
+        GAMES_HUB_HTML,
+        is_staff=False,
+        back_url=f"/customer/{reseller_id}/dashboard",
+        back_label="Dashboard",
+        title_sub="Crossword may points - ang Sudoku/Word Search/Trivia/Solitaire ay libangan lang",
+        crossword_url=f"/customer/{reseller_id}/crossword",
+        crossword_progress_url=f"/api/crossword/progress?reseller_id={reseller_id}",
+        crossword_badge_label="1-5 PTS / LEVEL",
+        show_points_badge=True,
+    )
 
 
 @app.route("/api/crossword/progress")
@@ -15567,6 +16512,196 @@ def api_crossword_check(level):
         return jsonify(response)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# =====================================================================
+# STAFF-ONLY CROSSWORD (boss's request, Oct 3: "sa admin/staff account
+# idagdag din yung puzzle ... Wala silang makukuhang point pero gusto
+# ko may hiwalay na monitoring kung ilan na completed nilang puzzle,
+# hiwalay sa mga customer")
+#
+# Deliberately a PARALLEL set of routes/helpers, not a staff-branch
+# bolted onto the existing customer routes above - the customer
+# crossword flow is heavily tested and has real points/anti-cheat
+# logic riding on it; keeping staff play on its own separate code path
+# means this new feature can't accidentally regress any of that.
+#
+# Key rules:
+#   - staff_name is NEVER passed to award_loyalty_points() - it isn't a
+#     real reseller_id, so doing that would corrupt the loyalty_points
+#     Firebase tree with fake entries. Staff simply never earn points.
+#   - Progress lives under staff_crossword_progress/{staff_name} - a
+#     completely separate Firebase root from customer_crossword_progress,
+#     so this can never mix with or affect real customer data.
+#   - No timer, no blur/watermark/void anti-cheat - there's no points
+#     at stake for staff, so there's nothing to cheat FOR.
+# =====================================================================
+
+def get_staff_crossword_progress(staff_name):
+    """Staff version of get_customer_crossword_progress() - reads from
+    staff_crossword_progress/{staff_name} only, never touching
+    customer_crossword_progress. No completed_points here since staff
+    never earn points - just which levels are cleared, for the level
+    picker and for admin monitoring (get_staff_crossword_summary)."""
+    data = fb_get(f"staff_crossword_progress/{staff_name}") or {}
+    unlocked = int(data.get("unlocked_level") or 1)
+    completed = _crossword_normalize_completed(data.get("completed_levels"))
+    completed_list = sorted(int(k) for k in completed.keys() if str(k).isdigit())
+    return {"unlocked_level": unlocked, "completed_levels": completed_list}
+
+
+@app.route("/staff/crossword")
+@login_required
+def staff_crossword_page():
+    """Puzzle page for ANY logged-in staff/admin account (login_required
+    alone covers this - not isesmo-gated, per boss's "admin/staff
+    account" wording). Reachable from the long button + hamburger link
+    added to CASHIER_HTML below."""
+    return render_template_string(STAFF_CROSSWORD_HTML, total_levels=CROSSWORD_TOTAL_LEVELS)
+
+
+@app.route("/staff/games")
+@login_required
+def staff_games_page():
+    """Mini-Games Hub for staff/admin accounts (boss's request, Oct 3:
+    "I add sa omega ice app" the suggested sari-sari-store games, same
+    one-page-with-tabs layout as the mockup boss approved). Staff
+    crossword here ALSO earns no points (consistent with the existing
+    /staff/crossword mode) - the other 4 games never did either."""
+    return render_template_string(
+        GAMES_HUB_HTML,
+        is_staff=True,
+        back_url="/cashier",
+        back_label="Sales",
+        title_sub="Staff mode - walang points sa alinmang laro dito",
+        crossword_url="/staff/crossword",
+        crossword_progress_url="/api/staff/crossword/progress",
+        crossword_badge_label="LIBANGAN LANG",
+        show_points_badge=False,
+    )
+
+
+@app.route("/api/staff/crossword/progress")
+@login_required
+def api_staff_crossword_progress():
+    try:
+        staff_name = session.get("staff_name")
+        progress = get_staff_crossword_progress(staff_name)
+        progress["total_levels"] = CROSSWORD_TOTAL_LEVELS
+        return jsonify({"ok": True, **progress})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/staff/crossword/level/<int:level>")
+@login_required
+def api_staff_crossword_get_level(level):
+    if level < 1 or level > CROSSWORD_TOTAL_LEVELS:
+        return jsonify({"ok": False, "error": "Invalid level"}), 404
+    puzzle = CROSSWORD_LEVELS.get(level)
+    if not puzzle:
+        return jsonify({"ok": False, "error": "Level not available"}), 404
+    try:
+        staff_name = session.get("staff_name")
+        progress = get_staff_crossword_progress(staff_name)
+        if level > progress["unlocked_level"]:
+            return jsonify({"ok": False, "error": "Naka-lock pa ang level na ito"}), 403
+        words_public = [{
+            "number": w["number"], "direction": w["direction"],
+            "row": w["row"], "col": w["col"], "length": len(w["word"]), "clue": w["clue"],
+        } for w in puzzle["words"]]
+        return jsonify({
+            "ok": True, "level": level, "width": puzzle["width"], "height": puzzle["height"],
+            "words": words_public,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/staff/crossword/level/<int:level>/check", methods=["POST"])
+@login_required
+def api_staff_crossword_check(level):
+    if level < 1 or level > CROSSWORD_TOTAL_LEVELS:
+        return jsonify({"ok": False, "error": "Invalid level"}), 404
+    puzzle = CROSSWORD_LEVELS.get(level)
+    if not puzzle:
+        return jsonify({"ok": False, "error": "Level not available"}), 404
+    try:
+        staff_name = session.get("staff_name")
+        data = request.json or {}
+        submitted = data.get("answers") or {}
+        results = {}
+        all_correct = True
+        for w in puzzle["words"]:
+            key = f"{w['number']}{w['direction']}"
+            given = str(submitted.get(key) or "").strip().upper()
+            correct = (given == w["word"])
+            results[key] = correct
+            if not correct:
+                all_correct = False
+
+        response = {"ok": True, "results": results, "all_correct": all_correct, "newly_completed": False}
+
+        if all_correct:
+            progress_raw = fb_get(f"staff_crossword_progress/{staff_name}") or {}
+            completed = _crossword_normalize_completed(progress_raw.get("completed_levels"))
+            already_done = str(level) in completed
+            unlocked = int(progress_raw.get("unlocked_level") or 1)
+            response["unlocked_level"] = unlocked
+            if not already_done:
+                new_unlocked = max(unlocked, level + 1) if level == unlocked else unlocked
+                # NOTE: no points ever stored here - staff never earn
+                # points, so this is just `True` (cleared), never a
+                # points int the way customer_crossword_progress uses.
+                completed[str(level)] = True
+                fb_patch(f"staff_crossword_progress/{staff_name}", {
+                    "completed_levels": completed,
+                    "unlocked_level": new_unlocked,
+                })
+                response["newly_completed"] = True
+                response["unlocked_level"] = new_unlocked
+        return jsonify(response)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+def get_staff_crossword_summary():
+    """Admin monitoring (boss's request, Oct 3: "gusto ko may hiwalay
+    na monitoring kung ilan na completed nilang puzzle, hiwalay sa mga
+    customer") - one row per staff member who has ever played, reading
+    ONLY from staff_crossword_progress. Never touches
+    customer_crossword_progress or loyalty_points, so this can never
+    mix staff play stats with real customer/loyalty data."""
+    all_staff = fb_get("staff_crossword_progress") or {}
+    if not isinstance(all_staff, dict):
+        all_staff = {}
+    rows = []
+    for staff_name, data in all_staff.items():
+        if not isinstance(data, dict):
+            continue
+        completed = _crossword_normalize_completed(data.get("completed_levels"))
+        completed_count = len([k for k in completed.keys() if str(k).isdigit()])
+        unlocked = int(data.get("unlocked_level") or 1)
+        rows.append({"staff_name": staff_name, "completed_count": completed_count, "unlocked_level": unlocked})
+    rows.sort(key=lambda r: r["completed_count"], reverse=True)
+    return rows
+
+
+@app.route("/api/admin/staff_crossword_summary")
+@login_required
+@isesmo_only
+def api_admin_staff_crossword_summary():
+    try:
+        return jsonify({"ok": True, "staff": get_staff_crossword_summary()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/admin/staff_crossword_monitor")
+@login_required
+@isesmo_only
+def admin_staff_crossword_monitor_page():
+    return render_template_string(ADMIN_STAFF_CROSSWORD_HTML)
 
 
 @app.route("/api/admin/loyalty_settings", methods=["GET"])
