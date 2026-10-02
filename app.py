@@ -14673,8 +14673,10 @@ CROSSWORD_HTML = """<!DOCTYPE html>
 .level-btn{aspect-ratio:1;border-radius:10px;border:1px solid #d7e3ef;background:#f8fafc;color:#334155;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative}
 .level-btn.locked{background:#eef2f6;color:#aab4bf;cursor:not-allowed}
 .level-btn.locked::after{content:'🔒';position:absolute;font-size:9px;bottom:2px;right:3px}
-.level-btn.done{background:#dcfce7;border-color:#86efac;color:#166534}
-.level-btn.done::after{content:'✓';position:absolute;font-size:10px;top:1px;right:3px;color:#16a34a}
+.level-btn.done{background:#dcfce7;border-color:#86efac;color:#166534;flex-direction:column;gap:1px}
+.level-btn.done .lvl-num{font-size:12px;font-weight:700;line-height:1}
+.level-btn.done .lvl-pts{font-size:8px;font-weight:800;line-height:1;color:#16a34a;background:rgba(255,255,255,.6);border-radius:6px;padding:1px 4px}
+.level-btn.done .lvl-pts.zero{color:#92400e}
 .level-btn.current{outline:2px solid #00609C;outline-offset:1px}
 /* ---- Puzzle view ---- */
 .puzzle-wrap{overflow-x:auto;padding-bottom:4px}
@@ -14698,6 +14700,11 @@ CROSSWORD_HTML = """<!DOCTYPE html>
 .timer-label{text-align:center;font-size:16px;font-weight:800;color:#00609C;background:#eef4fb;border-radius:10px;padding:8px;margin-bottom:10px}
 .timer-label.warn{color:#c2410c;background:#fff7ed}
 .timer-label.expired{color:#c0392b;background:#fee2e2}
+.blur-wrap{position:relative}
+.blur-wrap.blurred .puzzle-wrap,.blur-wrap.blurred .clue-section,.blur-wrap.blurred .check-btn,.blur-wrap.blurred .next-btn,.blur-wrap.blurred #resultBanner{filter:blur(14px);pointer-events:none;user-select:none}
+.puzzle-wrap,.clue-section,.check-btn,.next-btn{transition:filter .15s}
+.blur-overlay{display:none;position:absolute;inset:0;z-index:5;background:rgba(255,255,255,.88);border-radius:10px;align-items:center;justify-content:center;flex-direction:column;text-align:center;font-size:13px;font-weight:700;color:#00609C;line-height:1.6}
+.blur-wrap.blurred .blur-overlay{display:flex}
 .empty-hint{text-align:center;font-size:12px;color:#888;padding:20px 0}
 </style></head>
 <body>
@@ -14717,15 +14724,25 @@ CROSSWORD_HTML = """<!DOCTYPE html>
       <button class="btn" onclick="backToLevels()">← Listahan</button>
     </div>
     <div id="timerLabel" class="timer-label">⏱ 3:00</div>
-    <div class="puzzle-wrap"><table class="grid-table" id="gridTable"></table></div>
-    <button class="check-btn" onclick="checkAnswers()">✅ I-check ang Sagot</button>
-    <div id="resultBanner"></div>
-    <button class="next-btn" id="nextLevelBtn" style="display:none" onclick="goToNextLevel()">➡️ Susunod na Level</button>
-    <div class="clue-section">
-      <h4>➡️ Across</h4>
-      <div id="acrossClues"></div>
-      <h4>⬇️ Down</h4>
-      <div id="downClues"></div>
+    <!-- Boss's request, Oct 2: blur the puzzle (grid + clues + check
+         button) whenever the tab/app loses focus or goes to the
+         background, so switching away to screenshot-and-ask-an-AI
+         shows nothing useful. This is a DETERRENT only (explained to
+         boss already) - a website cannot block a real OS-level
+         screenshot or another device's camera, this just makes
+         switching-away-while-still-visible unhelpful. -->
+    <div id="blurWrap" class="blur-wrap">
+      <div class="blur-overlay" id="blurOverlay">🙈<br>Bumalik dito para makita ulit ang puzzle</div>
+      <div class="puzzle-wrap"><table class="grid-table" id="gridTable"></table></div>
+      <button class="check-btn" onclick="checkAnswers()">✅ I-check ang Sagot</button>
+      <div id="resultBanner"></div>
+      <button class="next-btn" id="nextLevelBtn" style="display:none" onclick="goToNextLevel()">➡️ Susunod na Level</button>
+      <div class="clue-section">
+        <h4>➡️ Across</h4>
+        <div id="acrossClues"></div>
+        <h4>⬇️ Down</h4>
+        <div id="downClues"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -14769,6 +14786,22 @@ function startLevelTimer(secondsLeft){
 function stopLevelTimer(){
   if(timerInterval){ clearInterval(timerInterval); timerInterval = null; }
 }
+// Boss's request, Oct 2: blur the puzzle whenever the tab/window loses
+// focus or the app goes to the background, as a deterrent against
+// switching away to screenshot the puzzle and ask an AI for the
+// answer. Only engages while a level is actually open - no point
+// blurring the level-picker list, it has no answers to hide.
+function setPuzzleBlur(on){
+  const wrap = document.getElementById('blurWrap');
+  if(wrap) wrap.classList.toggle('blurred', on);
+}
+function updateBlurFromFocus(){
+  if(!currentLevel){ setPuzzleBlur(false); return; }
+  setPuzzleBlur(document.hidden || !document.hasFocus());
+}
+document.addEventListener('visibilitychange', updateBlurFromFocus);
+window.addEventListener('blur', updateBlurFromFocus);
+window.addEventListener('focus', updateBlurFromFocus);
 function updateTimerLabel(){
   const el = document.getElementById('timerLabel');
   if(!el) return;
@@ -14790,6 +14823,7 @@ async function loadProgress(){
 function renderLevelGrid(){
   const el = document.getElementById('levelGrid');
   const completedSet = new Set(progressState.completed_levels || []);
+  const completedPoints = progressState.completed_points || {};
   let html = '';
   for(let lvl=1; lvl<=TOTAL_LEVELS; lvl++){
     const locked = lvl > progressState.unlocked_level;
@@ -14800,7 +14834,20 @@ function renderLevelGrid(){
     // non-tappable; this extends the same treatment to done ones.
     const cls = locked ? 'level-btn locked' : (done ? 'level-btn done' : 'level-btn');
     const isTappable = !locked && !done;
-    html += `<button class="${cls}" ${isTappable ? `onclick="openLevel(${lvl})"` : 'disabled'}>${lvl}</button>`;
+    if(done){
+      // boss's request, Oct 2: "sa mga natapos na level nakalagay yung
+      // points maliban sa check" - show the points earned right on the
+      // level button (0pt/1pt/5pt), not just a plain checkmark. `pts`
+      // can be null for a level completed before this feature shipped
+      // (no historical points on record) - falls back to a bare
+      // checkmark for those instead of a misleading "0pt".
+      const pts = completedPoints[lvl];
+      const ptsLabel = (pts === null || pts === undefined) ? '✓' : `${pts}pt`;
+      const ptsCls = 'lvl-pts' + (pts === 0 ? ' zero' : '');
+      html += `<button class="${cls}" disabled><span class="lvl-num">${lvl}</span><span class="${ptsCls}">${ptsLabel}</span></button>`;
+    } else {
+      html += `<button class="${cls}" ${isTappable ? `onclick="openLevel(${lvl})"` : 'disabled'}>${lvl}</button>`;
+    }
   }
   el.innerHTML = html;
 }
@@ -14822,6 +14869,7 @@ async function openLevel(level){
     currentLevel = level;
     currentPuzzle = data;
     nextUnlockedAfterWin = null;
+    setPuzzleBlur(false); // fresh level open - always starts unblurred regardless of any earlier state
     document.getElementById('levelListView').style.display = 'none';
     document.getElementById('puzzleView').style.display = 'block';
     document.getElementById('puzzleLevelLabel').textContent = `Level ${level} / ${TOTAL_LEVELS}`;
@@ -14838,6 +14886,8 @@ async function openLevel(level){
 function backToLevels(){
   saveDraftNow(); // boss's request, Oct 2: persist typed letters before leaving so they're there on the next tap
   stopLevelTimer();
+  currentLevel = null; // so updateBlurFromFocus() no longer tries to blur a closed puzzle
+  setPuzzleBlur(false);
   document.getElementById('puzzleView').style.display = 'none';
   document.getElementById('levelListView').style.display = 'block';
   loadProgress();
@@ -15068,8 +15118,13 @@ def _crossword_normalize_completed(raw):
         return dict(raw)
     if isinstance(raw, list):
         # index i in the array corresponds to key str(i); index 0 is
-        # always None/falsy since there's never a "level 0".
-        return {str(i): v for i, v in enumerate(raw) if v}
+        # always None since there's never a "level 0". IMPORTANT: this
+        # checks "is not None", NOT plain truthiness - a level cleared
+        # for 0 points (boss's request, Oct 2: show the actual points
+        # per level, including "0pt") stores the int 0 as its value,
+        # which `if v` would have silently dropped (0 is falsy in
+        # Python) even though the level WAS completed.
+        return {str(i): v for i, v in enumerate(raw) if v is not None}
     return {}
 
 
@@ -15078,7 +15133,28 @@ def get_customer_crossword_progress(reseller_id):
     unlocked = int(data.get("unlocked_level") or 1)
     completed = _crossword_normalize_completed(data.get("completed_levels"))
     completed_list = sorted(int(k) for k in completed.keys() if str(k).isdigit())
-    return {"unlocked_level": unlocked, "completed_levels": completed_list}
+    # boss's request, Oct 2: "sa mga natapos na level nakalagay yung
+    # points maliban sa check" - show how many points each completed
+    # level actually earned (0pt if cleared past the 3-minute limit, 1pt
+    # or 5pt otherwise) right on the level picker, without having to
+    # open/re-check it. api_crossword_check now writes the ACTUAL points
+    # value (int, possibly 0) into completed[str(level)] instead of a
+    # plain True/False flag. Older entries saved before this change was
+    # shipped are still plain `True` (a bool - note bool is a subclass
+    # of int in Python, so it's checked FIRST here) - those just can't
+    # tell us what was actually earned back then, so they come back as
+    # None and the level picker falls back to a plain checkmark for them.
+    completed_points = {}
+    for k, v in completed.items():
+        if not str(k).isdigit():
+            continue
+        if isinstance(v, bool):
+            completed_points[int(k)] = None  # legacy entry, pre-dates per-level point tracking
+        elif isinstance(v, int):
+            completed_points[int(k)] = v
+        else:
+            completed_points[int(k)] = None
+    return {"unlocked_level": unlocked, "completed_levels": completed_list, "completed_points": completed_points}
 
 
 def _crossword_auth_ok():
@@ -15334,7 +15410,12 @@ def api_crossword_check(level):
         if all_correct:
             progress_raw = fb_get(f"customer_crossword_progress/{reseller_id}") or {}
             completed = _crossword_normalize_completed(progress_raw.get("completed_levels"))
-            already_done = bool(completed.get(str(level)))
+            # NOTE: checks key EXISTENCE, not truthiness - completed[str(level)]
+            # can legitimately be 0 (cleared, but 0 points because it was
+            # too slow), and `bool(0)` is False, which used to make an
+            # already-cleared-for-0-points level look "not done yet" and
+            # re-award/re-process it on every replay.
+            already_done = str(level) in completed
             unlocked = int(progress_raw.get("unlocked_level") or 1)
             response["unlocked_level"] = unlocked
             if not already_done:
@@ -15349,7 +15430,11 @@ def api_crossword_check(level):
                     award_loyalty_points(reseller_id, points, f"Crossword Level {level} cleared", ref_order_id=None, touch_activity=False)
                     response["points_awarded"] = points
                 new_unlocked = max(unlocked, level + 1) if level == unlocked else unlocked
-                completed[str(level)] = True
+                # Stores the ACTUAL points earned (0 if cleared too slow)
+                # instead of a plain True flag, so the level picker can
+                # show "0pt"/"1pt"/"5pt" per level (boss's request, Oct 2)
+                # without needing a separate lookup.
+                completed[str(level)] = response["points_awarded"]
                 fb_patch(f"customer_crossword_progress/{reseller_id}", {
                     "completed_levels": completed,
                     "unlocked_level": new_unlocked,
