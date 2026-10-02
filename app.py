@@ -14574,6 +14574,9 @@ CROSSWORD_HTML = """<!DOCTYPE html>
 .result-banner.win{background:#dcfce7;color:#166534}
 .result-banner.try{background:#fef3c7;color:#92400e}
 .next-btn{width:100%;padding:12px;border-radius:10px;border:none;background:#16a34a;color:#fff;font-weight:700;font-size:13px;cursor:pointer;margin-top:8px}
+.timer-label{text-align:center;font-size:16px;font-weight:800;color:#00609C;background:#eef4fb;border-radius:10px;padding:8px;margin-bottom:10px}
+.timer-label.warn{color:#c2410c;background:#fff7ed}
+.timer-label.expired{color:#c0392b;background:#fee2e2}
 .empty-hint{text-align:center;font-size:12px;color:#888;padding:20px 0}
 </style></head>
 <body>
@@ -14581,7 +14584,7 @@ CROSSWORD_HTML = """<!DOCTYPE html>
 
 <div id="levelListView">
   <div class="card">
-    <div class="hint">Pumili ng level. Tapusin ang isang level para makakuha ng <b>5 points</b> at ma-unlock ang susunod. Sunod-sunod ang pagbukas ng level.</div>
+    <div class="hint">Pumili ng level. Tapusin ang isang level sa loob ng <b>3 minuto</b> para makakuha ng <b>1 point</b> - sunod-sunod ang pagbukas ng level. Kahit lumampas sa oras, naka-proceed ka pa rin sa susunod na level, wala lang points.</div>
     <div id="levelGrid" class="level-grid"><div class="empty-hint">Loading...</div></div>
   </div>
 </div>
@@ -14592,6 +14595,7 @@ CROSSWORD_HTML = """<!DOCTYPE html>
       <span style="font-weight:700;font-size:13px" id="puzzleLevelLabel">Level 1</span>
       <button class="btn" onclick="backToLevels()">← Listahan</button>
     </div>
+    <div id="timerLabel" class="timer-label">⏱ 3:00</div>
     <div class="puzzle-wrap"><table class="grid-table" id="gridTable"></table></div>
     <button class="check-btn" onclick="checkAnswers()">✅ I-check ang Sagot</button>
     <div id="resultBanner"></div>
@@ -14608,10 +14612,42 @@ CROSSWORD_HTML = """<!DOCTYPE html>
 <script>
 const RESELLER_ID = "{{ reseller_id }}";
 const TOTAL_LEVELS = {{ total_levels }};
+const TIME_LIMIT_SECONDS = 180; // boss's request, Oct 2: 3-minute timer per level
 let progressState = {unlocked_level: 1, completed_levels: []};
 let currentLevel = null;
 let currentPuzzle = null;
 let nextUnlockedAfterWin = null;
+let timerInterval = null;
+let timerSecondsLeft = TIME_LIMIT_SECONDS;
+
+function formatTimer(sec){
+  const s = Math.max(0, sec);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2,'0')}`;
+}
+function startLevelTimer(){
+  stopLevelTimer();
+  timerSecondsLeft = TIME_LIMIT_SECONDS;
+  updateTimerLabel();
+  timerInterval = setInterval(() => {
+    timerSecondsLeft -= 1;
+    updateTimerLabel();
+    if(timerSecondsLeft <= 0){ stopLevelTimer(); }
+  }, 1000);
+}
+function stopLevelTimer(){
+  if(timerInterval){ clearInterval(timerInterval); timerInterval = null; }
+}
+function updateTimerLabel(){
+  const el = document.getElementById('timerLabel');
+  if(!el) return;
+  el.textContent = `⏱ ${formatTimer(timerSecondsLeft)}`;
+  el.className = 'timer-label' + (timerSecondsLeft <= 0 ? ' expired' : (timerSecondsLeft <= 30 ? ' warn' : ''));
+  if(timerSecondsLeft <= 0){
+    el.textContent = '⏰ Lumampas sa 3 minuto - 0 points na lang pag na-clear, pero naka-proceed ka pa rin.';
+  }
+}
 
 async function loadProgress(){
   try{
@@ -14636,6 +14672,16 @@ function renderLevelGrid(){
 async function openLevel(level){
   try{
     const res = await fetch(`/api/crossword/level/${level}`);
+    if(!res.ok){
+      // Server returned a non-2xx response that isn't guaranteed to be
+      // JSON (e.g. a 500 crash page) - read it as text first so the
+      // alert shows something useful instead of a generic "Network
+      // error" that hides what actually went wrong (boss hit this when
+      // the level data file failed to load on the server).
+      const text = await res.text();
+      alert(`Hindi ma-load ang level (HTTP ${res.status}). ${text.slice(0,200)}`);
+      return;
+    }
     const data = await res.json();
     if(!data.ok){ alert(data.error || 'Hindi mabuksan ang level na ito.'); return; }
     currentLevel = level;
@@ -14648,11 +14694,13 @@ async function openLevel(level){
     document.getElementById('nextLevelBtn').style.display = 'none';
     renderGrid(data);
     renderClues(data);
+    startLevelTimer();
   }catch(e){
-    alert('Network error.');
+    alert('Network error: ' + (e && e.message ? e.message : e));
   }
 }
 function backToLevels(){
+  stopLevelTimer();
   document.getElementById('puzzleView').style.display = 'none';
   document.getElementById('levelListView').style.display = 'block';
   loadProgress();
@@ -14754,7 +14802,15 @@ async function checkAnswers(){
       }
     });
     if(data.all_correct){
-      const pts = data.points_awarded > 0 ? ` +${data.points_awarded} points!` : ' (na-clear mo na dati ang level na ito)';
+      stopLevelTimer();
+      let pts;
+      if(data.points_awarded > 0){
+        pts = ` +${data.points_awarded} point!`;
+      } else if(data.newly_completed && !data.within_time){
+        pts = ' Lumampas sa 3 minuto - wala points, pero naka-proceed ka na sa susunod na level.';
+      } else {
+        pts = ' (na-clear mo na dati ang level na ito)';
+      }
       banner.innerHTML = `<div class="result-banner win">🎉 Tama lahat!${pts}</div>`;
       nextUnlockedAfterWin = data.unlocked_level;
       if(currentLevel < TOTAL_LEVELS){
@@ -14777,8 +14833,9 @@ loadProgress();
 </body></html>
 """
 
-CROSSWORD_POINTS_PER_LEVEL = 5  # flat reward per level cleared - easy for ISESMO to retune later if needed
-CROSSWORD_TOTAL_LEVELS = 200
+CROSSWORD_POINTS_PER_LEVEL = 1  # boss's request, Oct 2: "per level 1 point lang"
+CROSSWORD_TOTAL_LEVELS = 400  # boss's request, Oct 2: extended from 200 to 400 levels
+CROSSWORD_TIME_LIMIT_SECONDS = 180  # boss's request, Oct 2: 3-minute timer per level
 
 def _load_crossword_levels():
     """Loads the 200 pre-generated puzzles once at startup. Returns an
@@ -14806,6 +14863,38 @@ def get_customer_crossword_progress(reseller_id):
 
 def _crossword_auth_ok():
     return bool(session.get("customer_id") or session.get("staff_name"))
+
+
+def _crossword_mark_level_started(reseller_id, level):
+    """Stamps the moment a customer actually opened this level, so the
+    3-minute timer (boss's request, Oct 2) is measured from the SERVER's
+    clock, not trusted from the browser (which could be faked/paused).
+    Re-opening a level (e.g. after backing out to the level list and
+    coming back) resets the clock for a fresh 3-minute attempt - simpler
+    and more forgiving than trying to resume a stale timer."""
+    try:
+        fb_patch(f"customer_crossword_progress/{reseller_id}/level_starts", {
+            str(level): manila_now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+    except Exception as e:
+        print(f"_crossword_mark_level_started error: {e}")
+
+
+def _crossword_elapsed_seconds(reseller_id, level):
+    """Seconds since this customer opened this level, per the server
+    timestamp set by _crossword_mark_level_started. Returns None if no
+    start was ever recorded (e.g. a staff preview, or a stale/missing
+    record) - callers treat that as "outside the time limit" rather
+    than silently granting the bonus."""
+    started = fb_get(f"customer_crossword_progress/{reseller_id}/level_starts/{level}")
+    if not started:
+        return None
+    try:
+        start_dt = datetime.strptime(started, "%Y-%m-%d %H:%M:%S")
+        now_dt = datetime.strptime(manila_now().strftime("%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H:%M:%S")
+        return (now_dt - start_dt).total_seconds()
+    except Exception:
+        return None
 
 
 @app.route("/customer/<reseller_id>/crossword")
@@ -14854,6 +14943,7 @@ def api_crossword_get_level(level):
         progress = get_customer_crossword_progress(reseller_id)
         if level > progress["unlocked_level"]:
             return jsonify({"ok": False, "error": "Naka-lock pa ang level na ito"}), 403
+        _crossword_mark_level_started(reseller_id, level)  # starts the 3-minute clock for this attempt
     words_public = [{
         "number": w["number"], "direction": w["direction"],
         "row": w["row"], "col": w["col"], "length": len(w["word"]), "clue": w["clue"],
@@ -14886,9 +14976,14 @@ def api_crossword_check(level):
             if not correct:
                 all_correct = False
 
+        elapsed = _crossword_elapsed_seconds(reseller_id, level)
+        within_time = elapsed is not None and elapsed <= CROSSWORD_TIME_LIMIT_SECONDS
         response = {
             "ok": True, "results": results, "all_correct": all_correct,
             "points_awarded": 0, "newly_completed": False,
+            "within_time": within_time,
+            "elapsed_seconds": int(elapsed) if elapsed is not None else None,
+            "time_limit_seconds": CROSSWORD_TIME_LIMIT_SECONDS,
         }
 
         if all_correct:
@@ -14898,13 +14993,13 @@ def api_crossword_check(level):
             unlocked = int(progress_raw.get("unlocked_level") or 1)
             response["unlocked_level"] = unlocked
             if not already_done:
-                # First-time clear: award points (unless the loyalty
-                # program is paused - same rule the rest of the app
-                # follows) and advance the unlock frontier, but ONLY
-                # when this level WAS the frontier - replaying/
-                # back-filling an earlier already-unlocked level never
-                # moves unlocked_level backwards or skips levels.
-                if not is_loyalty_program_paused():
+                # First-time clear (boss's request, Oct 2): the level
+                # ALWAYS unlocks the next one and counts as cleared -
+                # "makakapagproceed lang sa next level" even if too
+                # slow. The POINT itself is only awarded when finished
+                # within the 3-minute window (and the loyalty program
+                # isn't paused) - too slow means 0 points, not a block.
+                if within_time and not is_loyalty_program_paused():
                     award_loyalty_points(reseller_id, CROSSWORD_POINTS_PER_LEVEL, f"Crossword Level {level} cleared", ref_order_id=None, touch_activity=False)
                     response["points_awarded"] = CROSSWORD_POINTS_PER_LEVEL
                 new_unlocked = max(unlocked, level + 1) if level == unlocked else unlocked
