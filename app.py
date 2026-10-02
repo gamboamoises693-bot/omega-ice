@@ -7155,7 +7155,7 @@ if('serviceWorker' in navigator){
 // Lazy-loaded: the fetch only happens the FIRST time the customer
 // opens the panel, so someone who never taps it uses zero extra data.
 // ===================================================================
-let videoPanelOpen = false, videoPanelLoaded = false, VIDEO_LIST = [], viewedThisSession = new Set();
+let videoPanelOpen = false, videoPanelLoaded = false, VIDEO_LIST = [], viewedThisSession = new Set(), currentVideoIdx = 0;
 const videoToggle = document.getElementById('videoToggle');
 const videoPanel = document.getElementById('videoPanel');
 const videoPanelInner = document.getElementById('videoPanelInner');
@@ -7173,9 +7173,15 @@ async function loadVideoList(){
     videoPanelInner.innerHTML = '<div class="video-empty-msg">Walang available na video sa ngayon.</div>';
     return;
   }
+  // NOTE: no "loop" attribute here anymore (boss's request, Oct 2:
+  // "pwd ba auto play next video") - with loop=true the browser's
+  // 'ended' event never fires at all, so autoplay-next couldn't work.
+  // Looping a SINGLE video is instead handled manually in the 'ended'
+  // listener below, so a 1-video dashboard still behaves the same as
+  // before (replays itself endlessly).
   videoPanelInner.innerHTML = `
     <div class="video-wrap">
-      <video id="mainVideo" controls muted loop playsinline preload="none">
+      <video id="mainVideo" controls muted playsinline preload="none">
         <source src="" type="video/mp4">
       </video>
     </div>
@@ -7183,8 +7189,20 @@ async function loadVideoList(){
     <div class="picker-label">🎬 Pumili ng video:</div>
     <div class="picker-row" id="pickerRow"></div>
   `;
+  document.getElementById('mainVideo').addEventListener('ended', onMainVideoEnded);
   renderVideoPicker(0);
   selectVideo(0);
+}
+function onMainVideoEnded(){
+  const mainVideo = document.getElementById('mainVideo');
+  if(VIDEO_LIST.length <= 1){
+    // Only one video total - keep the old "endless replay" feel
+    // instead of doing nothing once it ends.
+    if(mainVideo){ mainVideo.currentTime = 0; mainVideo.play().catch(()=>{}); }
+    return;
+  }
+  const nextIdx = (currentVideoIdx + 1) % VIDEO_LIST.length; // wraps back to the first video after the last
+  selectVideo(nextIdx);
 }
 function renderVideoPicker(activeIdx){
   const pickerRow = document.getElementById('pickerRow');
@@ -7199,6 +7217,7 @@ function renderVideoPicker(activeIdx){
 function selectVideo(idx){
   const v = VIDEO_LIST[idx];
   if(!v) return;
+  currentVideoIdx = idx;
   const mainVideo = document.getElementById('mainVideo');
   mainVideo.querySelector('source').src = v.src;
   mainVideo.load();
