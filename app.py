@@ -2713,6 +2713,56 @@ def get_reward_catalog():
         return DEFAULT_REWARD_CATALOG
     return catalog
 
+def _classify_points_reason(reason):
+    """Buckets a loyalty-points ledger entry's free-text `reason` string
+    into a category, so boss can see totals by SOURCE (boss's request,
+    Oct 2: "gusto ko nakikita ni isesmo kung ilang points nakuha sa
+    order, sa spin, at sa games") instead of just a flat list of
+    entries. Matched against the exact reason strings award_loyalty_
+    points() is called with throughout app.py - if a new source is ever
+    added, give it its own recognizable prefix and add a branch here.
+    Falls back to "other" for anything unmatched (manual isesmo
+    adjustments, referral bonuses, redemptions, point expiry) so the
+    buckets we DO report are never silently wrong by misclassifying
+    something unexpected into them."""
+    r = (reason or "")
+    if r.startswith("Crossword Level"):
+        return "games"
+    if "Free Spin" in r:
+        return "spin"
+    if r.startswith("Order delivered") or r.startswith("Order qty corrected"):
+        return "order"
+    if r.startswith("Redeemed:"):
+        return "redeemed"
+    if r.startswith("Referral bonus"):
+        return "referral"
+    if r.startswith("[Isesmo]"):
+        return "manual"
+    if r.startswith("Expired -"):
+        return "expired"
+    return "other"
+
+
+def _summarize_points_history(history_entries):
+    """Sums a list of ledger entries (each a dict with 'points' and
+    'reason') into the per-source totals boss asked for. Only POSITIVE
+    (earned) points are counted per bucket - a redemption/expiry is a
+    deduction, not something "earned from order/spin/games", so those
+    stay out of the three headline numbers and land in their own
+    buckets instead (shown separately, not hidden)."""
+    totals = {"order": 0, "spin": 0, "games": 0, "referral": 0, "manual": 0, "redeemed": 0, "expired": 0, "other": 0}
+    for h in history_entries:
+        if not h:
+            continue
+        pts = h.get("points") or 0
+        category = _classify_points_reason(h.get("reason"))
+        if pts > 0:
+            totals[category] = totals.get(category, 0) + pts
+        elif category in ("redeemed", "expired"):
+            totals[category] = totals.get(category, 0) + pts  # negative, kept as-is for these two
+    return totals
+
+
 def award_loyalty_points(reseller_id, points, reason, ref_order_id=None, touch_activity=False):
     """
     Adds (positive points) or deducts (negative points, e.g. on
@@ -3412,10 +3462,40 @@ def get_reseller_detail(reseller_id):
             "points_balance": int(fb_get(f"loyalty_points/{reseller_id}/balance") or 0),
             "orders": orders[:100],
             "points_history": points_history[:100],
+            # boss's request, Oct 2: breakdown of THIS reseller's points
+            # by source (order/spin/games), computed from their full
+            # ledger (not just the [:100] slice shown above).
+            "points_breakdown": _summarize_points_history(points_history),
         }
     except Exception as e:
         print(f"get_reseller_detail error: {e}")
-        return {"store_name": "", "phone": "", "points_balance": 0, "orders": [], "points_history": []}
+        return {"store_name": "", "phone": "", "points_balance": 0, "orders": [], "points_history": [], "points_breakdown": {}}
+
+
+def get_points_breakdown_summary():
+    """Overall (ALL resellers combined) points-by-source totals - boss's
+    request, Oct 2, "overall" half of the points breakdown view. Reads
+    the whole loyalty_points tree in ONE Firebase call (cheaper than
+    fetching each reseller's history separately) and reuses the same
+    classify/sum logic as the per-reseller breakdown, so the two views
+    can never silently disagree on what counts as "order"/"spin"/
+    "games"."""
+    try:
+        all_points = fb_get("loyalty_points") or {}
+        all_history = []
+        for reseller_id, node in all_points.items():
+            if not node:
+                continue
+            history = node.get("history") or {}
+            for h in history.values():
+                if h:
+                    all_history.append(h)
+        totals = _summarize_points_history(all_history)
+        totals["reseller_count"] = len(all_points)
+        return totals
+    except Exception as e:
+        print(f"get_points_breakdown_summary error: {e}")
+        return {"order": 0, "spin": 0, "games": 0, "referral": 0, "manual": 0, "redeemed": 0, "expired": 0, "other": 0, "reseller_count": 0}
 
 def log_customer_login(reseller_id, store_name, phone, success, reason=""):
     """
@@ -13442,9 +13522,25 @@ tr.clickable:hover td{background:#fafcff}
 .modal-close{background:#f1f5f9;border:none;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;color:#333}
 .modal-section-title{font-size:12px;font-weight:700;color:#0f2942;margin:14px 0 6px}
 .modal-list-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f0f4f8;font-size:12px}
+.pts-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px}
+.pts-stat{background:#f8fafc;border:1px solid #eef2f6;border-radius:10px;padding:10px;text-align:center}
+.pts-stat .pts-stat-label{font-size:10px;color:#888;font-weight:700;text-transform:uppercase}
+.pts-stat .pts-stat-value{font-size:18px;font-weight:800;color:#00609C;margin-top:2px}
+.pts-stat.spin .pts-stat-value{color:#c2410c}
+.pts-stat.games .pts-stat-value{color:#166534}
 </style></head>
 <body>
 <div class="topbar"><h1>📊 Reseller Sales Tracking (ISESMO Only)</h1><div style="display:flex;gap:6px"><a href="/admin/rewards" class="nav-pill">🎁 Rewards</a><a href="/cashier" class="nav-pill">← Sales</a></div></div>
+
+<div class="card">
+  <h2>🎯 Points Breakdown (Lahat ng Reseller)</h2>
+  <div class="hint">Kabuuang points na na-claim ng LAHAT ng reseller, hinati base sa pinanggalingan - saan talaga sila pinaka-kumikita ng points.</div>
+  <div class="pts-stats" id="ptsBreakdownSummary">
+    <div class="pts-stat"><div class="pts-stat-label">📦 Order</div><div class="pts-stat-value">...</div></div>
+    <div class="pts-stat spin"><div class="pts-stat-label">🎡 Spin</div><div class="pts-stat-value">...</div></div>
+    <div class="pts-stat games"><div class="pts-stat-label">🧩 Games</div><div class="pts-stat-value">...</div></div>
+  </div>
+</div>
 
 <div class="card" id="atRiskCard" style="display:none">
   <h2>⚠️ At-Risk na Resellers (malapit nang mag-expire ang points)</h2>
@@ -13675,6 +13771,20 @@ async function loadTrend(){
   }catch(e){ el.innerHTML = `<div style="color:red">Error: ${escapeHtmlR(e.message)}</div>`; }
 }
 
+async function loadPointsBreakdownSummary(){
+  const el = document.getElementById('ptsBreakdownSummary');
+  try{
+    const res = await fetch('/api/admin/points_breakdown_summary');
+    const data = await res.json();
+    if(!data.ok){ el.innerHTML = `<div style="color:red">${escapeHtmlR(data.error||'Error')}</div>`; return; }
+    el.innerHTML = `
+      <div class="pts-stat"><div class="pts-stat-label">📦 Order</div><div class="pts-stat-value">${Number(data.order||0).toLocaleString()}</div></div>
+      <div class="pts-stat spin"><div class="pts-stat-label">🎡 Spin</div><div class="pts-stat-value">${Number(data.spin||0).toLocaleString()}</div></div>
+      <div class="pts-stat games"><div class="pts-stat-label">🧩 Games</div><div class="pts-stat-value">${Number(data.games||0).toLocaleString()}</div></div>
+    `;
+  }catch(e){ el.innerHTML = `<div style="color:red">Error: ${escapeHtmlR(e.message)}</div>`; }
+}
+
 async function openDetail(resellerId){
   const overlay = document.getElementById('detailOverlay');
   const body = document.getElementById('detailBody');
@@ -13691,7 +13801,17 @@ async function openDetail(resellerId){
     title.textContent = data.store_name;
     sub.textContent = `${data.phone || 'walang phone'} • ${Number(data.points_balance).toLocaleString()} points ngayon`;
 
-    let html = '<div class="modal-section-title">📦 Order History</div>';
+    const pb = data.points_breakdown || {};
+    let html = '<div class="modal-section-title">🎯 Points Breakdown (itong reseller)</div>';
+    html += `
+      <div class="pts-stats">
+        <div class="pts-stat"><div class="pts-stat-label">📦 Order</div><div class="pts-stat-value">${Number(pb.order||0).toLocaleString()}</div></div>
+        <div class="pts-stat spin"><div class="pts-stat-label">🎡 Spin</div><div class="pts-stat-value">${Number(pb.spin||0).toLocaleString()}</div></div>
+        <div class="pts-stat games"><div class="pts-stat-label">🧩 Games</div><div class="pts-stat-value">${Number(pb.games||0).toLocaleString()}</div></div>
+      </div>
+    `;
+
+    html += '<div class="modal-section-title">📦 Order History</div>';
     if(!data.orders.length){
       html += '<div class="empty-state">Wala pang online order.</div>';
     }else{
@@ -13725,6 +13845,7 @@ function closeDetail(){
 loadResellerSales();
 loadLeaderboard();
 loadTrend();
+loadPointsBreakdownSummary();
 </script>
 </body></html>
 """
@@ -14707,6 +14828,7 @@ async function openLevel(level){
     document.getElementById('resultBanner').innerHTML = '';
     document.getElementById('nextLevelBtn').style.display = 'none';
     renderGrid(data);
+    fillDraftAnswers(data); // boss's request, Oct 2: resume previously-typed letters, not a blank grid
     renderClues(data);
     startLevelTimer(data.seconds_left); // resume server clock, not a fresh 3:00 - see anti-cheat note in startLevelTimer()
   }catch(e){
@@ -14714,6 +14836,7 @@ async function openLevel(level){
   }
 }
 function backToLevels(){
+  saveDraftNow(); // boss's request, Oct 2: persist typed letters before leaving so they're there on the next tap
   stopLevelTimer();
   document.getElementById('puzzleView').style.display = 'none';
   document.getElementById('levelListView').style.display = 'block';
@@ -14746,6 +14869,67 @@ function renderGrid(data){
   }
   document.getElementById('gridTable').innerHTML = html;
 }
+// boss's request, Oct 2: "yung nasagot na nila nakalagay pa din kahit
+// na back na nila" - pre-fills the just-rendered (blank) grid with
+// whatever letters the server has saved from this player's last
+// session on this level, so backing out and tapping back in resumes
+// their progress instead of starting over.
+function fillDraftAnswers(data){
+  const draft = data.draft_answers || {};
+  if(!Object.keys(draft).length) return;
+  currentPuzzle.words.forEach(w => {
+    const key = `${w.number}${w.direction}`;
+    const word = draft[key];
+    if(!word) return;
+    for(let i=0; i<w.length; i++){
+      const ch = word[i];
+      if(!ch || ch === '_') continue;
+      const r = w.direction==='D' ? w.row+i : w.row;
+      const c = w.direction==='A' ? w.col+i : w.col;
+      const input = document.getElementById(`cell-${r}-${c}`);
+      if(input) input.value = ch;
+    }
+  });
+}
+// Gathers whatever is currently typed into the grid into the same
+// {"<number><direction>": "LETTERS"} shape both /check and /draft
+// expect - shared by checkAnswers() and saveDraftNow() so the two
+// never drift apart on how they read the grid.
+function collectAnswers(){
+  const answers = {};
+  if(!currentPuzzle) return answers;
+  currentPuzzle.words.forEach(w => {
+    let word = '';
+    for(let i=0; i<w.length; i++){
+      const r = w.direction==='D' ? w.row+i : w.row;
+      const c = w.direction==='A' ? w.col+i : w.col;
+      const input = document.getElementById(`cell-${r}-${c}`);
+      word += (input ? input.value : '') || '_';
+    }
+    answers[`${w.number}${w.direction}`] = word;
+  });
+  return answers;
+}
+let draftSaveTimer = null;
+function scheduleDraftSave(){
+  // Debounced (900ms after the player stops typing) so we're not
+  // firing a network request on every single keystroke - the auto-save
+  // only needs to keep up with pauses in typing, not every letter.
+  if(draftSaveTimer) clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(saveDraftNow, 900);
+}
+function saveDraftNow(){
+  if(draftSaveTimer){ clearTimeout(draftSaveTimer); draftSaveTimer = null; }
+  if(!currentLevel || !currentPuzzle) return;
+  const answers = collectAnswers();
+  // Fire-and-forget: a draft-save hiccup should never interrupt actual
+  // gameplay (no await, no error UI - worst case, resume just starts
+  // from wherever the last successful save left off).
+  fetch(`/api/crossword/level/${currentLevel}/draft`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({answers})
+  }).catch(() => {});
+}
 function onCellInput(input){
   input.value = input.value.toUpperCase().replace(/[^A-Z]/g, '');
   if(input.value){
@@ -14757,6 +14941,7 @@ function onCellInput(input){
     const down = document.getElementById(`cell-${r+1}-${c}`);
     if(right) right.focus(); else if(down) down.focus();
   }
+  scheduleDraftSave();
 }
 function onCellKey(e, input){
   const r = +input.dataset.r, c = +input.dataset.c;
@@ -14784,17 +14969,8 @@ function focusWord(row, col){
 }
 async function checkAnswers(){
   if(!currentPuzzle) return;
-  const answers = {};
-  currentPuzzle.words.forEach(w => {
-    let word = '';
-    for(let i=0; i<w.length; i++){
-      const r = w.direction==='D' ? w.row+i : w.row;
-      const c = w.direction==='A' ? w.col+i : w.col;
-      const input = document.getElementById(`cell-${r}-${c}`);
-      word += (input ? input.value : '') || '_';
-    }
-    answers[`${w.number}${w.direction}`] = word;
-  });
+  if(draftSaveTimer){ clearTimeout(draftSaveTimer); draftSaveTimer = null; } // about to submit anyway - no need for a pending auto-save to also fire
+  const answers = collectAnswers();
   const banner = document.getElementById('resultBanner');
   banner.innerHTML = '<div class="result-banner try">Sinusuri...</div>';
   try{
@@ -14953,6 +15129,46 @@ def _crossword_elapsed_seconds(reseller_id, level):
         return None
 
 
+def _crossword_save_draft(reseller_id, level, answers):
+    """Saves whatever the player has typed so far into this level's grid
+    (boss's request, Oct 2: "yung nasagot na nila nakalagay pa din kahit
+    na back na nila para iwas ulit" - don't make them retype everything
+    if they back out to the dashboard and come back). `answers` is the
+    same {"<number><direction>": "LETTERS"} shape the /check endpoint
+    already accepts - these are the player's OWN typed letters, not the
+    puzzle's real answers, so saving/returning them back is never an
+    answer leak. Uses fb_put (full replace, not patch) so a cleared
+    cell actually disappears from the draft instead of lingering."""
+    try:
+        fb_put(f"customer_crossword_progress/{reseller_id}/drafts/{level}", answers or {})
+    except Exception as e:
+        print(f"_crossword_save_draft error: {e}")
+
+
+def _crossword_get_draft(reseller_id, level):
+    """Returns the player's last-saved in-progress answers for this
+    level, or {} if none saved yet. Fetched by this specific level's
+    path (never the whole "drafts" node), so this is NOT exposed to the
+    Firebase integer-key array-coercion quirk the same way completed_
+    levels was - see _crossword_normalize_completed for that story."""
+    try:
+        draft = fb_get(f"customer_crossword_progress/{reseller_id}/drafts/{level}")
+        return draft if isinstance(draft, dict) else {}
+    except Exception as e:
+        print(f"_crossword_get_draft error: {e}")
+        return {}
+
+
+def _crossword_clear_draft(reseller_id, level):
+    """Deletes a level's saved draft once it's actually completed -
+    nothing left to resume, and keeps the Firebase tree from quietly
+    accumulating stale drafts for every level a player has ever cleared."""
+    try:
+        fb_delete(f"customer_crossword_progress/{reseller_id}/drafts/{level}")
+    except Exception as e:
+        print(f"_crossword_clear_draft error: {e}")
+
+
 @app.route("/customer/<reseller_id>/crossword")
 def customer_crossword_page(reseller_id):
     if not session.get("customer_id") and not session.get("staff_name"):
@@ -15022,13 +15238,59 @@ def api_crossword_get_level(level):
             "number": w["number"], "direction": w["direction"],
             "row": w["row"], "col": w["col"], "length": len(w["word"]), "clue": w["clue"],
         } for w in puzzle["words"]]
+        # boss's request, Oct 2: "yung nasagot na nila nakalagay pa din
+        # kahit na back na nila" - resume whatever letters the player
+        # already typed in this level, same as the timer already resumes
+        # instead of resetting. Staff previews get no draft (no
+        # reseller_id-scoped progress to resume for a non-customer
+        # session anyway).
+        draft_answers = _crossword_get_draft(reseller_id, level) if (session.get("customer_id") and not session.get("staff_name")) else {}
         return jsonify({
             "ok": True, "level": level, "width": puzzle["width"], "height": puzzle["height"],
             "words": words_public,
             "time_limit_seconds": CROSSWORD_TIME_LIMIT_SECONDS,
             "seconds_left": seconds_left,  # resumed countdown, NOT always a fresh 180s - see anti-cheat note above
             "points_for_level": _crossword_points_for_level(level),
+            "draft_answers": draft_answers,
         })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/crossword/level/<int:level>/draft", methods=["POST"])
+def api_crossword_save_draft(level):
+    """Auto-save endpoint for in-progress answers (boss's request, Oct
+    2) - called by the frontend on every cell edit (debounced) and when
+    backing out to the level list, so a player's partial progress
+    survives navigating away and coming back. Deliberately lightweight:
+    no correctness checking, no points, no timer interaction - just
+    persists whatever the player has typed so far."""
+    if not _crossword_auth_ok():
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    if level < 1 or level > CROSSWORD_TOTAL_LEVELS:
+        return jsonify({"ok": False, "error": "Invalid level"}), 404
+    data = request.json or {}
+    reseller_id = session.get("customer_id") or data.get("reseller_id")
+    if not reseller_id:
+        return jsonify({"ok": False, "error": "reseller_id required"}), 400
+    try:
+        # Staff previews never persist a draft - there's no real
+        # customer progress to resume, and staff aren't bound by the
+        # unlock/completed checks the way customers are below.
+        if session.get("customer_id") and not session.get("staff_name"):
+            progress = get_customer_crossword_progress(reseller_id)
+            if level > progress["unlocked_level"] or level in progress["completed_levels"]:
+                # Not an error worth surfacing to the player - just
+                # nothing to save a draft for (locked, or already done).
+                return jsonify({"ok": True, "saved": False})
+            answers = data.get("answers") or {}
+            if not isinstance(answers, dict):
+                answers = {}
+            # Only keep non-empty letters - no point persisting a pile
+            # of blank-string entries for cells the player never touched.
+            clean_answers = {str(k): str(v).strip().upper() for k, v in answers.items() if str(v or "").strip()}
+            _crossword_save_draft(reseller_id, level, clean_answers)
+        return jsonify({"ok": True, "saved": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -15094,6 +15356,7 @@ def api_crossword_check(level):
                 })
                 response["newly_completed"] = True
                 response["unlocked_level"] = new_unlocked
+                _crossword_clear_draft(reseller_id, level)  # nothing left to resume - level is done
         return jsonify(response)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -15457,6 +15720,19 @@ def api_admin_redemption_trend():
 def api_admin_reseller_detail(reseller_id):
     try:
         return jsonify({"ok": True, **get_reseller_detail(reseller_id)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/admin/points_breakdown_summary")
+@login_required
+@isesmo_only
+def api_admin_points_breakdown_summary():
+    """boss's request, Oct 2: overall points-by-source totals (order/
+    spin/games) across ALL resellers, shown at the top of the Reseller
+    Sales Tracking page."""
+    try:
+        return jsonify({"ok": True, **get_points_breakdown_summary()})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
