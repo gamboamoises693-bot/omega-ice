@@ -14584,7 +14584,7 @@ CROSSWORD_HTML = """<!DOCTYPE html>
 
 <div id="levelListView">
   <div class="card">
-    <div class="hint">Pumili ng level. Tapusin ang isang level sa loob ng <b>3 minuto</b> para makakuha ng <b>1 point</b> - sunod-sunod ang pagbukas ng level. Kahit lumampas sa oras, naka-proceed ka pa rin sa susunod na level, wala lang points.</div>
+    <div class="hint">Pumili ng level. Tapusin ang isang level sa loob ng <b>3 minuto</b> para makakuha ng points (<b>1 point</b> sa level 1-499, <b>5 points</b> sa level 500 pataas - mas mahirap na ang mga salita doon) - sunod-sunod ang pagbukas ng level. Kahit lumampas sa oras, naka-proceed ka pa rin sa susunod na level, wala lang points. Hindi na mabubuksan ulit ang level na tapos na.</div>
     <div id="levelGrid" class="level-grid"><div class="empty-hint">Loading...</div></div>
   </div>
 </div>
@@ -14626,9 +14626,18 @@ function formatTimer(sec){
   const r = s % 60;
   return `${m}:${String(r).padStart(2,'0')}`;
 }
-function startLevelTimer(){
+function startLevelTimer(secondsLeft){
+  // ANTI-CHEAT (boss's request, Oct 2): secondsLeft comes from the
+  // SERVER's own elapsed-time calculation (api_crossword_get_level's
+  // "seconds_left"), not a fresh TIME_LIMIT_SECONDS every time. The
+  // server only starts the clock on a level's FIRST open and keeps it
+  // running even if the player backs out to the dashboard and taps
+  // back in - so the on-screen countdown here is always just a visual
+  // RESUME of that same server clock, never a reset. Falls back to a
+  // full countdown only if the server didn't send one (shouldn't
+  // normally happen for a logged-in customer).
   stopLevelTimer();
-  timerSecondsLeft = TIME_LIMIT_SECONDS;
+  timerSecondsLeft = (typeof secondsLeft === 'number') ? secondsLeft : TIME_LIMIT_SECONDS;
   updateTimerLabel();
   timerInterval = setInterval(() => {
     timerSecondsLeft -= 1;
@@ -14664,8 +14673,13 @@ function renderLevelGrid(){
   for(let lvl=1; lvl<=TOTAL_LEVELS; lvl++){
     const locked = lvl > progressState.unlocked_level;
     const done = completedSet.has(lvl);
+    // Boss's request, Oct 2: "yung done na dapat di na pwd i tap" - a
+    // completed level is no longer tappable at all (disabled, no
+    // onclick), not just visually marked. Locked levels were already
+    // non-tappable; this extends the same treatment to done ones.
     const cls = locked ? 'level-btn locked' : (done ? 'level-btn done' : 'level-btn');
-    html += `<button class="${cls}" ${locked?'disabled':''} onclick="openLevel(${lvl})">${lvl}</button>`;
+    const isTappable = !locked && !done;
+    html += `<button class="${cls}" ${isTappable ? `onclick="openLevel(${lvl})"` : 'disabled'}>${lvl}</button>`;
   }
   el.innerHTML = html;
 }
@@ -14694,7 +14708,7 @@ async function openLevel(level){
     document.getElementById('nextLevelBtn').style.display = 'none';
     renderGrid(data);
     renderClues(data);
-    startLevelTimer();
+    startLevelTimer(data.seconds_left); // resume server clock, not a fresh 3:00 - see anti-cheat note in startLevelTimer()
   }catch(e){
     alert('Network error: ' + (e && e.message ? e.message : e));
   }
@@ -14833,9 +14847,19 @@ loadProgress();
 </body></html>
 """
 
-CROSSWORD_POINTS_PER_LEVEL = 1  # boss's request, Oct 2: "per level 1 point lang"
-CROSSWORD_TOTAL_LEVELS = 400  # boss's request, Oct 2: extended from 200 to 400 levels
+CROSSWORD_TOTAL_LEVELS = 1000  # boss's request, Oct 2: extended 200 -> 400 -> 1000 levels
 CROSSWORD_TIME_LIMIT_SECONDS = 180  # boss's request, Oct 2: 3-minute timer per level
+CROSSWORD_HARD_MODE_START_LEVEL = 500  # boss's request, Oct 2: "level 500 pataas 5 points, mahihirap na yung words"
+CROSSWORD_POINTS_NORMAL = 1
+CROSSWORD_POINTS_HARD = 5
+
+
+def _crossword_points_for_level(level):
+    """Points awarded for clearing a level within the time limit. Levels
+    1-499 stay at the original 1 point; level 500 and up pay 5 points,
+    matching the harder word bank/bigger grids those levels use (see
+    data/crossword_levels.json generation notes)."""
+    return CROSSWORD_POINTS_HARD if level >= CROSSWORD_HARD_MODE_START_LEVEL else CROSSWORD_POINTS_NORMAL
 
 def _load_crossword_levels():
     """Loads the 200 pre-generated puzzles once at startup. Returns an
@@ -14885,24 +14909,36 @@ def _crossword_auth_ok():
     return bool(session.get("customer_id") or session.get("staff_name"))
 
 
-def _crossword_mark_level_started(reseller_id, level):
-    """Stamps the moment a customer actually opened this level, so the
+def _crossword_mark_level_started_if_new(reseller_id, level):
+    """Stamps the moment a customer FIRST opens this level, so the
     3-minute timer (boss's request, Oct 2) is measured from the SERVER's
     clock, not trusted from the browser (which could be faked/paused).
-    Re-opening a level (e.g. after backing out to the level list and
-    coming back) resets the clock for a fresh 3-minute attempt - simpler
-    and more forgiving than trying to resume a stale timer."""
+
+    ANTI-CHEAT FIX (boss's request, Oct 2: "Pwede mandaya yung player
+    pag di nya masagot back lang nya sa dashboard magrereset ulit yung
+    time nya dapat resume time pag tap nya sa current"): this used to
+    overwrite the start timestamp on EVERY open, which meant a player
+    stuck on a hard puzzle could just tap back to the dashboard and
+    re-open the level to get a brand new, unlimited number of fresh
+    3-minute windows - effectively no time limit at all. Now it only
+    writes the start timestamp the FIRST time (when none exists yet);
+    re-opening the same still-unfinished level resumes the existing
+    clock instead of resetting it, so the 3-minute budget is genuinely
+    enforced from the first tap."""
     try:
+        existing = fb_get(f"customer_crossword_progress/{reseller_id}/level_starts/{level}")
+        if existing:
+            return  # already started earlier - resume, don't reset
         fb_patch(f"customer_crossword_progress/{reseller_id}/level_starts", {
             str(level): manila_now().strftime("%Y-%m-%d %H:%M:%S")
         })
     except Exception as e:
-        print(f"_crossword_mark_level_started error: {e}")
+        print(f"_crossword_mark_level_started_if_new error: {e}")
 
 
 def _crossword_elapsed_seconds(reseller_id, level):
     """Seconds since this customer opened this level, per the server
-    timestamp set by _crossword_mark_level_started. Returns None if no
+    timestamp set by _crossword_mark_level_started_if_new. Returns None if no
     start was ever recorded (e.g. a staff preview, or a stale/missing
     record) - callers treat that as "outside the time limit" rather
     than silently granting the bonus."""
@@ -14966,16 +15002,33 @@ def api_crossword_get_level(level):
         # Staff can preview any level (support/testing); a customer can only
         # play up to whatever they've already unlocked - prevents jumping
         # ahead by guessing/incrementing the URL.
+        seconds_left = CROSSWORD_TIME_LIMIT_SECONDS
         if session.get("customer_id") and not session.get("staff_name"):
             progress = get_customer_crossword_progress(reseller_id)
             if level > progress["unlocked_level"]:
                 return jsonify({"ok": False, "error": "Naka-lock pa ang level na ito"}), 403
-            _crossword_mark_level_started(reseller_id, level)  # starts the 3-minute clock for this attempt
+            # Anti-cheat (boss's request, Oct 2): a level already marked
+            # completed can no longer be re-opened/re-tapped at all - no
+            # point re-playing an already-cleared level, and this also
+            # closes off a would-be exploit where a cleared level could
+            # be reopened to "practice" the exact answers risk-free.
+            if level in progress["completed_levels"]:
+                return jsonify({"ok": False, "error": "Tapos na ang level na ito"}), 403
+            _crossword_mark_level_started_if_new(reseller_id, level)  # starts the clock ONCE; resumes on re-open
+            elapsed = _crossword_elapsed_seconds(reseller_id, level)
+            if elapsed is not None:
+                seconds_left = max(0, int(CROSSWORD_TIME_LIMIT_SECONDS - elapsed))
         words_public = [{
             "number": w["number"], "direction": w["direction"],
             "row": w["row"], "col": w["col"], "length": len(w["word"]), "clue": w["clue"],
         } for w in puzzle["words"]]
-        return jsonify({"ok": True, "level": level, "width": puzzle["width"], "height": puzzle["height"], "words": words_public})
+        return jsonify({
+            "ok": True, "level": level, "width": puzzle["width"], "height": puzzle["height"],
+            "words": words_public,
+            "time_limit_seconds": CROSSWORD_TIME_LIMIT_SECONDS,
+            "seconds_left": seconds_left,  # resumed countdown, NOT always a fresh 180s - see anti-cheat note above
+            "points_for_level": _crossword_points_for_level(level),
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -15013,6 +15066,7 @@ def api_crossword_check(level):
             "within_time": within_time,
             "elapsed_seconds": int(elapsed) if elapsed is not None else None,
             "time_limit_seconds": CROSSWORD_TIME_LIMIT_SECONDS,
+            "points_for_level": _crossword_points_for_level(level),
         }
 
         if all_correct:
@@ -15029,8 +15083,9 @@ def api_crossword_check(level):
                 # within the 3-minute window (and the loyalty program
                 # isn't paused) - too slow means 0 points, not a block.
                 if within_time and not is_loyalty_program_paused():
-                    award_loyalty_points(reseller_id, CROSSWORD_POINTS_PER_LEVEL, f"Crossword Level {level} cleared", ref_order_id=None, touch_activity=False)
-                    response["points_awarded"] = CROSSWORD_POINTS_PER_LEVEL
+                    points = _crossword_points_for_level(level)
+                    award_loyalty_points(reseller_id, points, f"Crossword Level {level} cleared", ref_order_id=None, touch_activity=False)
+                    response["points_awarded"] = points
                 new_unlocked = max(unlocked, level + 1) if level == unlocked else unlocked
                 completed[str(level)] = True
                 fb_patch(f"customer_crossword_progress/{reseller_id}", {
