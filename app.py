@@ -15408,7 +15408,7 @@ load();
 GAMES_HUB_HTML = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mini-Games - Omega Ice</title>
 <style>
-*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px;overflow-x:hidden}
 .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
 .topbar h1{font-size:15px;color:#00609C;margin:0}
 .topbar-sub{font-size:10px;color:#888;margin-bottom:12px}
@@ -15430,15 +15430,15 @@ GAMES_HUB_HTML = """<!DOCTYPE html>
 .sud-diff-row{display:flex;gap:6px;margin-bottom:12px}
 .sud-diff-btn{font-size:10.5px;font-weight:700;padding:6px 12px;border-radius:10px;border:1px solid #d7e3ef;background:#fff;color:#334155;cursor:pointer}
 .sud-diff-btn.active{background:#00609C;color:#fff;border-color:#00609C}
-.sud-grid{display:grid;grid-template-columns:repeat(9,1fr);gap:1px;background:#0f2942;padding:2px;border-radius:6px;margin-bottom:14px}
-.sud-cell{aspect-ratio:1;background:#fff;border:none;text-align:center;font-size:13px;font-weight:700;color:#00609C;display:flex;align-items:center;justify-content:center;padding:0;font-family:inherit}
+.sud-grid{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:1px;background:#0f2942;padding:2px;border-radius:6px;margin-bottom:14px}
+.sud-cell{width:100%;min-width:0;aspect-ratio:1;background:#fff;border:none;text-align:center;font-size:13px;font-weight:700;color:#00609C;display:flex;align-items:center;justify-content:center;padding:0;font-family:inherit}
 div.sud-cell{color:#0f2942;background:#f1f5f9}
 input.sud-cell.correct{background:#dcfce7 !important;color:#166534}
 input.sud-cell.incorrect{background:#fee2e2 !important;color:#c0392b}
 
 /* ---- Word Search ---- */
 .ws-grid{display:grid;gap:2px;margin-bottom:12px;user-select:none}
-.ws-cell{aspect-ratio:1;background:#f8fafc;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#334155;cursor:pointer}
+.ws-cell{width:100%;min-width:0;aspect-ratio:1;background:#f8fafc;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#334155;cursor:pointer}
 .ws-cell.selecting{background:#fef3c7}
 .ws-cell.found{background:#dcfce7;color:#166534}
 .ws-word-list{margin-bottom:10px}
@@ -15454,9 +15454,9 @@ input.sud-cell.incorrect{background:#fee2e2 !important;color:#c0392b}
 
 /* ---- Solitaire ---- */
 .sol-row{display:flex;gap:6px;margin-bottom:14px;align-items:flex-start}
-.sol-slot{width:13%;aspect-ratio:3/4;border-radius:6px;border:1px dashed #cbd5e1;display:flex;align-items:center;justify-content:center;background:#f8fafc;font-size:14px;color:#cbd5e1;cursor:pointer}
+.sol-slot{width:13%;min-width:0;flex-shrink:0;aspect-ratio:3/4;border-radius:6px;border:1px dashed #cbd5e1;display:flex;align-items:center;justify-content:center;background:#f8fafc;font-size:14px;color:#cbd5e1;cursor:pointer}
 .sol-spacer{flex:1}
-.sol-card{width:13%;aspect-ratio:3/4;border-radius:6px;background:#fff;border:1px solid #d7e3ef;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.12);cursor:pointer;position:relative}
+.sol-card{width:13%;min-width:0;flex-shrink:0;aspect-ratio:3/4;border-radius:6px;background:#fff;border:1px solid #d7e3ef;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.12);cursor:pointer;position:relative}
 .sol-card.red{color:#c0392b}
 .sol-card.black{color:#0f2942}
 .sol-card.back{background:#00609C;border-color:#004b7a}
@@ -15748,7 +15748,7 @@ function renderWordSearch(){
   wsFirstTap = null;
   document.getElementById('wsWinBanner').style.display='none';
   const el = document.getElementById('wsGrid');
-  el.style.gridTemplateColumns = `repeat(${WS_SIZE}, 1fr)`;
+  el.style.gridTemplateColumns = `repeat(${WS_SIZE}, minmax(0,1fr))`;
   let html = '';
   for(let r=0;r<WS_SIZE;r++){
     for(let c=0;c<WS_SIZE;c++){
@@ -16038,6 +16038,18 @@ function attemptMoveTo(dest){
 
 CROSSWORD_TOTAL_LEVELS = 1000  # boss's request, Oct 2: extended 200 -> 400 -> 1000 levels
 CROSSWORD_TIME_LIMIT_SECONDS = 180  # boss's request, Oct 2: 3-minute timer per level
+# boss's report, Oct 3: "Nawala yung timer sa crossword" - a level
+# opened once and then abandoned (lunch break, a prior test session,
+# genuinely coming back hours/days later) got stuck showing "Lumampas
+# sa 3 minuto" FOREVER on every future open, even a brand new attempt,
+# because resume-not-reset (below) never expired the old start
+# timestamp. The original anti-cheat concern was only about tapping
+# back-and-forth WITHIN THE SAME SITTING (seconds/minutes apart) to
+# grab unlimited fresh 3-minute windows - never meant to permanently
+# lock a level after a long break. Anything older than this many
+# seconds since the level was last opened is treated as stale and
+# reset to a fresh timer; anything newer still just resumes.
+CROSSWORD_STALE_RESET_SECONDS = 3600  # 1 hour
 CROSSWORD_HARD_MODE_START_LEVEL = 500  # boss's request, Oct 2: "level 500 pataas 5 points, mahihirap na yung words"
 CROSSWORD_POINTS_NORMAL = 1
 CROSSWORD_POINTS_HARD = 5
@@ -16139,11 +16151,29 @@ def _crossword_mark_level_started_if_new(reseller_id, level):
     writes the start timestamp the FIRST time (when none exists yet);
     re-opening the same still-unfinished level resumes the existing
     clock instead of resetting it, so the 3-minute budget is genuinely
-    enforced from the first tap."""
+    enforced from the first tap.
+
+    STALE-RESET FIX (boss's report, Oct 3: "Nawala yung timer sa
+    crossword"): resume-not-reset by itself never expires, so a level
+    opened once and abandoned for a long time (hours/days later) would
+    show "Lumampas sa 3 minuto" immediately forever, even on what is
+    genuinely a brand new attempt. If the existing start timestamp is
+    older than CROSSWORD_STALE_RESET_SECONDS, treat this as a fresh
+    attempt and reset the clock - still resumes normally for anything
+    within that window, so the original back-and-forth exploit stays
+    closed."""
     try:
         existing = fb_get(f"customer_crossword_progress/{reseller_id}/level_starts/{level}")
         if existing:
-            return  # already started earlier - resume, don't reset
+            stale = True
+            try:
+                existing_dt = datetime.strptime(existing, "%Y-%m-%d %H:%M:%S")
+                now_dt = datetime.strptime(manila_now().strftime("%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H:%M:%S")
+                stale = (now_dt - existing_dt).total_seconds() > CROSSWORD_STALE_RESET_SECONDS
+            except Exception:
+                stale = False  # malformed timestamp - safer to resume than to silently reset
+            if not stale:
+                return  # still within the grace window - resume, don't reset
         fb_patch(f"customer_crossword_progress/{reseller_id}/level_starts", {
             str(level): manila_now().strftime("%Y-%m-%d %H:%M:%S")
         })
