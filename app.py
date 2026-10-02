@@ -6224,6 +6224,7 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 <button onclick="bulkMarkDelivered()" class="action-btn action-btn-success"><span class="action-btn-icon">✅</span>Mark all Pending as Delivered</button>
 <a href="/customer/{{ reseller_id }}/history" class="action-btn action-btn-accent"><span class="action-btn-icon">📊</span>Sales History</a>
 <a href="/customer/{{ reseller_id }}/trend" class="action-btn action-btn-accent"><span class="action-btn-icon">📈</span>Sales Trend</a>
+<a href="/customer/{{ reseller_id }}/crossword" class="action-btn action-btn-warn action-btn-wide"><span class="action-btn-icon">🧩</span>Crossword Puzzle (Laro + Points)</a>
 </div>
 <div style="font-size:10px;color:#888;margin-top:6px">Staff will update to Preparing → Delivered</div>
 </div>
@@ -7181,7 +7182,7 @@ async function loadVideoList(){
   // before (replays itself endlessly).
   videoPanelInner.innerHTML = `
     <div class="video-wrap">
-      <video id="mainVideo" controls muted playsinline preload="none">
+      <video id="mainVideo" controls playsinline preload="none">
         <source src="" type="video/mp4">
       </video>
     </div>
@@ -7193,12 +7194,28 @@ async function loadVideoList(){
   renderVideoPicker(0);
   selectVideo(0);
 }
+// Boss's request, Oct 2: "yung volume dapat hindi na mute" - default
+// na may tunog ang video (hindi na kailangan i-tap pa ng customer para
+// marinig). Some mobile browsers (especially iOS Safari) still block
+// autoplay-with-sound even on a user-gesture chain once an `await`
+// (the /api/videos fetch) breaks it up, so this tries unmuted first
+// and falls back to muted ONLY if the browser actually refuses to play
+// it any other way - the customer can still unmute anytime via the
+// speaker icon on the native video controls.
+function tryPlayMainVideo(mainVideo){
+  if(!mainVideo) return;
+  mainVideo.muted = false;
+  mainVideo.play().catch(()=>{
+    mainVideo.muted = true;
+    mainVideo.play().catch(()=>{});
+  });
+}
 function onMainVideoEnded(){
   const mainVideo = document.getElementById('mainVideo');
   if(VIDEO_LIST.length <= 1){
     // Only one video total - keep the old "endless replay" feel
     // instead of doing nothing once it ends.
-    if(mainVideo){ mainVideo.currentTime = 0; mainVideo.play().catch(()=>{}); }
+    if(mainVideo){ mainVideo.currentTime = 0; tryPlayMainVideo(mainVideo); }
     return;
   }
   const nextIdx = (currentVideoIdx + 1) % VIDEO_LIST.length; // wraps back to the first video after the last
@@ -7221,7 +7238,7 @@ function selectVideo(idx){
   const mainVideo = document.getElementById('mainVideo');
   mainVideo.querySelector('source').src = v.src;
   mainVideo.load();
-  mainVideo.play().catch(()=>{});
+  tryPlayMainVideo(mainVideo);
   document.getElementById('videoTitleBar').textContent = '▶ ' + v.title;
   document.getElementById('videoViewsBadge').textContent = `👁 ${v.views || 0} views`;
   renderVideoPicker(idx);
@@ -7244,7 +7261,7 @@ function toggleVideoPanel(){
   videoPanel.classList.toggle('open', videoPanelOpen);
   if(videoPanelOpen){
     if(!videoPanelLoaded){ loadVideoList(); videoPanelLoaded = true; }
-    else { const mv = document.getElementById('mainVideo'); if(mv) mv.play().catch(()=>{}); }
+    else { tryPlayMainVideo(document.getElementById('mainVideo')); }
   } else {
     const mv = document.getElementById('mainVideo'); if(mv) mv.pause();
   }
@@ -14493,6 +14510,412 @@ def api_admin_delete_video(video_id):
             return jsonify({"ok": False, "error": "Video not found"}), 404
         fb_delete(f"dashboard_videos/{video_id}")
         return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+
+
+# =====================================================================
+# DASHBOARD CROSSWORD MINI-GAME (boss's request, Oct 2: "...kaya din ba
+# natin gumawa ng mini games tulad ng word puzzle na may 200 level?").
+# Confirmed with boss: Crossword style, lives on the Customer Dashboard
+# (new page, linked via a button), awards loyalty points per level
+# cleared, word list is auto-generated common English/Tagalog
+# vocabulary (not business-themed).
+#
+# 200 puzzles are PRE-GENERATED (not built live on each request - the
+# crossword-packing algorithm is non-trivial and not something you want
+# running inside a web request) and baked into data/crossword_levels.json,
+# loaded once at startup. Each level's word list gets longer and the
+# grid gets bigger as the level number climbs, for a difficulty curve.
+#
+# Firebase shape: "customer_crossword_progress/<reseller_id>": {
+#   "unlocked_level": int (default 1 - the highest level this customer
+#      is currently ALLOWED to play; levels must be cleared in order),
+#   "completed_levels": {"<level>": true, ...} (so points are never
+#      re-awarded for replaying an already-cleared level),
+# }
+# =====================================================================
+
+CROSSWORD_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Crossword Puzzle - Omega Ice</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.topbar h1{font-size:15px;color:#00609C;margin:0}
+.btn{padding:9px 14px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:12px;text-decoration:none;cursor:pointer}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.hint{font-size:11px;color:#666;line-height:1.5;margin-bottom:10px}
+/* ---- Level picker grid ---- */
+.level-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.level-btn{aspect-ratio:1;border-radius:10px;border:1px solid #d7e3ef;background:#f8fafc;color:#334155;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative}
+.level-btn.locked{background:#eef2f6;color:#aab4bf;cursor:not-allowed}
+.level-btn.locked::after{content:'🔒';position:absolute;font-size:9px;bottom:2px;right:3px}
+.level-btn.done{background:#dcfce7;border-color:#86efac;color:#166534}
+.level-btn.done::after{content:'✓';position:absolute;font-size:10px;top:1px;right:3px;color:#16a34a}
+.level-btn.current{outline:2px solid #00609C;outline-offset:1px}
+/* ---- Puzzle view ---- */
+.puzzle-wrap{overflow-x:auto;padding-bottom:4px}
+.grid-table{border-collapse:collapse;margin:0 auto}
+.gcell{width:30px;height:30px;border:1px solid #cfd9e3;position:relative;background:#fff}
+.gcell.blank{border:none;background:transparent}
+.gcell input{width:100%;height:100%;border:none;text-align:center;font-size:14px;font-weight:700;text-transform:uppercase;color:#0f2942;background:transparent;padding:0}
+.gcell input:focus{outline:2px solid #00609C;outline-offset:-2px}
+.gcell.correct input{background:#dcfce7;color:#166534}
+.gcell.incorrect input{background:#fee2e2;color:#c0392b}
+.gnum{position:absolute;top:0;left:1px;font-size:7px;color:#7891a8;font-weight:700;line-height:1}
+.clue-section{margin-top:14px}
+.clue-section h4{font-size:12px;color:#00609C;margin:10px 0 6px}
+.clue-row{font-size:12px;color:#334155;padding:4px 0;border-bottom:1px solid #f0f4f8;cursor:pointer}
+.clue-row b{color:#0f2942}
+.check-btn{width:100%;padding:12px;border-radius:10px;border:none;background:#00609C;color:#fff;font-weight:700;font-size:13px;cursor:pointer;margin-top:14px}
+.result-banner{border-radius:10px;padding:12px;margin-top:10px;font-size:13px;text-align:center;font-weight:700}
+.result-banner.win{background:#dcfce7;color:#166534}
+.result-banner.try{background:#fef3c7;color:#92400e}
+.next-btn{width:100%;padding:12px;border-radius:10px;border:none;background:#16a34a;color:#fff;font-weight:700;font-size:13px;cursor:pointer;margin-top:8px}
+.empty-hint{text-align:center;font-size:12px;color:#888;padding:20px 0}
+</style></head>
+<body>
+<div class="topbar"><h1>🧩 Crossword Puzzle</h1><a href="/customer/{{ reseller_id }}/dashboard" class="btn">← Dashboard</a></div>
+
+<div id="levelListView">
+  <div class="card">
+    <div class="hint">Pumili ng level. Tapusin ang isang level para makakuha ng <b>5 points</b> at ma-unlock ang susunod. Sunod-sunod ang pagbukas ng level.</div>
+    <div id="levelGrid" class="level-grid"><div class="empty-hint">Loading...</div></div>
+  </div>
+</div>
+
+<div id="puzzleView" style="display:none">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="font-weight:700;font-size:13px" id="puzzleLevelLabel">Level 1</span>
+      <button class="btn" onclick="backToLevels()">← Listahan</button>
+    </div>
+    <div class="puzzle-wrap"><table class="grid-table" id="gridTable"></table></div>
+    <button class="check-btn" onclick="checkAnswers()">✅ I-check ang Sagot</button>
+    <div id="resultBanner"></div>
+    <button class="next-btn" id="nextLevelBtn" style="display:none" onclick="goToNextLevel()">➡️ Susunod na Level</button>
+    <div class="clue-section">
+      <h4>➡️ Across</h4>
+      <div id="acrossClues"></div>
+      <h4>⬇️ Down</h4>
+      <div id="downClues"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const RESELLER_ID = "{{ reseller_id }}";
+const TOTAL_LEVELS = {{ total_levels }};
+let progressState = {unlocked_level: 1, completed_levels: []};
+let currentLevel = null;
+let currentPuzzle = null;
+let nextUnlockedAfterWin = null;
+
+async function loadProgress(){
+  try{
+    const res = await fetch('/api/crossword/progress');
+    const data = await res.json();
+    if(data.ok){ progressState = data; }
+  }catch(e){}
+  renderLevelGrid();
+}
+function renderLevelGrid(){
+  const el = document.getElementById('levelGrid');
+  const completedSet = new Set(progressState.completed_levels || []);
+  let html = '';
+  for(let lvl=1; lvl<=TOTAL_LEVELS; lvl++){
+    const locked = lvl > progressState.unlocked_level;
+    const done = completedSet.has(lvl);
+    const cls = locked ? 'level-btn locked' : (done ? 'level-btn done' : 'level-btn');
+    html += `<button class="${cls}" ${locked?'disabled':''} onclick="openLevel(${lvl})">${lvl}</button>`;
+  }
+  el.innerHTML = html;
+}
+async function openLevel(level){
+  try{
+    const res = await fetch(`/api/crossword/level/${level}`);
+    const data = await res.json();
+    if(!data.ok){ alert(data.error || 'Hindi mabuksan ang level na ito.'); return; }
+    currentLevel = level;
+    currentPuzzle = data;
+    nextUnlockedAfterWin = null;
+    document.getElementById('levelListView').style.display = 'none';
+    document.getElementById('puzzleView').style.display = 'block';
+    document.getElementById('puzzleLevelLabel').textContent = `Level ${level} / ${TOTAL_LEVELS}`;
+    document.getElementById('resultBanner').innerHTML = '';
+    document.getElementById('nextLevelBtn').style.display = 'none';
+    renderGrid(data);
+    renderClues(data);
+  }catch(e){
+    alert('Network error.');
+  }
+}
+function backToLevels(){
+  document.getElementById('puzzleView').style.display = 'none';
+  document.getElementById('levelListView').style.display = 'block';
+  loadProgress();
+}
+function renderGrid(data){
+  const cellMap = {}; // "r,c" -> {number}
+  data.words.forEach(w => {
+    for(let i=0; i<w.length; i++){
+      const r = w.direction==='D' ? w.row+i : w.row;
+      const c = w.direction==='A' ? w.col+i : w.col;
+      const key = `${r},${c}`;
+      if(!cellMap[key]) cellMap[key] = {};
+      if(i===0) cellMap[key].number = w.number;
+    }
+  });
+  let html = '';
+  for(let r=0; r<data.height; r++){
+    html += '<tr>';
+    for(let c=0; c<data.width; c++){
+      const key = `${r},${c}`;
+      if(cellMap[key]){
+        const num = cellMap[key].number;
+        html += `<td class="gcell" id="cellwrap-${r}-${c}">${num?`<span class="gnum">${num}</span>`:''}<input maxlength="1" id="cell-${r}-${c}" data-r="${r}" data-c="${c}" oninput="onCellInput(this)" onkeydown="onCellKey(event,this)"></td>`;
+      } else {
+        html += '<td class="gcell blank"></td>';
+      }
+    }
+    html += '</tr>';
+  }
+  document.getElementById('gridTable').innerHTML = html;
+}
+function onCellInput(input){
+  input.value = input.value.toUpperCase().replace(/[^A-Z]/g, '');
+  if(input.value){
+    // Move to the next cell to the right if one exists, else try down -
+    // simple heuristic (not full across/down-aware navigation) good
+    // enough for casual play; the player can always tap any cell.
+    const r = +input.dataset.r, c = +input.dataset.c;
+    const right = document.getElementById(`cell-${r}-${c+1}`);
+    const down = document.getElementById(`cell-${r+1}-${c}`);
+    if(right) right.focus(); else if(down) down.focus();
+  }
+}
+function onCellKey(e, input){
+  const r = +input.dataset.r, c = +input.dataset.c;
+  let target = null;
+  if(e.key === 'ArrowRight') target = document.getElementById(`cell-${r}-${c+1}`);
+  else if(e.key === 'ArrowLeft') target = document.getElementById(`cell-${r}-${c-1}`);
+  else if(e.key === 'ArrowDown') target = document.getElementById(`cell-${r+1}-${c}`);
+  else if(e.key === 'ArrowUp') target = document.getElementById(`cell-${r-1}-${c}`);
+  else if(e.key === 'Backspace' && !input.value) target = document.getElementById(`cell-${r}-${c-1}`);
+  if(target){ e.preventDefault(); target.focus(); }
+}
+function renderClues(data){
+  const across = data.words.filter(w => w.direction === 'A').sort((a,b)=>a.number-b.number);
+  const down = data.words.filter(w => w.direction === 'D').sort((a,b)=>a.number-b.number);
+  document.getElementById('acrossClues').innerHTML = across.map(w =>
+    `<div class="clue-row" onclick="focusWord(${w.row},${w.col})"><b>${w.number}.</b> ${w.clue} (${w.length})</div>`
+  ).join('') || '<div class="clue-row">-</div>';
+  document.getElementById('downClues').innerHTML = down.map(w =>
+    `<div class="clue-row" onclick="focusWord(${w.row},${w.col})"><b>${w.number}.</b> ${w.clue} (${w.length})</div>`
+  ).join('') || '<div class="clue-row">-</div>';
+}
+function focusWord(row, col){
+  const el = document.getElementById(`cell-${row}-${col}`);
+  if(el) el.focus();
+}
+async function checkAnswers(){
+  if(!currentPuzzle) return;
+  const answers = {};
+  currentPuzzle.words.forEach(w => {
+    let word = '';
+    for(let i=0; i<w.length; i++){
+      const r = w.direction==='D' ? w.row+i : w.row;
+      const c = w.direction==='A' ? w.col+i : w.col;
+      const input = document.getElementById(`cell-${r}-${c}`);
+      word += (input ? input.value : '') || '_';
+    }
+    answers[`${w.number}${w.direction}`] = word;
+  });
+  const banner = document.getElementById('resultBanner');
+  banner.innerHTML = '<div class="result-banner try">Sinusuri...</div>';
+  try{
+    const res = await fetch(`/api/crossword/level/${currentLevel}/check`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({answers})
+    });
+    const data = await res.json();
+    if(!data.ok){ banner.innerHTML = `<div class="result-banner try">${data.error || 'May error.'}</div>`; return; }
+    // Paint each word's cells green/red based on per-word correctness
+    currentPuzzle.words.forEach(w => {
+      const key = `${w.number}${w.direction}`;
+      const correct = data.results[key];
+      for(let i=0; i<w.length; i++){
+        const r = w.direction==='D' ? w.row+i : w.row;
+        const c = w.direction==='A' ? w.col+i : w.col;
+        const wrap = document.getElementById(`cellwrap-${r}-${c}`);
+        if(wrap){ wrap.classList.remove('correct','incorrect'); wrap.classList.add(correct ? 'correct' : 'incorrect'); }
+      }
+    });
+    if(data.all_correct){
+      const pts = data.points_awarded > 0 ? ` +${data.points_awarded} points!` : ' (na-clear mo na dati ang level na ito)';
+      banner.innerHTML = `<div class="result-banner win">🎉 Tama lahat!${pts}</div>`;
+      nextUnlockedAfterWin = data.unlocked_level;
+      if(currentLevel < TOTAL_LEVELS){
+        document.getElementById('nextLevelBtn').style.display = 'block';
+      }
+    } else {
+      banner.innerHTML = '<div class="result-banner try">May mali pa - tingnan ang pulang kahon.</div>';
+    }
+  }catch(e){
+    banner.innerHTML = '<div class="result-banner try">Network error.</div>';
+  }
+}
+function goToNextLevel(){
+  if(currentLevel < TOTAL_LEVELS){
+    openLevel(currentLevel + 1);
+  }
+}
+loadProgress();
+</script>
+</body></html>
+"""
+
+CROSSWORD_POINTS_PER_LEVEL = 5  # flat reward per level cleared - easy for ISESMO to retune later if needed
+CROSSWORD_TOTAL_LEVELS = 200
+
+def _load_crossword_levels():
+    """Loads the 200 pre-generated puzzles once at startup. Returns an
+    empty dict (game quietly unavailable, rather than crashing the
+    whole app) if the data file is missing for any reason."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "crossword_levels.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return {int(k): v for k, v in raw.items()}
+    except Exception as e:
+        print(f"Failed to load crossword_levels.json: {e}")
+        return {}
+
+CROSSWORD_LEVELS = _load_crossword_levels()
+
+
+def get_customer_crossword_progress(reseller_id):
+    data = fb_get(f"customer_crossword_progress/{reseller_id}") or {}
+    unlocked = int(data.get("unlocked_level") or 1)
+    completed = data.get("completed_levels") or {}
+    completed_list = sorted(int(k) for k in completed.keys() if str(k).isdigit())
+    return {"unlocked_level": unlocked, "completed_levels": completed_list}
+
+
+def _crossword_auth_ok():
+    return bool(session.get("customer_id") or session.get("staff_name"))
+
+
+@app.route("/customer/<reseller_id>/crossword")
+def customer_crossword_page(reseller_id):
+    if not session.get("customer_id") and not session.get("staff_name"):
+        return redirect(url_for("customer_login_page"))
+    if session.get("customer_id") and session.get("customer_id") != reseller_id and not session.get("staff_name"):
+        return redirect(f"/customer/{session.get('customer_id')}/crossword")
+    return render_template_string(CROSSWORD_HTML, reseller_id=reseller_id, total_levels=CROSSWORD_TOTAL_LEVELS)
+
+
+@app.route("/api/crossword/progress")
+def api_crossword_progress():
+    if not _crossword_auth_ok():
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    reseller_id = session.get("customer_id") or request.args.get("reseller_id")
+    if not reseller_id:
+        return jsonify({"ok": False, "error": "reseller_id required"}), 400
+    try:
+        progress = get_customer_crossword_progress(reseller_id)
+        progress["total_levels"] = CROSSWORD_TOTAL_LEVELS
+        return jsonify({"ok": True, **progress})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/crossword/level/<int:level>")
+def api_crossword_get_level(level):
+    """Returns the puzzle SHAPE only - grid size, clue numbers/text,
+    word lengths and start positions - never the actual answers, so a
+    customer can't just read them out of the browser's network tab.
+    Answers are verified server-side only, in the /check endpoint
+    below."""
+    if not _crossword_auth_ok():
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    if level < 1 or level > CROSSWORD_TOTAL_LEVELS:
+        return jsonify({"ok": False, "error": "Invalid level"}), 404
+    puzzle = CROSSWORD_LEVELS.get(level)
+    if not puzzle:
+        return jsonify({"ok": False, "error": "Level not available"}), 404
+    reseller_id = session.get("customer_id") or request.args.get("reseller_id")
+    # Staff can preview any level (support/testing); a customer can only
+    # play up to whatever they've already unlocked - prevents jumping
+    # ahead by guessing/incrementing the URL.
+    if session.get("customer_id") and not session.get("staff_name"):
+        progress = get_customer_crossword_progress(reseller_id)
+        if level > progress["unlocked_level"]:
+            return jsonify({"ok": False, "error": "Naka-lock pa ang level na ito"}), 403
+    words_public = [{
+        "number": w["number"], "direction": w["direction"],
+        "row": w["row"], "col": w["col"], "length": len(w["word"]), "clue": w["clue"],
+    } for w in puzzle["words"]]
+    return jsonify({"ok": True, "level": level, "width": puzzle["width"], "height": puzzle["height"], "words": words_public})
+
+
+@app.route("/api/crossword/level/<int:level>/check", methods=["POST"])
+def api_crossword_check(level):
+    if not _crossword_auth_ok():
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    if level < 1 or level > CROSSWORD_TOTAL_LEVELS:
+        return jsonify({"ok": False, "error": "Invalid level"}), 404
+    puzzle = CROSSWORD_LEVELS.get(level)
+    if not puzzle:
+        return jsonify({"ok": False, "error": "Level not available"}), 404
+    data = request.json or {}
+    reseller_id = session.get("customer_id") or data.get("reseller_id")
+    if not reseller_id:
+        return jsonify({"ok": False, "error": "reseller_id required"}), 400
+    try:
+        submitted = data.get("answers") or {}
+        results = {}
+        all_correct = True
+        for w in puzzle["words"]:
+            key = f"{w['number']}{w['direction']}"
+            given = str(submitted.get(key) or "").strip().upper()
+            correct = (given == w["word"])
+            results[key] = correct
+            if not correct:
+                all_correct = False
+
+        response = {
+            "ok": True, "results": results, "all_correct": all_correct,
+            "points_awarded": 0, "newly_completed": False,
+        }
+
+        if all_correct:
+            progress_raw = fb_get(f"customer_crossword_progress/{reseller_id}") or {}
+            completed = dict(progress_raw.get("completed_levels") or {})
+            already_done = bool(completed.get(str(level)))
+            unlocked = int(progress_raw.get("unlocked_level") or 1)
+            response["unlocked_level"] = unlocked
+            if not already_done:
+                # First-time clear: award points (unless the loyalty
+                # program is paused - same rule the rest of the app
+                # follows) and advance the unlock frontier, but ONLY
+                # when this level WAS the frontier - replaying/
+                # back-filling an earlier already-unlocked level never
+                # moves unlocked_level backwards or skips levels.
+                if not is_loyalty_program_paused():
+                    award_loyalty_points(reseller_id, CROSSWORD_POINTS_PER_LEVEL, f"Crossword Level {level} cleared", ref_order_id=None, touch_activity=False)
+                    response["points_awarded"] = CROSSWORD_POINTS_PER_LEVEL
+                new_unlocked = max(unlocked, level + 1) if level == unlocked else unlocked
+                completed[str(level)] = True
+                fb_patch(f"customer_crossword_progress/{reseller_id}", {
+                    "completed_levels": completed,
+                    "unlocked_level": new_unlocked,
+                })
+                response["newly_completed"] = True
+                response["unlocked_level"] = new_unlocked
+        return jsonify(response)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
