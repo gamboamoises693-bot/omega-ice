@@ -14853,10 +14853,30 @@ def _load_crossword_levels():
 CROSSWORD_LEVELS = _load_crossword_levels()
 
 
+def _crossword_normalize_completed(raw):
+    """Firebase Realtime Database quirk: a JSON object whose keys are ALL
+    small integer-like strings (exactly what completed_levels uses - "1",
+    "2", "3"...) gets silently returned as a JSON ARRAY instead of an
+    object/dict, both via REST and the Admin SDK (e.g. {"1": true, "2":
+    true} comes back as [null, true, true]). Our local test mock
+    (FakeRef) always preserves plain dict semantics, so this never showed
+    up in the 39/39 passing test_crossword.py run - only in production
+    against the real Firebase, as the HTTP 500 boss reported. This
+    normalizes EITHER shape back into a clean {"<level>": True, ...}
+    dict so the rest of the code can always assume dict semantics."""
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, list):
+        # index i in the array corresponds to key str(i); index 0 is
+        # always None/falsy since there's never a "level 0".
+        return {str(i): v for i, v in enumerate(raw) if v}
+    return {}
+
+
 def get_customer_crossword_progress(reseller_id):
     data = fb_get(f"customer_crossword_progress/{reseller_id}") or {}
     unlocked = int(data.get("unlocked_level") or 1)
-    completed = data.get("completed_levels") or {}
+    completed = _crossword_normalize_completed(data.get("completed_levels"))
     completed_list = sorted(int(k) for k in completed.keys() if str(k).isdigit())
     return {"unlocked_level": unlocked, "completed_levels": completed_list}
 
@@ -14935,20 +14955,29 @@ def api_crossword_get_level(level):
     puzzle = CROSSWORD_LEVELS.get(level)
     if not puzzle:
         return jsonify({"ok": False, "error": "Level not available"}), 404
-    reseller_id = session.get("customer_id") or request.args.get("reseller_id")
-    # Staff can preview any level (support/testing); a customer can only
-    # play up to whatever they've already unlocked - prevents jumping
-    # ahead by guessing/incrementing the URL.
-    if session.get("customer_id") and not session.get("staff_name"):
-        progress = get_customer_crossword_progress(reseller_id)
-        if level > progress["unlocked_level"]:
-            return jsonify({"ok": False, "error": "Naka-lock pa ang level na ito"}), 403
-        _crossword_mark_level_started(reseller_id, level)  # starts the 3-minute clock for this attempt
-    words_public = [{
-        "number": w["number"], "direction": w["direction"],
-        "row": w["row"], "col": w["col"], "length": len(w["word"]), "clue": w["clue"],
-    } for w in puzzle["words"]]
-    return jsonify({"ok": True, "level": level, "width": puzzle["width"], "height": puzzle["height"], "words": words_public})
+    # Wrapped in try/except (was missing before - any exception in here,
+    # e.g. the Firebase array-coercion bug inside
+    # get_customer_crossword_progress, used to escape as Flask's raw HTML
+    # 500 error page instead of JSON, which broke the frontend's
+    # res.json() parsing and showed up as boss's "Hindi ma-load ang
+    # level (HTTP 500) <!doctype html>..." report).
+    try:
+        reseller_id = session.get("customer_id") or request.args.get("reseller_id")
+        # Staff can preview any level (support/testing); a customer can only
+        # play up to whatever they've already unlocked - prevents jumping
+        # ahead by guessing/incrementing the URL.
+        if session.get("customer_id") and not session.get("staff_name"):
+            progress = get_customer_crossword_progress(reseller_id)
+            if level > progress["unlocked_level"]:
+                return jsonify({"ok": False, "error": "Naka-lock pa ang level na ito"}), 403
+            _crossword_mark_level_started(reseller_id, level)  # starts the 3-minute clock for this attempt
+        words_public = [{
+            "number": w["number"], "direction": w["direction"],
+            "row": w["row"], "col": w["col"], "length": len(w["word"]), "clue": w["clue"],
+        } for w in puzzle["words"]]
+        return jsonify({"ok": True, "level": level, "width": puzzle["width"], "height": puzzle["height"], "words": words_public})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/api/crossword/level/<int:level>/check", methods=["POST"])
@@ -14988,7 +15017,7 @@ def api_crossword_check(level):
 
         if all_correct:
             progress_raw = fb_get(f"customer_crossword_progress/{reseller_id}") or {}
-            completed = dict(progress_raw.get("completed_levels") or {})
+            completed = _crossword_normalize_completed(progress_raw.get("completed_levels"))
             already_done = bool(completed.get(str(level)))
             unlocked = int(progress_raw.get("unlocked_level") or 1)
             response["unlocked_level"] = unlocked
