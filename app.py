@@ -14683,6 +14683,8 @@ CROSSWORD_HTML = """<!DOCTYPE html>
 .level-btn.done .lvl-pts{font-size:8px;font-weight:800;line-height:1;color:#16a34a;background:rgba(255,255,255,.6);border-radius:6px;padding:1px 4px}
 .level-btn.done .lvl-pts.zero{color:#92400e}
 .level-btn.current{outline:2px solid #00609C;outline-offset:1px}
+.level-btn.milestone{border-color:#facc15;border-width:2px}
+.level-btn.milestone.done::before,.level-btn.milestone:not(.done)::before{content:'🎰';position:absolute;top:-6px;right:-5px;font-size:11px;line-height:1}
 /* ---- Puzzle view ---- */
 .puzzle-wrap{overflow-x:auto;padding-bottom:4px}
 .grid-table{border-collapse:collapse;margin:0 auto}
@@ -14719,7 +14721,8 @@ CROSSWORD_HTML = """<!DOCTYPE html>
 
 <div id="levelListView">
   <div class="card">
-    <div class="hint">Pumili ng level. Tapusin ang isang level sa loob ng <b>3 minuto</b> para makakuha ng points (<b>1 point</b> sa level 1-499, <b>5 points</b> sa level 500 pataas - mas mahirap na ang mga salita doon) - sunod-sunod ang pagbukas ng level. Kahit lumampas sa oras, naka-proceed ka pa rin sa susunod na level, wala lang points. Hindi na mabubuksan ulit ang level na tapos na.</div>
+    <div class="hint">Pumili ng level. Tapusin ang isang level sa loob ng <b>3 minuto</b> para makakuha ng points (<b>1 point</b> sa level 1-499, <b>5 points</b> sa level 500 pataas - mas mahirap na ang mga salita doon) - sunod-sunod ang pagbukas ng level. Kahit lumampas sa oras, naka-proceed ka pa rin sa susunod na level, wala lang points. Hindi na mabubuksan ulit ang level na tapos na. Tuwing makumpleto ang bawat ika-30 level (30, 60, 90...), may makukuhang 1 FREE SPIN na pwedeng magbigay ng points - mas marami pang points habang tumataas ang level.</div>
+    <div id="cwSpinBanner" class="result-banner" style="display:none;background:#fef9c3;color:#854d0e;margin-bottom:10px"></div>
     <div id="levelGrid" class="level-grid"><div class="empty-hint">Loading...</div></div>
   </div>
 </div>
@@ -14860,6 +14863,7 @@ async function loadProgress(){
     if(data.ok){ progressState = data; }
   }catch(e){}
   renderLevelGrid();
+  renderCrosswordSpinBanner();
 }
 function renderLevelGrid(){
   const el = document.getElementById('levelGrid');
@@ -14869,12 +14873,18 @@ function renderLevelGrid(){
   for(let lvl=1; lvl<=TOTAL_LEVELS; lvl++){
     const locked = lvl > progressState.unlocked_level;
     const done = completedSet.has(lvl);
+    // boss's request, Oct 3: "lagyan ni ng icon kung nasaan na yung
+    // free spin" + "I apply din ito sa crossword para standard" - a 🎰
+    // badge on every level that's a multiple of SPIN_EVERY_N_LEVELS
+    // (30, 60, 90...), same treatment as the Trivia level grid.
+    const isMilestone = (lvl % SPIN_EVERY_N_LEVELS) === 0;
     // Boss's request, Oct 2: "yung done na dapat di na pwd i tap" - a
     // completed level is no longer tappable at all (disabled, no
     // onclick), not just visually marked. Locked levels were already
     // non-tappable; this extends the same treatment to done ones.
-    const cls = locked ? 'level-btn locked' : (done ? 'level-btn done' : 'level-btn');
+    const cls = 'level-btn' + (locked ? ' locked' : '') + (done ? ' done' : '') + (isMilestone ? ' milestone' : '');
     const isTappable = !locked && !done;
+    const title = isMilestone ? ` title="Level ${lvl} = FREE SPIN milestone!"` : '';
     if(done){
       // boss's request, Oct 2: "sa mga natapos na level nakalagay yung
       // points maliban sa check" - show the points earned right on the
@@ -14885,12 +14895,48 @@ function renderLevelGrid(){
       const pts = completedPoints[lvl];
       const ptsLabel = (pts === null || pts === undefined) ? '✓' : `${pts}pt`;
       const ptsCls = 'lvl-pts' + (pts === 0 ? ' zero' : '');
-      html += `<button class="${cls}" disabled><span class="lvl-num">${lvl}</span><span class="${ptsCls}">${ptsLabel}</span></button>`;
+      html += `<button class="${cls}" disabled${title}><span class="lvl-num">${lvl}</span><span class="${ptsCls}">${ptsLabel}</span></button>`;
     } else {
-      html += `<button class="${cls}" ${isTappable ? `onclick="openLevel(${lvl})"` : 'disabled'}>${lvl}</button>`;
+      html += `<button class="${cls}" ${isTappable ? `onclick="openLevel(${lvl})"` : 'disabled'}${title}>${lvl}</button>`;
     }
   }
   el.innerHTML = html;
+}
+const SPIN_EVERY_N_LEVELS = {{ spin_every_n_levels }};
+function renderCrosswordSpinBanner(){
+  const el = document.getElementById('cwSpinBanner');
+  if(!el) return;
+  const spins = progressState.spins_available || 0;
+  const maxPts = progressState.max_spin_points || 1;
+  if(spins > 0){
+    el.style.display = 'block';
+    el.innerHTML = `🎰 May ${spins} FREE SPIN ka (hanggang ${maxPts} point${maxPts>1?'s':''} ngayon)! <br><button class="btn" style="margin-top:8px" onclick="doCrosswordSpin()">🎰 I-spin!</button>`;
+  } else {
+    el.style.display = 'none';
+  }
+}
+async function doCrosswordSpin(){
+  const el = document.getElementById('cwSpinBanner');
+  const btn = el.querySelector('button');
+  if(btn){ btn.disabled = true; btn.textContent = '🎰 Sumpi-spin...'; }
+  try{
+    const res = await fetch('/api/crossword/spin', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reseller_id: RESELLER_ID}),
+    });
+    const data = await res.json();
+    if(data.ok){
+      progressState.spins_available = data.spins_available;
+      el.innerHTML = data.won
+        ? `🎉 Panalo! +${data.points_awarded} point sa loyalty points mo!`
+        : `😅 Walang panalo this time - sige lang, susunod na 30-level milestone ulit!`;
+      setTimeout(() => renderCrosswordSpinBanner(), 2800);
+    } else {
+      renderCrosswordSpinBanner();
+    }
+  }catch(e){
+    renderCrosswordSpinBanner();
+  }
 }
 async function openLevel(level){
   try{
@@ -15429,10 +15475,12 @@ GAMES_HUB_HTML = """<!DOCTYPE html>
 
 /* ---- Level picker (reused by Trivia's 1000 levels) ---- */
 .level-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;max-height:420px;overflow-y:auto;padding-right:2px;margin-bottom:4px}
-.level-btn{width:100%;min-width:0;aspect-ratio:1;border-radius:10px;border:1px solid #d7e3ef;background:#f8fafc;color:#334155;font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.level-btn{position:relative;width:100%;min-width:0;aspect-ratio:1;border-radius:10px;border:1px solid #d7e3ef;background:#f8fafc;color:#334155;font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .level-btn:active{background:#eef4fb}
 .level-btn.locked{background:#e2e8f0;color:#94a3b8;cursor:not-allowed}
 .level-btn.done{background:#dcfce7;border-color:#86efac;color:#166534}
+.level-btn.milestone{border-color:#facc15;border-width:2px}
+.level-btn.milestone::after{content:'🎰';position:absolute;top:-6px;right:-5px;font-size:11px;line-height:1}
 .timer-label{text-align:center;font-size:16px;font-weight:800;color:#00609C;background:#eef4fb;border-radius:10px;padding:8px;margin-bottom:10px}
 .timer-label.warn{color:#c2410c;background:#fff7ed}
 .timer-label.expired{color:#c0392b;background:#fee2e2}
@@ -15853,7 +15901,7 @@ function onWsTap(r,c){
    logic; this file is just the UI for it.
 */
 const TRIVIA_TOTAL_LEVELS = 1000;
-const TRIVIA_SPIN_EVERY_N_LEVELS = 30;
+const SPIN_EVERY_N_LEVELS = 30;
 const TRIVIA_TIME_LIMIT_SECONDS = 180;  // display/UX only - server doesn't gate points on speed, only on a perfect score (see app.py)
 
 function triviaProgressUrl(){
@@ -15901,11 +15949,18 @@ function renderTriviaLevelGrid(){
   for(let lvl=1; lvl<=TRIVIA_TOTAL_LEVELS; lvl++){
     const done = completedSet.has(lvl);
     const locked = lvl > unlocked;
-    const cls = 'level-btn' + (done ? ' done' : '') + (locked ? ' locked' : '');
+    // boss's request, Oct 3: "lagyan ni ng icon kung nasaan na yung
+    // free spin" - every level that's a multiple of SPIN_EVERY_N_LEVELS
+    // (30, 60, 90, ...) gets a small 🎰 badge, REGARDLESS of locked/
+    // done/open state, so a player can see at a glance how far the next
+    // free-spin milestone is.
+    const isMilestone = (lvl % SPIN_EVERY_N_LEVELS) === 0;
+    const cls = 'level-btn' + (done ? ' done' : '') + (locked ? ' locked' : '') + (isMilestone && !IS_STAFF ? ' milestone' : '');
     const label = done ? '✓' : (locked ? '🔒' : lvl);
+    const title = isMilestone && !IS_STAFF ? ` title="Level ${lvl} = FREE SPIN milestone!"` : (locked ? ` title="Tapusin muna ang Level ${lvl-1}"` : '');
     html += locked
-      ? `<button class="${cls}" disabled title="Tapusin muna ang Level ${lvl-1}">${label}</button>`
-      : `<button class="${cls}" onclick="openTriviaLevel(${lvl})">${label}</button>`;
+      ? `<button class="${cls}" disabled${title}>${label}</button>`
+      : `<button class="${cls}" onclick="openTriviaLevel(${lvl})"${title}>${label}</button>`;
   }
   el.innerHTML = html;
 }
@@ -15914,9 +15969,10 @@ function renderTriviaSpinBanner(){
   const el = document.getElementById('trivSpinBanner');
   if(!el) return;
   const spins = triviaProgressData.spins_available || 0;
+  const maxPts = triviaProgressData.max_spin_points || 1;
   if(!IS_STAFF && spins > 0){
     el.style.display = 'block';
-    el.innerHTML = `🎰 May ${spins} FREE SPIN ka (bonus sa every ${TRIVIA_SPIN_EVERY_N_LEVELS} levels)! <br><button class="action-link" style="margin-top:8px" onclick="doTriviaSpin()">🎰 I-spin!</button>`;
+    el.innerHTML = `🎰 May ${spins} FREE SPIN ka (hanggang ${maxPts} point${maxPts>1?'s':''} ngayon)! <br><button class="action-link" style="margin-top:8px" onclick="doTriviaSpin()">🎰 I-spin!</button>`;
   } else {
     el.style.display = 'none';
   }
@@ -16303,6 +16359,78 @@ CROSSWORD_HARD_MODE_START_LEVEL = 500  # boss's request, Oct 2: "level 500 pataa
 CROSSWORD_POINTS_NORMAL = 1
 CROSSWORD_POINTS_HARD = 5
 
+# =====================================================================
+# SHARED "FREE SPIN EVERY 30 LEVELS" MECHANIC (boss's request, Oct 3,
+# originally for Trivia only - "kada tapos every 30 level mu free spin
+# na pwd makakuha ng 1 max 1 point", then "pataas ng pataas yung level
+# tataas ng 1pt ang pwd nila makuha" to make the prize scale up - then
+# boss's SAME-DAY follow-up: "I apply din ito sa crossword para
+# standard", making this ONE shared mechanic both Crossword and Trivia
+# plug into, instead of two separate copies of the same logic. Any
+# level-based game that wants this just needs: (1) its own
+# spins_available counter in its own progress node, (2) to call
+# _game_roll_spin_prize(...) when a player spins, and (3) to credit a
+# spin whenever a player clears a level where level % SPIN_EVERY_N_
+# LEVELS == 0. See api_customer_trivia_spin and api_customer_crossword_
+# spin below for the two real implementations.
+# =====================================================================
+SPIN_EVERY_N_LEVELS = 30
+SPIN_WIN_CHANCE = 0.4  # 40% chance of winning ANY points at all on a given spin
+# boss's follow-up request, Oct 3: "pataas ng pataas yung level tataas
+# ng 1pt ang pwd nila makuha" - the max a single spin can pay out
+# scales with how far the player has progressed (1 point possible at
+# the level-30 milestone, 2 at level-60, 3 at level-90, ...), capped so
+# the point economy doesn't run away with it by level 900+ (boss's
+# follow-up answer: cap at 10).
+SPIN_MAX_POINTS_CAP = 10
+
+
+def _game_spin_milestone_number(level):
+    """Which 30-level milestone a given level belongs to (30->1, 60->2,
+    90->3, ...). Used to size the free-spin prize ladder below. Shared
+    by Crossword and Trivia - both count milestones off their OWN level
+    number (a player's Crossword progress and Trivia progress are
+    tracked completely separately, so "milestone 3" means something
+    different in each game, by design)."""
+    return max(0, level) // SPIN_EVERY_N_LEVELS
+
+
+def _game_spin_max_points(highest_cleared_level):
+    """The biggest prize a spin can pay out RIGHT NOW, based on the
+    highest level the player has actually cleared IN THAT GAME - not
+    frozen at whichever milestone originally granted the spin credit.
+    This means a banked, unused spin credit gets MORE valuable the
+    further the player keeps progressing before cashing it in (an
+    intentional incentive to keep playing, per boss's "pataas ng
+    pataas yung level tataas ng 1pt" framing), always at least 1 (a
+    player can only ever have a spin credit after clearing at least
+    milestone 1 / level 30), capped at SPIN_MAX_POINTS_CAP."""
+    milestone = _game_spin_milestone_number(highest_cleared_level)
+    return max(1, min(milestone, SPIN_MAX_POINTS_CAP))
+
+
+def _game_roll_spin_prize(max_points):
+    """Rolls one spin's result: SPIN_WIN_CHANCE to win anything at all,
+    and if won, a weighted pick from 1..max_points where SMALLER prizes
+    are more likely than the max (a flat coin-flip across 1..10 would
+    make the jackpot as common as 1 point, which doesn't feel like a
+    jackpot) - weight(k) = max_points - k + 1, so 1 point is always the
+    single most likely non-zero outcome."""
+    if random.random() >= SPIN_WIN_CHANCE:
+        return 0
+    if max_points <= 1:
+        return 1
+    weighted = [(k, max_points - k + 1) for k in range(1, max_points + 1)]
+    total = sum(w for _, w in weighted)
+    roll = random.uniform(0, total)
+    upto = 0
+    for k, w in weighted:
+        upto += w
+        if roll <= upto:
+            return k
+    return weighted[-1][0]
+
+
 TRIVIA_BANK = [
     # Ported 1:1 from the client-side TRIVIA_BANK in GAMES_HUB_HTML's
     # <script> (same 117 verified evergreen Q&A items) so the server can
@@ -16438,7 +16566,7 @@ TRIVIA_BANK = [
 # (like Sudoku/Word Search/Solitaire) into one with real stakes -
 # level locking (must score PERFECT 20/20 to unlock the next level)
 # and real loyalty points (one free spin credited every
-# TRIVIA_SPIN_EVERY_N_LEVELS levels cleared, worth 0 or 1 point - boss
+# SPIN_EVERY_N_LEVELS levels cleared, worth 0 or 1 point - boss
 # was explicit: "max 1 point"). Once real points are on the line, the
 # question bank and its answer key CANNOT live only in the browser's
 # JS anymore (anyone could read TRIVIA_BANK's `answer` field straight
@@ -16459,8 +16587,6 @@ TRIVIA_BANK = [
 TRIVIA_TOTAL_LEVELS = 1000
 TRIVIA_QUESTIONS_PER_LEVEL = 20
 TRIVIA_TIME_LIMIT_SECONDS = 180  # informal/client-side only - no server-side time anti-cheat (no points ride on speed, only on getting all 20 right)
-TRIVIA_SPIN_EVERY_N_LEVELS = 30  # boss's request, Oct 3: "kada tapos every 30 level mu free spin"
-TRIVIA_SPIN_WIN_CHANCE = 0.4  # 40% chance of winning the 1 point; "max 1 point" means never more than 1 per spin
 
 
 def _trivia_sample_question_indices():
@@ -16483,7 +16609,13 @@ def get_customer_trivia_progress(reseller_id):
     completed = _crossword_normalize_completed(data.get("completed_levels"))
     completed_list = sorted(int(k) for k in completed.keys() if str(k).isdigit())
     spins_available = int(data.get("spins_available") or 0)
-    return {"unlocked_level": unlocked, "completed_levels": completed_list, "spins_available": spins_available}
+    highest_cleared = max(completed_list, default=0)
+    # boss's follow-up, Oct 3: "pataas ng pataas yung level tataas ng
+    # 1pt ang pwd nila makuha" - lets the level-picker show "hanggang
+    # Npt" on the spin banner without the frontend re-deriving the
+    # milestone math itself.
+    max_spin_points = _game_spin_max_points(highest_cleared) if spins_available > 0 else 0
+    return {"unlocked_level": unlocked, "completed_levels": completed_list, "spins_available": spins_available, "max_spin_points": max_spin_points}
 
 
 def get_staff_trivia_progress(staff_name):
@@ -16572,7 +16704,17 @@ def get_customer_crossword_progress(reseller_id):
             completed_points[int(k)] = v
         else:
             completed_points[int(k)] = None
-    return {"unlocked_level": unlocked, "completed_levels": completed_list, "completed_points": completed_points}
+    # boss's request, Oct 3: "I apply din ito sa crossword para
+    # standard" - the same every-30-levels free-spin mechanic built for
+    # Trivia, now shared here too. See SPIN_EVERY_N_LEVELS and
+    # _game_spin_max_points above.
+    spins_available = int(data.get("spins_available") or 0)
+    highest_cleared = max(completed_list, default=0)
+    max_spin_points = _game_spin_max_points(highest_cleared) if spins_available > 0 else 0
+    return {
+        "unlocked_level": unlocked, "completed_levels": completed_list, "completed_points": completed_points,
+        "spins_available": spins_available, "max_spin_points": max_spin_points,
+    }
 
 
 def _crossword_auth_ok():
@@ -16730,7 +16872,7 @@ def customer_crossword_page(reseller_id):
         return redirect(url_for("customer_login_page"))
     if session.get("customer_id") and session.get("customer_id") != reseller_id and not session.get("staff_name"):
         return redirect(f"/customer/{session.get('customer_id')}/crossword")
-    return render_template_string(CROSSWORD_HTML, reseller_id=reseller_id, total_levels=CROSSWORD_TOTAL_LEVELS)
+    return render_template_string(CROSSWORD_HTML, reseller_id=reseller_id, total_levels=CROSSWORD_TOTAL_LEVELS, spin_every_n_levels=SPIN_EVERY_N_LEVELS)
 
 
 @app.route("/customer/<reseller_id>/games")
@@ -16948,6 +17090,7 @@ def api_crossword_check(level):
             "elapsed_seconds": int(elapsed) if elapsed is not None else None,
             "time_limit_seconds": CROSSWORD_TIME_LIMIT_SECONDS,
             "points_for_level": _crossword_points_for_level(level),
+            "milestone_reached": False,
         }
 
         if all_correct:
@@ -16961,6 +17104,7 @@ def api_crossword_check(level):
             already_done = str(level) in completed
             unlocked = int(progress_raw.get("unlocked_level") or 1)
             response["unlocked_level"] = unlocked
+            response["spins_available"] = int(progress_raw.get("spins_available") or 0)
             if not already_done:
                 # First-time clear (boss's request, Oct 2): the level
                 # ALWAYS unlocks the next one and counts as cleared -
@@ -16978,15 +17122,61 @@ def api_crossword_check(level):
                 # show "0pt"/"1pt"/"5pt" per level (boss's request, Oct 2)
                 # without needing a separate lookup.
                 completed[str(level)] = response["points_awarded"]
-                fb_patch(f"customer_crossword_progress/{reseller_id}", {
-                    "completed_levels": completed,
-                    "unlocked_level": new_unlocked,
-                })
+                patch = {"completed_levels": completed, "unlocked_level": new_unlocked}
+                # boss's request, Oct 3: "I apply din ito sa crossword
+                # para standard" - same every-30-levels free-spin credit
+                # as Trivia, on ANY first-time clear of a milestone level
+                # (reaching the level counts, same as trivia's "cleared"
+                # trigger - speed only gates the per-level 1pt/5pt, never
+                # the milestone spin).
+                spins_available = int(progress_raw.get("spins_available") or 0)
+                if level % SPIN_EVERY_N_LEVELS == 0:
+                    spins_available += 1
+                    patch["spins_available"] = spins_available
+                    response["milestone_reached"] = True
+                fb_patch(f"customer_crossword_progress/{reseller_id}", patch)
                 response["newly_completed"] = True
                 response["unlocked_level"] = new_unlocked
+                response["spins_available"] = spins_available
                 _crossword_clear_draft(reseller_id, level)  # nothing left to resume - level is done
                 _crossword_clear_voided(reseller_id, level)  # attempt is over - clean slate for any future replay path
         return jsonify(response)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/crossword/spin", methods=["POST"])
+def api_crossword_spin():
+    """Crossword's half of the shared free-spin mechanic (boss's
+    request, Oct 3: "I apply din ito sa crossword para standard") -
+    identical rules to api_customer_trivia_spin: consumes ONE
+    spins_available credit (granted above on a 30/60/90/... milestone
+    clear) and rolls 0..N points, N scaling with the highest Crossword
+    level cleared so far, capped at SPIN_MAX_POINTS_CAP. Customer-only,
+    same as Trivia's spin - staff never earns points here either."""
+    if not _crossword_auth_ok():
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    if not (session.get("customer_id") and not session.get("staff_name")):
+        return jsonify({"ok": False, "error": "Customer-only feature"}), 403
+    data = request.json or {}
+    reseller_id = session.get("customer_id") or data.get("reseller_id")
+    if not reseller_id:
+        return jsonify({"ok": False, "error": "reseller_id required"}), 400
+    try:
+        progress_raw = fb_get(f"customer_crossword_progress/{reseller_id}") or {}
+        spins_available = int(progress_raw.get("spins_available") or 0)
+        if spins_available <= 0:
+            return jsonify({"ok": False, "error": "Walang available na free spin"}), 400
+        completed = _crossword_normalize_completed(progress_raw.get("completed_levels"))
+        highest_cleared = max((int(k) for k in completed.keys() if str(k).isdigit()), default=0)
+        max_points = _game_spin_max_points(highest_cleared)
+        points_awarded = _game_roll_spin_prize(max_points)
+        won = points_awarded > 0
+        new_spins = spins_available - 1
+        fb_patch(f"customer_crossword_progress/{reseller_id}", {"spins_available": new_spins})
+        if points_awarded and not is_loyalty_program_paused():
+            award_loyalty_points(reseller_id, points_awarded, f"Crossword Free Spin (+{points_awarded}pt, every {SPIN_EVERY_N_LEVELS} levels)", ref_order_id=None, touch_activity=False)
+        return jsonify({"ok": True, "won": won, "points_awarded": points_awarded, "max_points": max_points, "spins_available": new_spins})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -17008,7 +17198,7 @@ def api_customer_trivia_progress():
     try:
         progress = get_customer_trivia_progress(reseller_id)
         progress["total_levels"] = TRIVIA_TOTAL_LEVELS
-        progress["spin_every_n_levels"] = TRIVIA_SPIN_EVERY_N_LEVELS
+        progress["spin_every_n_levels"] = SPIN_EVERY_N_LEVELS
         return jsonify({"ok": True, **progress})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -17055,7 +17245,7 @@ def api_customer_trivia_submit(level):
     """Scores the just-played round against the answer set stashed by
     the GET above - PERFECT 20/20 required to unlock the next level
     (boss's request, Oct 3: "dapat nakalock muna yung next level").
-    Clearing a level that's a multiple of TRIVIA_SPIN_EVERY_N_LEVELS
+    Clearing a level that's a multiple of SPIN_EVERY_N_LEVELS
     for the first time credits one free-spin (spins_available += 1);
     the actual point roll happens in /api/customer/trivia/spin below,
     never here."""
@@ -17097,7 +17287,7 @@ def api_customer_trivia_submit(level):
             completed[str(level)] = True
             new_unlocked = max(unlocked, level + 1) if level == unlocked else unlocked
             patch = {"completed_levels": completed, "unlocked_level": new_unlocked}
-            if level % TRIVIA_SPIN_EVERY_N_LEVELS == 0:
+            if level % SPIN_EVERY_N_LEVELS == 0:
                 spins_available += 1
                 patch["spins_available"] = spins_available
                 response["milestone_reached"] = True
@@ -17152,13 +17342,15 @@ def api_customer_trivia_check_answer(level):
 @app.route("/api/customer/trivia/spin", methods=["POST"])
 def api_customer_trivia_spin():
     """boss's request, Oct 3: "kada tapos every 30 level mu free spin
-    na pwd makakuha ng 1 max 1 point". Consumes ONE spins_available
-    credit (granted by /submit above on a 30/60/90/... milestone
-    clear) and rolls for 0 or 1 point - never more than 1, "max 1
-    point" was explicit. Customer-only, matching boss's "Customer lang"
-    answer - staff accounts get 403 here even if they somehow had
-    spins_available (they never do; staff_trivia_progress has no such
-    field)."""
+    na pwd makakuha ng 1 max 1 point", then the follow-up "pataas ng
+    pataas yung level tataas ng 1pt ang pwd nila makuha" - consumes ONE
+    spins_available credit (granted by /submit above on a 30/60/90/...
+    milestone clear) and rolls for 0..N points, where N scales with the
+    highest Trivia level the player has actually cleared (see
+    _game_spin_max_points), capped at SPIN_MAX_POINTS_CAP. Customer-
+    only, matching boss's "Customer lang" answer - staff accounts get
+    403 here even if they somehow had spins_available (they never do;
+    staff_trivia_progress has no such field)."""
     if not _crossword_auth_ok():
         return jsonify({"ok": False, "error": "Login required"}), 401
     if not (session.get("customer_id") and not session.get("staff_name")):
@@ -17172,13 +17364,16 @@ def api_customer_trivia_spin():
         spins_available = int(progress_raw.get("spins_available") or 0)
         if spins_available <= 0:
             return jsonify({"ok": False, "error": "Walang available na free spin"}), 400
-        won = (random.random() < TRIVIA_SPIN_WIN_CHANCE)
-        points_awarded = 1 if won else 0
+        completed = _crossword_normalize_completed(progress_raw.get("completed_levels"))
+        highest_cleared = max((int(k) for k in completed.keys() if str(k).isdigit()), default=0)
+        max_points = _game_spin_max_points(highest_cleared)
+        points_awarded = _game_roll_spin_prize(max_points)
+        won = points_awarded > 0
         new_spins = spins_available - 1
         fb_patch(f"customer_trivia_progress/{reseller_id}", {"spins_available": new_spins})
         if points_awarded and not is_loyalty_program_paused():
-            award_loyalty_points(reseller_id, points_awarded, "Trivia Quiz Free Spin (every 30 levels)", ref_order_id=None, touch_activity=False)
-        return jsonify({"ok": True, "won": won, "points_awarded": points_awarded, "spins_available": new_spins})
+            award_loyalty_points(reseller_id, points_awarded, f"Trivia Quiz Free Spin (+{points_awarded}pt, every {SPIN_EVERY_N_LEVELS} levels)", ref_order_id=None, touch_activity=False)
+        return jsonify({"ok": True, "won": won, "points_awarded": points_awarded, "max_points": max_points, "spins_available": new_spins})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -17195,7 +17390,7 @@ def api_staff_trivia_progress():
     try:
         progress = get_staff_trivia_progress(staff_name)
         progress["total_levels"] = TRIVIA_TOTAL_LEVELS
-        progress["spin_every_n_levels"] = TRIVIA_SPIN_EVERY_N_LEVELS
+        progress["spin_every_n_levels"] = SPIN_EVERY_N_LEVELS
         return jsonify({"ok": True, **progress})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -17261,7 +17456,7 @@ def api_staff_trivia_submit(level):
             fb_patch(f"staff_trivia_progress/{staff_name}", {"completed_levels": completed, "unlocked_level": new_unlocked})
             response["newly_completed"] = True
             response["unlocked_level"] = new_unlocked
-            if level % TRIVIA_SPIN_EVERY_N_LEVELS == 0:
+            if level % SPIN_EVERY_N_LEVELS == 0:
                 response["milestone_reached"] = True  # banner only - no spins_available field exists for staff, no points ever
 
         fb_delete(f"staff_trivia_progress/{staff_name}/active_attempt/{level}")
