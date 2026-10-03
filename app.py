@@ -49,6 +49,74 @@ def add_security_headers(resp):
     return resp
 
 
+# =====================================================================
+# STAFF IDLE AUTO-LOGOUT (boss's request, Oct 3: "pag sa staff
+# nakalimutan maglogout auto logout na after 5 mins"). Implemented as
+# a response-injection hook instead of editing every single staff
+# template by hand: ANY html page response that goes out while
+# session["staff_name"] is set gets a tiny <script> tag injected
+# right before </body>, which starts a 5-minute no-activity timer in
+# the browser (reset on mousemove/keydown/click/touch/scroll) and
+# calls /api/logout + redirects to /login once it fires. This covers
+# every current staff page (cashier, dashboard, crossword, games hub,
+# sales analytics, admin pages, etc.) AND any future one, with zero
+# per-template wiring.
+# =====================================================================
+STAFF_IDLE_TIMEOUT_MS = 5 * 60 * 1000  # 5 minutes
+
+STAFF_IDLE_LOGOUT_JS = """
+(function(){
+  var IDLE_LIMIT_MS = %d;
+  var idleTimer = null;
+  var loggingOut = false;
+
+  function doIdleLogout(){
+    if(loggingOut) return;
+    loggingOut = true;
+    fetch('/api/logout', {method:'POST', headers:{'Content-Type':'application/json'}})
+      .catch(function(){})
+      .then(function(){ window.location.href = '/login?idle=1'; });
+  }
+
+  function resetIdleTimer(){
+    if(idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(doIdleLogout, IDLE_LIMIT_MS);
+  }
+
+  ['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(function(evt){
+    document.addEventListener(evt, resetIdleTimer, {passive:true});
+  });
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'visible') resetIdleTimer();
+  });
+
+  resetIdleTimer();
+})();
+""" % STAFF_IDLE_TIMEOUT_MS
+
+
+@app.route("/js/staff-idle-logout.js")
+def staff_idle_logout_js():
+    return Response(STAFF_IDLE_LOGOUT_JS, mimetype="application/javascript")
+
+
+@app.after_request
+def inject_staff_idle_logout(resp):
+    try:
+        if session.get("staff_name") and resp.mimetype == "text/html":
+            body = resp.get_data(as_text=True)
+            if "</body>" in body and "staff-idle-logout.js" not in body:
+                body = body.replace(
+                    "</body>",
+                    '<script src="/js/staff-idle-logout.js"></script></body>',
+                    1,
+                )
+                resp.set_data(body)
+    except Exception:
+        pass  # never let the idle-logout injection break a real page
+    return resp
+
+
 # --- SECURITY HARDENING ---
 SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:
@@ -5628,8 +5696,8 @@ input{width:100%;padding:clamp(7px,1.5dvh,12px);border-radius:12px;border:1.5px 
 <body>
 {% if show_snow %}<div id="snowLayer"></div>{% endif %}
 <div class="card">
-<div id="installBannerCu"><div>📲 I-install ang app na ito sa phone mo para mas mabilis mag-order.</div><button onclick="doInstallPromptCu()">Install App</button>
-<div id="manualInstallHint">Sa Chrome: tapikin yung <b>⋮ (tatlong tuldok)</b> sa taas-kanan → piliin <b>"Install app"</b> o <b>"Add to Home screen"</b>.</div>
+<div id="installBannerCu"><div>📲 Install this app on your phone for faster ordering.</div><button onclick="doInstallPromptCu()">Install App</button>
+<div id="manualInstallHint">In Chrome: tap the <b>⋮ (three dots)</b> at the top-right → select <b>"Install app"</b> or <b>"Add to Home screen"</b>.</div>
 </div>
 <div class="header">
 <!-- FLOATING LOGO (boss's request, Sept 27) - transparent badge + plain
@@ -5643,7 +5711,7 @@ input{width:100%;padding:clamp(7px,1.5dvh,12px);border-radius:12px;border:1.5px 
 <div class="pwd-wrap"><input type="password" id="password" placeholder="Enter password"><button type="button" class="pwd-toggle" onclick="togglePwdVisibility('password',this)">👁️</button></div>
 <button class="btn" onclick="doLogin()">🔐 Login</button>
 <p class="status" id="status"></p>
-<div style="display:flex;align-items:center;gap:8px;margin:8px 0"><div style="flex:1;height:1px;background:rgba(255,255,255,.25)"></div><span style="font-size:10px;color:#bcd9ee">O KAYA</span><div style="flex:1;height:1px;background:rgba(255,255,255,.25)"></div></div>
+<div style="display:flex;align-items:center;gap:8px;margin:8px 0"><div style="flex:1;height:1px;background:rgba(255,255,255,.25)"></div><span style="font-size:10px;color:#bcd9ee">OR</span><div style="flex:1;height:1px;background:rgba(255,255,255,.25)"></div></div>
 <!-- LIVE QR SCAN (boss's request, Sept 27: "paano kung scan qr ilagay din
      para scan nalang nila yung ibibigay kong printed QR sa customer auto
      login na") - primary action now, since a customer holding a PRINTED
@@ -5652,11 +5720,11 @@ input{width:100%;padding:clamp(7px,1.5dvh,12px);border-radius:12px;border:1.5px 
      "Upload QR Code" stays as a fallback button below for a saved/
      screenshotted QR image, or for a device whose camera permission is
      blocked. -->
-<button class="btn" style="background:#1fa35c;color:#fff" onclick="openQRScanner()">📷 I-scan ang QR Code</button>
+<button class="btn" style="background:#1fa35c;color:#fff" onclick="openQRScanner()">📷 Scan QR Code</button>
 <input type="file" id="qrFileInput" accept="image/*" style="display:none" onchange="handleQRUpload(event)">
-<button class="btn" style="background:transparent;color:#eaf6ff;border:1.5px solid rgba(255,255,255,.35);margin-top:8px;box-shadow:none" onclick="document.getElementById('qrFileInput').click()">🖼️ I-upload na lang ang QR Image</button>
-<p style="font-size:10px;color:#bcd9ee;text-align:center;margin-top:4px">Itutok lang ang camera sa QR code na ibinigay sa'yo ni ISESMO - automatic na ang login.</p>
-<p style="font-size:11px;color:#cfe6f5;text-align:center;margin-top:8px;border-top:1px solid rgba(255,255,255,.15);padding-top:8px">Nakalimutan ang password?<br><button class="link-btn" onclick="openForgotModal()">🔑 I-reset gamit ang OTP</button></p>
+<button class="btn" style="background:transparent;color:#eaf6ff;border:1.5px solid rgba(255,255,255,.35);margin-top:8px;box-shadow:none" onclick="document.getElementById('qrFileInput').click()">🖼️ Upload QR Image Instead</button>
+<p style="font-size:10px;color:#bcd9ee;text-align:center;margin-top:4px">Just point the camera at the QR code given to you by ISESMO - login happens automatically.</p>
+<p style="font-size:11px;color:#cfe6f5;text-align:center;margin-top:8px;border-top:1px solid rgba(255,255,255,.15);padding-top:8px">Forgot your password?<br><button class="link-btn" onclick="openForgotModal()">🔑 Reset using OTP</button></p>
 <div style="text-align:center;font-size:9px;color:#89a8bf;margin-top:6px">Developed by Moises Orio Gamboa</div>
 </div>
 
@@ -5668,28 +5736,28 @@ input{width:100%;padding:clamp(7px,1.5dvh,12px);border-radius:12px;border:1.5px 
   <div class="modal-box">
     <div id="forgotStep1">
       <h3>🔑 Reset Password</h3>
-      <p class="step-hint">Ilagay ang registered phone number mo. Lalabas agad dito ang OTP code mo, susunod na step.</p>
+      <p class="step-hint">Enter your registered phone number. Your OTP code will appear right here for the next step.</p>
       <label>Registered Phone</label><input type="tel" id="forgotPhone" placeholder="09xx xxx xxxx">
       <p class="status" id="forgotStatus1"></p>
       <div class="modal-actions">
         <button onclick="closeForgotModal()">Cancel</button>
-        <button class="modal-btn-primary" onclick="requestForgotOtp()">Kunin ang OTP</button>
+        <button class="modal-btn-primary" onclick="requestForgotOtp()">Get OTP</button>
       </div>
     </div>
     <div id="forgotStep2" style="display:none">
-      <h3>🔑 OTP Code Mo</h3>
-      <p class="step-hint">Ito ang OTP mo - naka-fill na sa baba, pero pwede mo pang i-edit. Ilagay na lang ang bagong password.</p>
+      <h3>🔑 Your OTP Code</h3>
+      <p class="step-hint">This is your OTP - already filled in below, but you can still edit it. Just enter your new password.</p>
       <div style="background:#eef4fb;border:1.5px dashed #00609C;border-radius:12px;padding:14px;text-align:center;margin-bottom:10px">
         <div style="font-size:10px;color:#00609C;font-weight:600;letter-spacing:1px">YOUR OTP CODE</div>
         <div id="forgotOtpDisplay" style="font-size:28px;font-weight:700;color:#00609C;letter-spacing:4px;margin-top:2px">------</div>
       </div>
       <label>OTP Code</label><input type="text" id="forgotOtp" placeholder="123456" maxlength="6" inputmode="numeric">
-      <label>Bagong Password</label>
-      <div class="pwd-wrap"><input type="password" id="forgotNewPwd" placeholder="Bagong password (min 4 chars)"><button type="button" class="pwd-toggle" onclick="togglePwdVisibility('forgotNewPwd',this)">👁️</button></div>
+      <label>New Password</label>
+      <div class="pwd-wrap"><input type="password" id="forgotNewPwd" placeholder="New password (min 4 chars)"><button type="button" class="pwd-toggle" onclick="togglePwdVisibility('forgotNewPwd',this)">👁️</button></div>
       <p class="status" id="forgotStatus2"></p>
       <div class="modal-actions">
         <button onclick="closeForgotModal()">Cancel</button>
-        <button class="modal-btn-primary" onclick="confirmForgotReset()">I-reset ang Password</button>
+        <button class="modal-btn-primary" onclick="confirmForgotReset()">Reset Password</button>
       </div>
     </div>
   </div>
@@ -5704,7 +5772,7 @@ input{width:100%;padding:clamp(7px,1.5dvh,12px);border-radius:12px;border:1.5px 
      the actual scan, which runs on the full video frame regardless. -->
 <div class="modal-overlay" id="qrScanModal" style="background:rgba(0,10,20,.88)">
   <div style="background:#0a1f2e;border-radius:16px;padding:16px;max-width:380px;width:100%;text-align:center">
-    <h3 style="margin:0 0 10px;font-size:15px;color:#fff">📷 I-scan ang QR Code</h3>
+    <h3 style="margin:0 0 10px;font-size:15px;color:#fff">📷 Scan QR Code</h3>
     <div style="position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:1/1">
       <video id="qrScanVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:block"></video>
       <div style="position:absolute;inset:12%;border:3px dashed rgba(255,255,255,.55);border-radius:14px;pointer-events:none"></div>
@@ -5745,8 +5813,8 @@ function closeForgotModal(){
 async function requestForgotOtp(){
   const phone = document.getElementById('forgotPhone').value.trim();
   const st = document.getElementById('forgotStatus1');
-  if(!phone){ st.textContent='Ilagay ang phone number.'; st.className='status err'; return; }
-  st.textContent='Kinukuha ang OTP...'; st.className='status';
+  if(!phone){ st.textContent='Please enter your phone number.'; st.className='status err'; return; }
+  st.textContent='Getting OTP...'; st.className='status';
   try{
     const res = await fetch('/api/customer/request_otp', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({phone})});
     const data = await res.json();
@@ -5759,10 +5827,10 @@ async function requestForgotOtp(){
       // still editable/visible so the customer can double-check it.
       document.getElementById('forgotOtpDisplay').textContent = data.otp || '------';
       document.getElementById('forgotOtp').value = data.otp || '';
-      document.getElementById('forgotStatus2').textContent = 'Valid ng 5 minuto.';
+      document.getElementById('forgotStatus2').textContent = 'Valid for 5 minutes.';
       document.getElementById('forgotStatus2').className = 'status ok';
     } else {
-      st.textContent = data.error || data.message || 'May error. Subukan ulit.';
+      st.textContent = data.error || data.message || 'Something went wrong. Please try again.';
       st.className = 'status err';
     }
   }catch(e){
@@ -5774,13 +5842,13 @@ async function confirmForgotReset(){
   const otp = document.getElementById('forgotOtp').value.trim();
   const newPwd = document.getElementById('forgotNewPwd').value;
   const st = document.getElementById('forgotStatus2');
-  if(!otp || !newPwd){ st.textContent='Ilagay ang OTP at bagong password.'; st.className='status err'; return; }
-  st.textContent='Ni-reset ang password...'; st.className='status';
+  if(!otp || !newPwd){ st.textContent='Please enter the OTP and new password.'; st.className='status err'; return; }
+  st.textContent='Resetting password...'; st.className='status';
   try{
     const res = await fetch('/api/customer/verify_otp', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({phone: forgotPhoneValue, otp, new_password: newPwd})});
     const data = await res.json();
     if(data.ok){
-      st.textContent='✅ Na-reset na ang password mo! I-login mo na gamit ang bago.';
+      st.textContent='✅ Your password has been reset! Log in with your new password.';
       st.className='status ok';
       setTimeout(()=>{
         closeForgotModal();
@@ -5789,7 +5857,7 @@ async function confirmForgotReset(){
         document.getElementById('password').focus();
       }, 1800);
     } else {
-      st.textContent = data.error || 'May error. Subukan ulit.';
+      st.textContent = data.error || 'Something went wrong. Please try again.';
       st.className = 'status err';
     }
   }catch(e){
@@ -5920,41 +5988,41 @@ function handleQRUpload(event){
   const st = document.getElementById('status');
   if(!file) return;
   st.className = 'status';
-  st.textContent = 'Binabasa ang QR code...';
+  st.textContent = 'Reading QR code...';
   const reader = new FileReader();
   reader.onerror = function(){
-    st.textContent = 'Hindi ma-open ang file. Subukan ulit.';
+    st.textContent = 'Could not open the file. Please try again.';
     st.className = 'status err';
   };
   reader.onload = function(ev){
     const img = new Image();
     img.onerror = function(){
-      st.textContent = 'Hindi valid na image file.';
+      st.textContent = 'Not a valid image file.';
       st.className = 'status err';
     };
     img.onload = function(){
       try{
         if(typeof jsQR !== 'function'){
-          st.textContent = 'Hindi ma-load ang QR reader. Siguraduhing may internet at i-refresh ang page.';
+          st.textContent = 'Could not load the QR reader. Make sure you have internet and refresh the page.';
           st.className = 'status err';
           return;
         }
         const decoded = decodeQRFromImage(img);
         if(!decoded){
-          st.textContent = 'Hindi mabasa ang QR sa picture na yan. Gamitin yung QR file na na-download/na-send sa’yo (huwag kuhanan ulit ng photo), o piliing mas malinaw/hindi paikot na larawan.';
+          st.textContent = "Couldn't read the QR in that picture. Use the QR file that was downloaded/sent to you (don't photograph a photo), or pick a clearer, non-rotated image.";
           st.className = 'status err';
           return;
         }
         if(!decoded.includes('/customer/qr') || !decoded.includes('token=')){
-          st.textContent = 'Hindi ito QR code ng Omega Ice. Gamitin yung QR na binigay ni ISESMO.';
+          st.textContent = "This isn't an Omega Ice QR code. Use the QR given to you by ISESMO.";
           st.className = 'status err';
           return;
         }
-        st.textContent = 'QR na-detect! Nag-lo-login...';
+        st.textContent = 'QR detected! Logging in...';
         st.className = 'status ok';
         window.location.href = decoded;
       }catch(err){
-        st.textContent = 'May error sa pagbasa ng QR. Subukan ulit.';
+        st.textContent = 'Error reading the QR. Please try again.';
         st.className = 'status err';
       }
     };
@@ -5993,19 +6061,19 @@ async function openQRScanner(){
   const st = document.getElementById('qrScanStatus');
   overlay.classList.add('open');
   if(isInAppBrowser()){
-    st.textContent = '⚠️ Hindi gumagana ang camera dito (Facebook/Messenger/Instagram browser). Sa taas-kanan, piliin ang "⋮" o "Open in Browser" para buksan sa Chrome, o gamitin na lang ang "Upload QR Image" sa baba.';
+    st.textContent = '⚠️ The camera does not work here (Facebook/Messenger/Instagram browser). At the top-right, choose "⋮" or "Open in Browser" to open this in Chrome, or use "Upload QR Image" below instead.';
     st.className = 'status err';
     return;
   }
-  st.textContent = 'Kinukuha ang camera...';
+  st.textContent = 'Accessing camera...';
   st.className = 'status';
   if(typeof jsQR !== 'function'){
-    st.textContent = 'Hindi ma-load ang QR reader. Siguraduhing may internet at i-refresh ang page.';
+    st.textContent = 'Could not load the QR reader. Make sure you have internet and refresh the page.';
     st.className = 'status err';
     return;
   }
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    st.textContent = 'Hindi supported ng browser na ito ang camera scan. Gamitin na lang ang "Upload QR Image" sa baba.';
+    st.textContent = 'This browser does not support camera scanning. Use the Upload QR Image button below instead.';
     st.className = 'status err';
     return;
   }
@@ -6021,10 +6089,10 @@ async function openQRScanner(){
     const video = document.getElementById('qrScanVideo');
     video.srcObject = qrScanStream;
     await video.play();
-    st.textContent = 'Itutok sa QR code...';
+    st.textContent = 'Point at the QR code...';
     qrScanRAF = requestAnimationFrame(scanQRFrame);
   }catch(err){
-    st.textContent = 'Hindi ma-access ang camera (' + (err && err.name ? err.name : 'error') + '). Siguraduhing pinayagan ang Camera permission, o gamitin na lang ang "Upload QR Image" sa baba.';
+    st.textContent = 'Could not access the camera (' + (err && err.name ? err.name : 'error') + '). Make sure Camera permission is allowed, or use "Upload QR Image" below instead.';
     st.className = 'status err';
   }
 }
@@ -6067,12 +6135,12 @@ function handleScannedQR(decoded){
     // Not our QR (e.g. some other poster briefly in frame) - say so but
     // keep scanning instead of closing, since the right QR may just not
     // be in view yet.
-    st.textContent = 'Hindi ito QR code ng Omega Ice. Itutok sa tamang QR na binigay ni ISESMO.';
+    st.textContent = "This isn't an Omega Ice QR code. Point at the correct QR given by ISESMO.";
     st.className = 'status err';
     qrScanRAF = requestAnimationFrame(scanQRFrame);
     return;
   }
-  st.textContent = 'QR na-detect! Nag-lo-login...';
+  st.textContent = 'QR detected! Logging in...';
   st.className = 'status ok';
   closeQRScanner();
   window.location.href = decoded;
@@ -6268,28 +6336,28 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 /* ===== END Dashboard Videos card ===== */
 </style></head>
 <body>
-<div id="installBannerCu"><span>📲 I-install ang app na ito para mas mabilis mag-order.</span><button onclick="doInstallPromptCu()">Install</button>
-<div id="manualInstallHint">Sa Chrome: tapikin yung <b>⋮</b> sa taas-kanan → piliin <b>"Install app"</b> o <b>"Add to Home screen"</b>.</div>
+<div id="installBannerCu"><span>📲 Install this app for faster ordering.</span><button onclick="doInstallPromptCu()">Install</button>
+<div id="manualInstallHint">In Chrome: tap the <b>⋮</b> at the top-right → select <b>"Install app"</b> or <b>"Add to Home screen"</b>.</div>
 </div>
 <div class="topbar"><div><h1 id="storeName">My Orders</h1><div style="font-size:11px;color:#666" id="storeMeta"></div></div><div style="display:flex;gap:6px;align-items:center"><span class="live">● LIVE</span><button onclick="openChangePwdModal()" class="btn" style="cursor:pointer">🔑</button><a href="/customer/logout" class="btn">Logout</a></div></div>
 <div id="pushBannerCust" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:#991b1b;justify-content:space-between;align-items:center;gap:8px">
-  <span>🔔 I-enable ang notifications para malaman mo agad ang balita (order updates, Points Program) kahit closed ang app.</span>
+  <span>🔔 Enable notifications so you get order updates and Points Program news right away, even when the app is closed.</span>
   <button onclick="enableCustomerPushAlerts()" style="padding:6px 12px;border-radius:8px;border:none;background:#c0392b;color:#fff;font-size:11px;font-weight:600;white-space:nowrap">Enable</button>
 </div>
 <div id="routeAlertBanner" style="display:none;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:10px;margin-bottom:10px;font-size:12px;color:#065f46">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-    <span id="routeAlertMsg">🚚 May delivery ngayon sa lugar niyo!</span>
+    <span id="routeAlertMsg">🚚 There's a delivery in your area right now!</span>
     <button onclick="dismissRouteAlert()" style="background:none;border:none;color:#065f46;font-size:14px;cursor:pointer;line-height:1;padding:0 2px">✕</button>
   </div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px">
-    <a href="/customer/{{ reseller_id }}/order" style="padding:7px 14px;border-radius:20px;background:#059669;color:#fff;text-decoration:none;font-size:11px;font-weight:700">🧊 Mag-order Ngayon</a>
+    <a href="/customer/{{ reseller_id }}/order" style="padding:7px 14px;border-radius:20px;background:#059669;color:#fff;text-decoration:none;font-size:11px;font-weight:700">🧊 Order Now</a>
     <span id="routeAlertCountdown" style="font-size:11px;font-weight:700;color:#047857;white-space:nowrap">⏳ 5:00</span>
   </div>
 </div>
 <!-- Dashboard Videos card (collapsed by default) - boss's request Oct 2 -->
 <div class="card video-card">
   <div class="video-toggle" id="videoToggle" onclick="toggleVideoPanel()">
-    <span class="video-toggle-label">🎬 Panoorin ang mga Video</span>
+    <span class="video-toggle-label">🎬 Watch Videos</span>
     <span class="video-toggle-chevron">▼</span>
   </div>
   <div class="video-panel" id="videoPanel">
@@ -6309,7 +6377,7 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
 <button onclick="bulkMarkDelivered()" class="action-btn action-btn-success"><span class="action-btn-icon">✅</span>Mark all Pending as Delivered</button>
 <a href="/customer/{{ reseller_id }}/history" class="action-btn action-btn-accent"><span class="action-btn-icon">📊</span>Sales History</a>
 <a href="/customer/{{ reseller_id }}/trend" class="action-btn action-btn-accent"><span class="action-btn-icon">📈</span>Sales Trend</a>
-<a href="/customer/{{ reseller_id }}/games" class="action-btn action-btn-warn action-btn-wide"><span class="action-btn-icon">🎮</span>Mini-Games (Crossword may Points + Iba pang Libangan)</a>
+<a href="/customer/{{ reseller_id }}/games" class="action-btn action-btn-warn action-btn-wide"><span class="action-btn-icon">🎮</span>Mini-Games (Crossword earns Points + other fun games)</a>
 </div>
 <div style="font-size:10px;color:#888;margin-top:6px">Staff will update to Preparing → Delivered</div>
 </div>
@@ -6322,10 +6390,10 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     <button onclick="openRewards()" style="padding:10px 16px;border-radius:20px;border:none;background:#fff;color:#00609C;font-weight:700;font-size:12px">View Rewards</button>
   </div>
-  <div id="pointsPausedBanner" style="margin-top:12px;display:none;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.35);border-radius:10px;padding:10px 12px;font-size:11px;line-height:1.5">⏸️ Pansamantalang naka-pause ang Points Rewards Program. Ligtas at buo pa rin ang points mo - babalik ito once na-resume na.</div>
+  <div id="pointsPausedBanner" style="margin-top:12px;display:none;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.35);border-radius:10px;padding:10px 12px;font-size:11px;line-height:1.5">⏸️ The Points Rewards Program is temporarily paused. Your points are safe and still intact - this will come back once resumed.</div>
   <div id="pointsProgressWrap" style="margin-top:12px;display:none">
     <div style="display:flex;justify-content:space-between;align-items:baseline">
-      <div style="font-size:11px;opacity:.85;font-weight:600">Progress papunta sa susunod na reward</div>
+      <div style="font-size:11px;opacity:.85;font-weight:600">Progress to your next reward</div>
       <div style="font-size:12px;font-weight:800" id="pointsProgressLabel">0 / 0</div>
     </div>
     <div style="width:100%;height:12px;background:rgba(255,255,255,.22);border-radius:20px;overflow:hidden;margin-top:6px">
@@ -6333,7 +6401,7 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     <div style="font-size:12px;font-weight:600;margin-top:6px" id="pointsProgressText"></div>
   </div>
-  <div style="font-size:10px;opacity:.8;margin-top:6px" id="pointsEarnHint">Kumikita ng points sa bawat online order na na-DELIVER (hindi kasama ang manual/walk-in sale)</div>
+  <div style="font-size:10px;opacity:.8;margin-top:6px" id="pointsEarnHint">You earn points on every online order that gets DELIVERED (manual/walk-in sales don't count)</div>
   <div style="font-size:10px;color:#fde68a;margin-top:4px;font-weight:600" id="pointsExpiry"></div>
 </div>
 
@@ -6364,16 +6432,16 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
      at all. -->
 <div class="cp-overlay" id="cpModal">
   <div class="cp-box">
-    <h3>🔑 Baguhin ang Password</h3>
-    <p style="font-size:11px;color:#888;margin:0">Ilagay ang kasalukuyang password mo, tapos ang bago.</p>
-    <label>Kasalukuyang Password</label>
+    <h3>🔑 Change Password</h3>
+    <p style="font-size:11px;color:#888;margin:0">Enter your current password, then your new one.</p>
+    <label>Current Password</label>
     <div class="pwd-wrap"><input type="password" id="cpCurrentPwd" placeholder="Current password"><button type="button" class="pwd-toggle" onclick="togglePwdVisibility('cpCurrentPwd',this)">👁️</button></div>
-    <label>Bagong Password</label>
-    <div class="pwd-wrap"><input type="password" id="cpNewPwd" placeholder="Bagong password (min 4 chars)"><button type="button" class="pwd-toggle" onclick="togglePwdVisibility('cpNewPwd',this)">👁️</button></div>
+    <label>New Password</label>
+    <div class="pwd-wrap"><input type="password" id="cpNewPwd" placeholder="New password (min 4 chars)"><button type="button" class="pwd-toggle" onclick="togglePwdVisibility('cpNewPwd',this)">👁️</button></div>
     <p class="status" id="cpStatus"></p>
     <div class="modal-actions">
       <button onclick="closeChangePwdModal()">Cancel</button>
-      <button class="modal-btn-primary" onclick="submitChangePwd()">Baguhin</button>
+      <button class="modal-btn-primary" onclick="submitChangePwd()">Change</button>
     </div>
   </div>
 </div>
@@ -6397,8 +6465,8 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
      FREE_SPIN_CLAIM_WINDOW_MINUTES on the backend). -->
 <div class="spin-overlay" id="spinOverlay">
   <div class="spin-sheet">
-    <div style="font-size:15px;font-weight:700;color:#0f2942">🎉 Salamat sa Order!</div>
-    <div style="font-size:11px;color:#888;margin:2px 0 4px">I-spin para sa FREE points bonus</div>
+    <div style="font-size:15px;font-weight:700;color:#0f2942">🎉 Thanks for your order!</div>
+    <div style="font-size:11px;color:#888;margin:2px 0 4px">Spin for a FREE points bonus</div>
     <div class="spin-wheel-wrap">
       <div class="spin-pointer">▼</div>
       <div class="spin-wheel" id="spinWheel">
@@ -6411,9 +6479,9 @@ CUSTOMER_DASHBOARD_HTML = """<!DOCTYPE html>
       </div>
       <div class="spin-hub"></div>
     </div>
-    <button id="spinBtn" onclick="startFreeSpin()" style="width:100%;padding:13px;margin-top:16px;background:#f5a300;color:#3a2600;border:none;border-radius:10px;font-weight:800;font-size:14px;letter-spacing:.5px;cursor:pointer">🎡 I-SPIN NA!</button>
+    <button id="spinBtn" onclick="startFreeSpin()" style="width:100%;padding:13px;margin-top:16px;background:#f5a300;color:#3a2600;border:none;border-radius:10px;font-weight:800;font-size:14px;letter-spacing:.5px;cursor:pointer">🎡 SPIN NOW!</button>
     <div id="spinResultMsg" style="font-size:13px;font-weight:700;margin-top:10px;min-height:20px"></div>
-    <button id="spinCloseBtn" onclick="closeSpinModal()" style="display:none;width:100%;padding:11px;margin-top:8px;background:transparent;color:#888;border:1px solid #ddd;border-radius:10px;font-size:12px;cursor:pointer">Isara</button>
+    <button id="spinCloseBtn" onclick="closeSpinModal()" style="display:none;width:100%;padding:11px;margin-top:8px;background:transparent;color:#888;border:1px solid #ddd;border-radius:10px;font-size:12px;cursor:pointer">Close</button>
   </div>
 </div>
 
@@ -6585,7 +6653,7 @@ async function loadOrders(){
       //     live-ish minutes-left countdown so it's clear it will expire.
       let spinBtnHtml='';
       if(o.can_spin && o.order_status==='Out for Delivery'){
-        spinBtnHtml=`<button onclick="event.stopPropagation();openSpinModal('${o.id}')" style="margin-top:6px;width:100%;font-size:11px;padding:8px 10px;border-radius:10px;border:none;background:#f5a300;color:#3a2600;font-weight:700">✅ Natanggap ko na - Tapos na!</button>`;
+        spinBtnHtml=`<button onclick="event.stopPropagation();openSpinModal('${o.id}')" style="margin-top:6px;width:100%;font-size:11px;padding:8px 10px;border-radius:10px;border:none;background:#f5a300;color:#3a2600;font-weight:700">✅ I received it - Done!</button>`;
       } else if(o.can_spin && o.order_status==='Delivered'){
         const minsLeft = Math.max(1, Math.ceil((o.spin_seconds_left||0)/60));
         spinBtnHtml=`<button onclick="event.stopPropagation();openSpinModal('${o.id}')" style="margin-top:6px;width:100%;font-size:11px;padding:8px 10px;border-radius:10px;border:1.5px dashed #f5a300;background:#fff8e8;color:#8a5a00;font-weight:700">🎡 Free Spin available! (${minsLeft}min left)</button>`;
@@ -6634,7 +6702,7 @@ function startRouteAlertCountdown(secondsLeft){
       // pa din mag order at babalikan na lang"). Palitan muna ng
       // reassurance message bago itago yung banner.
       const msgEl=document.getElementById('routeAlertMsg');
-      if(msgEl) msgEl.textContent='⏳ Tapos na yung window, pero pwede ka pa ring mag-order - babalikan na lang sa susunod na round!';
+      if(msgEl) msgEl.textContent='⏳ The window has ended, but you can still place an order - it will just be included in the next delivery round!';
       if(el) el.textContent='';
       setTimeout(()=>{
         const banner=document.getElementById('routeAlertBanner');
@@ -6674,8 +6742,8 @@ function openTracking(orderId){
     return;
   }
   if(status==='Declined'){
-    const reasonTxt = o.decline_reason ? o.decline_reason : 'Walang detalye na ibinigay.';
-    body.innerHTML=`<div class="track-cancelled"><div style="font-size:40px;margin-bottom:10px">🚫</div><div style="font-weight:700;font-size:15px;color:#be123c">Order Declined</div><div style="font-size:12px;color:#888;margin-top:6px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales}</div><div style="margin-top:10px;background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:10px;text-align:left"><div style="font-size:11px;color:#9f1239;font-weight:700;margin-bottom:2px">Dahilan:</div><div style="font-size:12px;color:#881337">${reasonTxt}</div></div></div>`;
+    const reasonTxt = o.decline_reason ? o.decline_reason : 'No details given.';
+    body.innerHTML=`<div class="track-cancelled"><div style="font-size:40px;margin-bottom:10px">🚫</div><div style="font-weight:700;font-size:15px;color:#be123c">Order Declined</div><div style="font-size:12px;color:#888;margin-top:6px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales}</div><div style="margin-top:10px;background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:10px;text-align:left"><div style="font-size:11px;color:#9f1239;font-weight:700;margin-bottom:2px">Reason:</div><div style="font-size:12px;color:#881337">${reasonTxt}</div></div></div>`;
     document.getElementById('trackOverlay').classList.add('show');
     return;
   }
@@ -6705,7 +6773,7 @@ function openTracking(orderId){
   const notYetDelivered = idx < TRACK_STAGES.length - 1;
   const followUpHtml = notYetDelivered ? `
     <div style="margin-top:12px">
-      <button id="followUpBtn" onclick="customerFollowUp('${o.id}')" style="width:100%;padding:11px;border-radius:10px;border:1px solid #00609C;background:#fff;color:#00609C;font-weight:700;font-size:12.5px;cursor:pointer">📞 Wala pa order ko - Follow Up</button>
+      <button id="followUpBtn" onclick="customerFollowUp('${o.id}')" style="width:100%;padding:11px;border-radius:10px;border:1px solid #00609C;background:#fff;color:#00609C;font-weight:700;font-size:12.5px;cursor:pointer">📞 My order has not arrived - Follow Up</button>
       <div id="followUpStatus" style="font-size:11px;color:#888;text-align:center;margin-top:4px"></div>
     </div>` : '';
   // FREE SPIN (boss's request, Sept 27) - same button shown on the order
@@ -6713,7 +6781,7 @@ function openTracking(orderId){
   // reachable from either place.
   let spinHtml='';
   if(o.can_spin && status==='Out for Delivery'){
-    spinHtml=`<div style="margin-top:10px"><button onclick="openSpinModal('${o.id}')" style="width:100%;padding:11px;border-radius:10px;border:none;background:#f5a300;color:#3a2600;font-weight:800;font-size:12.5px;cursor:pointer">✅ Natanggap ko na - Tapos na!</button></div>`;
+    spinHtml=`<div style="margin-top:10px"><button onclick="openSpinModal('${o.id}')" style="width:100%;padding:11px;border-radius:10px;border:none;background:#f5a300;color:#3a2600;font-weight:800;font-size:12.5px;cursor:pointer">✅ I received it - Done!</button></div>`;
   } else if(o.can_spin && status==='Delivered'){
     const minsLeft = Math.max(1, Math.ceil((o.spin_seconds_left||0)/60));
     spinHtml=`<div style="margin-top:10px"><button onclick="openSpinModal('${o.id}')" style="width:100%;padding:11px;border-radius:10px;border:1.5px dashed #f5a300;background:#fff8e8;color:#8a5a00;font-weight:800;font-size:12.5px;cursor:pointer">🎡 Free Spin available! (${minsLeft}min left)</button></div>`;
@@ -6734,20 +6802,20 @@ function closeTracking(){document.getElementById('trackOverlay').classList.remov
 async function customerFollowUp(orderId){
   const btn=document.getElementById('followUpBtn');
   const statusEl=document.getElementById('followUpStatus');
-  if(btn){ btn.disabled=true; btn.style.opacity='0.6'; btn.textContent='Sinusubmit...'; }
+  if(btn){ btn.disabled=true; btn.style.opacity='0.6'; btn.textContent='Submitting...'; }
   try{
     const res=await fetch(`/api/customer/${resellerId}/order/${orderId}/follow_up`, {method:'POST'});
     const data=await res.json();
     if(data.ok){
-      if(statusEl){ statusEl.textContent='✅ Nasabihan na si staff, sinusundan na nila ang order mo.'; statusEl.style.color='#1a7a3c'; }
-      if(btn){ btn.textContent='✅ Na-follow up na'; }
+      if(statusEl){ statusEl.textContent='✅ Staff has been notified and is now following up on your order.'; statusEl.style.color='#1a7a3c'; }
+      if(btn){ btn.textContent='✅ Followed up'; }
     } else {
-      if(statusEl){ statusEl.textContent=data.error || 'May error, subukan ulit.'; statusEl.style.color='#c0392b'; }
-      if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='📞 Wala pa order ko - Follow Up'; }
+      if(statusEl){ statusEl.textContent=data.error || 'Something went wrong, please try again.'; statusEl.style.color='#c0392b'; }
+      if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='📞 My order has not arrived - Follow Up'; }
     }
   }catch(e){
-    if(statusEl){ statusEl.textContent='May error sa koneksyon, subukan ulit.'; statusEl.style.color='#c0392b'; }
-    if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='📞 Wala pa order ko - Follow Up'; }
+    if(statusEl){ statusEl.textContent='Connection error, please try again.'; statusEl.style.color='#c0392b'; }
+    if(btn){ btn.disabled=false; btn.style.opacity='1'; btn.textContent='📞 My order has not arrived - Follow Up'; }
   }
 }
 
@@ -6768,7 +6836,7 @@ function openSpinModal(orderId){
   wheel.style.transform='rotate(0deg)';
   document.getElementById('spinResultMsg').textContent='';
   const btn=document.getElementById('spinBtn');
-  btn.style.display='block'; btn.disabled=false; btn.style.opacity='1'; btn.textContent='🎡 I-SPIN NA!';
+  btn.style.display='block'; btn.disabled=false; btn.style.opacity='1'; btn.textContent='🎡 SPIN NOW!';
   document.getElementById('spinCloseBtn').style.display='none'; // spin first, then close
   document.getElementById('spinOverlay').classList.add('show');
 }
@@ -6788,7 +6856,7 @@ async function startFreeSpin(){
     if(!data.ok){
       msg.style.color='#c0392b';
       msg.textContent=data.error || 'May error, subukan ulit mamaya.';
-      btn.disabled=false; btn.style.opacity='1'; btn.textContent='🎡 I-SPIN NA!';
+      btn.disabled=false; btn.style.opacity='1'; btn.textContent='🎡 SPIN NOW!';
       document.getElementById('spinCloseBtn').style.display='block';
       _spinInFlight=false;
       return;
@@ -6799,7 +6867,7 @@ async function startFreeSpin(){
       // goes through), but the spin itself is paused along with points.
       // No wheel animation since there's no real prize this time.
       msg.style.color='#888';
-      msg.textContent='⏸️ '+(data.error || 'Pansamantalang naka-pause muna ang Free Spin.');
+      msg.textContent='⏸️ '+(data.error || 'The Free Spin is temporarily paused for now.');
       btn.style.display='none';
       document.getElementById('spinCloseBtn').style.display='block';
       try{ loadOrders(); }catch(e){}
@@ -6824,7 +6892,7 @@ async function startFreeSpin(){
     setTimeout(()=>{
       if(points>0){
         msg.style.color='#1a7a3c';
-        msg.textContent=`🎉 Nanalo ka ng +${points} point${points>1?'s':''}!`;
+        msg.textContent=`🎉 You won +${points} point${points>1?'s':''}!`;
       }else{
         msg.style.color='#888';
         msg.textContent='😅 Better luck next order! Subukan mo ulit sa susunod.';
@@ -6840,7 +6908,7 @@ async function startFreeSpin(){
   }catch(e){
     msg.style.color='#c0392b';
     msg.textContent='Network error: '+e.message;
-    btn.disabled=false; btn.style.opacity='1'; btn.textContent='🎡 I-SPIN NA!';
+    btn.disabled=false; btn.style.opacity='1'; btn.textContent='🎡 SPIN NOW!';
     document.getElementById('spinCloseBtn').style.display='block';
     _spinInFlight=false;
   }
@@ -6874,18 +6942,18 @@ async function submitChangePwd(){
   const current = document.getElementById('cpCurrentPwd').value;
   const newPwd = document.getElementById('cpNewPwd').value;
   const st = document.getElementById('cpStatus');
-  if(!current || !newPwd){ st.textContent='Ilagay ang current at bagong password.'; st.className='status err'; return; }
-  if(newPwd.length < 4){ st.textContent='Ang bagong password ay dapat 4 characters pataas.'; st.className='status err'; return; }
-  st.textContent='Binabago ang password...'; st.className='status';
+  if(!current || !newPwd){ st.textContent='Please enter your current and new password.'; st.className='status err'; return; }
+  if(newPwd.length < 4){ st.textContent='The new password must be at least 4 characters.'; st.className='status err'; return; }
+  st.textContent='Updating password...'; st.className='status';
   try{
     const res = await fetch(`/api/customer/${resellerId}/change_password`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({current_password: current, new_password: newPwd})});
     const data = await res.json();
     if(data.ok){
-      st.textContent='✅ Na-update na ang password mo!';
+      st.textContent='✅ Your password has been updated!';
       st.className='status ok';
       setTimeout(()=>closeChangePwdModal(), 1500);
     } else {
-      st.textContent = data.error || 'May error. Subukan ulit.';
+      st.textContent = data.error || 'Something went wrong. Please try again.';
       st.className = 'status err';
     }
   }catch(e){
@@ -6935,7 +7003,7 @@ function openRating(orderId){
 function closeRating(){document.getElementById('rateOverlay').classList.remove('show');}
 async function submitRating(){
   const statusEl=document.getElementById('rateStatus');
-  if(!rateValue){statusEl.textContent='Pumili muna ng star rating.';return;}
+  if(!rateValue){statusEl.textContent='Please pick a star rating first.';return;}
   try{
     const res=await fetch(`/api/customer/${resellerId}/rate_order/${rateOrderId}`,{
       method:'POST',headers:{'Content-Type':'application/json'},
@@ -6984,8 +7052,8 @@ async function loadPoints(){
         pausedBanner.style.display = _programPaused ? '' : 'none';
         if(_programPaused){
           pausedBanner.textContent = data.scheduled_resume_at
-            ? `⏸️ Pansamantalang naka-pause ang Points Rewards Program. Ligtas at buo pa rin ang points mo - babalik ito sa ${formatResumeDate(data.scheduled_resume_at)}.`
-            : '⏸️ Pansamantalang naka-pause ang Points Rewards Program. Ligtas at buo pa rin ang points mo - babalik ito once na-resume na.';
+            ? `⏸️ The Points Rewards Program is temporarily paused. Your points are safe and still intact - this will come back on ${formatResumeDate(data.scheduled_resume_at)}.`
+            : '⏸️ The Points Rewards Program is temporarily paused. Your points are safe and still intact - this will come back once resumed.';
         }
       }
       if(earnHint) earnHint.style.display = _programPaused ? 'none' : '';
@@ -6998,7 +7066,7 @@ async function loadPoints(){
       const expiryEl = document.getElementById('pointsExpiry');
       if(expiryEl){
         expiryEl.textContent = (data.expires_at && !_programPaused)
-          ? `⏳ Mag-order bago sumapit ang ${data.expires_at} para hindi mawala ang points mo`
+          ? `⏳ Order before ${data.expires_at} so your points don't expire`
           : '';
       }
     }
@@ -7027,7 +7095,7 @@ function renderPointsProgress(balance, rewards){
     const pct = Math.max(0, Math.min(100, Math.round((balance / next.points_required) * 100)));
     bar.style.width = pct + '%';
     label.textContent = `${balance.toLocaleString()} / ${next.points_required.toLocaleString()}`;
-    text.textContent = `${(next.points_required - balance).toLocaleString()} points pa para sa ${next.label} 🧊`;
+    text.textContent = `${(next.points_required - balance).toLocaleString()} more points for ${next.label} 🧊`;
   } else {
     // Balance already covers even the highest tier - nothing bigger to
     // count up to, so show a full bar and a "maxed out" message
@@ -7035,7 +7103,7 @@ function renderPointsProgress(balance, rewards){
     const top = rewards[rewards.length - 1];
     bar.style.width = '100%';
     label.textContent = `${balance.toLocaleString()} / ${top.points_required.toLocaleString()}`;
-    text.textContent = 'Naabot mo na ang pinakamataas na reward — pwede ka nang mag-redeem! 🎉';
+    text.textContent = "You've reached the highest reward tier - you can redeem now! 🎉";
   }
 }
 function openRewards(){
@@ -7047,16 +7115,16 @@ function openRewards(){
 function closeRewards(){ document.getElementById('rewardsOverlay').classList.remove('show'); }
 function renderRewardsList(){
   const el = document.getElementById('rewardsList');
-  if(!_rewardsCache.length){ el.innerHTML = '<div style="text-align:center;color:#888;padding:16px">Walang available na rewards sa ngayon.</div>'; return; }
+  if(!_rewardsCache.length){ el.innerHTML = '<div style="text-align:center;color:#888;padding:16px">No rewards available right now.</div>'; return; }
   // Pause banner takes priority over the cooldown note - if the whole
   // program is paused, that's the reason EVERY button is disabled, not
   // the per-reseller cooldown (though both can legitimately apply).
   let html = '';
   if(_programPaused){
-    const resumeNote = _scheduledResumeAt ? ` Babalik ito sa ${formatResumeDate(_scheduledResumeAt)}.` : '';
-    html += `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#991b1b">⏸️ Pansamantalang naka-pause ang Points Rewards Program - hindi muna pwede mag-redeem. Ligtas at buo pa rin ang points mo.${resumeNote}</div>`;
+    const resumeNote = _scheduledResumeAt ? ` This will come back on ${formatResumeDate(_scheduledResumeAt)}.` : '';
+    html += `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#991b1b">⏸️ The Points Rewards Program is temporarily paused - redeeming is unavailable for now. Your points are safe and still intact.${resumeNote}</div>`;
   } else if(_cooldownDaysLeft > 0){
-    html += `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#92400e">⏳ Naka-redeem ka na kamakailan - pwede ka ulit mag-redeem sa loob ng <b>${_cooldownDaysLeft}</b> (na) araw.</div>`;
+    html += `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#92400e">⏳ You redeemed recently - you can redeem again in <b>${_cooldownDaysLeft}</b> day(s).</div>`;
   }
   html += _rewardsCache.map(r => `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border:1px solid #eef2f6;border-radius:12px;margin-bottom:8px;${r.can_redeem?'':'opacity:.55'}">
@@ -7087,7 +7155,7 @@ function rewardIconSvg(){
   </svg>`;
 }
 async function redeemReward(rewardId){
-  if(!confirm('Sigurado ka bang i-redeem itong reward?')) return;
+  if(!confirm('Are you sure you want to redeem this reward?')) return;
   const statusEl = document.getElementById('redeemStatus');
   statusEl.style.color = '#888';
   statusEl.textContent = 'Processing...';
@@ -7099,7 +7167,7 @@ async function redeemReward(rewardId){
     const data = await res.json();
     if(data.ok){
       statusEl.style.color = '#166534';
-      statusEl.textContent = '✅ Na-redeem! Makikita mo na sa Real-time Orders - dadalhin ito ng staff.';
+      statusEl.textContent = '✅ Redeemed! You will see it in Real-time Orders - staff will bring it to you.';
       loadPoints().then(renderRewardsList);
       loadOrders();
     }else{
@@ -7154,12 +7222,12 @@ async function enableCustomerPushAlerts(){
   const banner = document.getElementById('pushBannerCust');
   try{
     if(!PUSH_ENABLED_CUST){
-      alert('Hindi pa naka-configure ang push notifications sa server.');
+      alert('Push notifications are not configured on the server yet.');
       return;
     }
     const perm = await Notification.requestPermission();
     if(perm !== 'granted'){
-      alert('Kailangan payagan ang Notifications para makatanggap ng updates kahit closed ang app.');
+      alert('Please allow Notifications to get updates even when the app is closed.');
       return;
     }
     const reg = await navigator.serviceWorker.ready;
@@ -7178,7 +7246,7 @@ async function enableCustomerPushAlerts(){
     });
     if(banner) banner.style.display = 'none';
   }catch(err){
-    alert('Hindi na-enable ang notifications: ' + err.message);
+    alert('Could not enable notifications: ' + err.message);
   }
 }
 async function autoEnablePushOnFirstLogin(){
@@ -7256,7 +7324,7 @@ async function loadVideoList(){
     VIDEO_LIST = [];
   }
   if(!VIDEO_LIST.length){
-    videoPanelInner.innerHTML = '<div class="video-empty-msg">Walang available na video sa ngayon.</div>';
+    videoPanelInner.innerHTML = '<div class="video-empty-msg">No videos available right now.</div>';
     return;
   }
   // NOTE: no "loop" attribute here anymore (boss's request, Oct 2:
@@ -7272,7 +7340,7 @@ async function loadVideoList(){
       </video>
     </div>
     <div class="video-title-bar"><span id="videoTitleBar"></span><span class="video-views-badge" id="videoViewsBadge"></span></div>
-    <div class="picker-label">🎬 Pumili ng video:</div>
+    <div class="picker-label">🎬 Choose a video:</div>
     <div class="picker-row" id="pickerRow"></div>
   `;
   document.getElementById('mainVideo').addEventListener('ended', onMainVideoEnded);
@@ -7694,39 +7762,39 @@ select,input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;fon
 </div>
 
 <div class="card">
-  <div class="section-title">💰 Presyo ng Benta Mo (Retail Price per Kg)</div>
+  <div class="section-title">💰 Your Selling Price (Retail Price per Kg)</div>
   <div class="price-row">
     <div><input type="number" id="retailPriceInput" step="0.01" min="0" placeholder="hal. 15.00"></div>
     <button onclick="saveRetailPrice()">Save</button>
   </div>
-  <label style="margin-top:10px">Simula kailan? (effective date)</label>
+  <label style="margin-top:10px">Starting when? (effective date)</label>
   <input type="date" id="effectiveDateInput">
-  <div class="price-hint">Ito yung presyo na ibinebenta mo sa customers mo per kilo ng yelo. Kung nagbago ang presyo mo (halimbawa bumaba), i-save lang ang BAGONG presyo dito na may tamang petsa - hindi babaguhin ang kita ng mga nakaraang buwan, doon pa rin gagamitin ang lumang presyo.</div>
+  <div class="price-hint">This is the price you sell ice to your customers per kilo. If your price changed (for example it went down), just save the NEW price here with the correct date - it won't change past months' earnings, which still use the old price.</div>
   <div class="price-status" id="priceStatus"></div>
   <div id="priceHistoryToggle" style="display:none;margin-top:10px">
-    <a href="#" onclick="togglePriceHistory();return false" style="font-size:11px;color:#00609C;font-weight:600;text-decoration:none">📜 Tingnan ang Presyo History</a>
+    <a href="#" onclick="togglePriceHistory();return false" style="font-size:11px;color:#00609C;font-weight:600;text-decoration:none">📜 View Price History</a>
     <div id="priceHistoryList" style="display:none;margin-top:8px"></div>
   </div>
 </div>
 
 <div class="two-col">
-  <div class="total-card"><div class="amt" id="yearTotal">₱0</div><div class="lbl" id="yearTotalLbl">BINILI (COST) - TAON</div></div>
-  <div class="total-card profit"><div class="amt" id="yearProfit">₱0</div><div class="lbl" id="yearProfitLbl">TINATAYANG KITA (PROFIT)</div></div>
+  <div class="total-card"><div class="amt" id="yearTotal">₱0</div><div class="lbl" id="yearTotalLbl">COST - YEAR</div></div>
+  <div class="total-card profit"><div class="amt" id="yearProfit">₱0</div><div class="lbl" id="yearProfitLbl">ESTIMATED PROFIT</div></div>
 </div>
 
 <div class="card">
-  <div class="section-title">Buwanang Trend</div>
+  <div class="section-title">Monthly Trend</div>
   <div id="chartArea">Loading...</div>
-  <div class="price-hint" style="text-align:center;margin-top:8px">👆 I-tap ang isang buwan para makita ang bawat order na bumubuo sa total niya (para ma-verify).</div>
+  <div class="price-hint" style="text-align:center;margin-top:8px">👆 Tap a month to see every order that makes up its total (to verify).</div>
 </div>
 
 <div class="card" id="profitTableCard" style="display:none">
-  <div class="section-title">📊 Buwanang Profit Analysis</div>
+  <div class="section-title">📊 Monthly Profit Analysis</div>
   <table class="profit-table">
-    <thead><tr><th>Buwan</th><th>Kg</th><th>Binili</th><th>Ibinenta</th><th>Kita</th></tr></thead>
+    <thead><tr><th>Month</th><th>Kg</th><th>Cost</th><th>Sold</th><th>Profit</th></tr></thead>
     <tbody id="profitTableBody"></tbody>
   </table>
-  <div class="price-hint" id="profitTableNote" style="display:none;margin-top:8px">⚠️ May mga order na bago pa nailagay ang unang retail price, kaya hindi pa nasasama sa kita computation ang kg na iyon.</div>
+  <div class="price-hint" id="profitTableNote" style="display:none;margin-top:8px">⚠️ Some orders are from before the first retail price was set, so their kg isn't included in the profit computation yet.</div>
 </div>
 
 <div class="card" id="breakdownCard" style="display:none">
@@ -7773,12 +7841,12 @@ async function saveRetailPrice(){
   const val = document.getElementById('retailPriceInput').value;
   const effDate = document.getElementById('effectiveDateInput').value;
   if(val === '' || isNaN(Number(val)) || Number(val) < 0){
-    statusEl.textContent = 'Maglagay ng valid na presyo (0 pataas).';
+    statusEl.textContent = 'Enter a valid price (0 or higher).';
     statusEl.className = 'price-status err';
     return;
   }
   if(!effDate){
-    statusEl.textContent = 'Piliin ang petsa kung kailan magsisimula ang presyong ito.';
+    statusEl.textContent = 'Pick the date this price takes effect.';
     statusEl.className = 'price-status err';
     return;
   }
@@ -7791,7 +7859,7 @@ async function saveRetailPrice(){
     });
     const data = await res.json();
     if(!data.ok){ statusEl.textContent = data.error || 'Error'; statusEl.className = 'price-status err'; return; }
-    statusEl.textContent = `Na-save! Bisa mula ${effDate} - hindi na babaguhin ang kita ng mga nakaraang buwan bago ang petsang ito.`;
+    statusEl.textContent = `Saved! Effective from ${effDate} - earnings for months before this date won't change.`;
     statusEl.className = 'price-status ok';
     loadTrend();
   }catch(e){ statusEl.textContent = 'Error: ' + e.message; statusEl.className = 'price-status err'; }
@@ -7811,7 +7879,7 @@ function renderPriceHistory(history){
   }
   wrap.style.display = 'block';
   const sorted = history.slice().sort((a, b) => (b.effective_date || '').localeCompare(a.effective_date || ''));
-  list.innerHTML = '<table class="profit-table"><thead><tr><th>Bisa Mula</th><th>Presyo/Kg</th></tr></thead><tbody>' +
+  list.innerHTML = '<table class="profit-table"><thead><tr><th>Effective From</th><th>Price/Kg</th></tr></thead><tbody>' +
     sorted.map(h => `<tr><td style="text-align:left">${escapeHtmlCT(h.effective_date)}</td><td>${escapeHtmlCT(peso(h.price))}</td></tr>`).join('') +
     '</tbody></table>';
 }
@@ -7845,7 +7913,7 @@ async function loadTrend(){
 
     const months = data.months || [];
     if(!months.some(m => m.total > 0)){
-      chartArea.innerHTML = `<div class="empty">Wala pang na-record na sales noong ${data.year}.</div>`;
+      chartArea.innerHTML = `<div class="empty">No sales recorded yet for ${data.year}.</div>`;
       profitTableCard.style.display = 'none';
       return;
     }
@@ -7861,8 +7929,8 @@ async function loadTrend(){
     if(hasProfit){
       const maxVal = Math.max(1, ...months.map(m => Math.max(m.total, Math.abs(m.profit || 0))));
       let legend = `<div class="chart-legend">
-        <span><span class="dot" style="background:#0096D6"></span>Binili (Cost)</span>
-        <span><span class="dot" style="background:#10b981"></span>Kita (Profit)</span>
+        <span><span class="dot" style="background:#0096D6"></span>Cost</span>
+        <span><span class="dot" style="background:#10b981"></span>Profit</span>
       </div>`;
       bars = legend + '<div class="chart-wrap">';
       labels = '<div class="month-labels">';
@@ -7883,7 +7951,7 @@ async function loadTrend(){
         const topmostPct = Math.max(costPct, profitPct);
         const costLabelBottom = `calc(${topmostPct}% + 3px)`;
         const profitLabelBottom = `calc(${topmostPct}% + 16px)`;
-        bars += `<div class="bar-col" style="cursor:pointer" title="${escapeHtmlCT(m.label)} ${data.year} - Binili: ${escapeHtmlCT(peso(m.total))}, Kita: ${escapeHtmlCT(peso(profitVal))} - tap para tingnan ang mga order" onclick="showMonthBreakdown(${m.month})">
+        bars += `<div class="bar-col" style="cursor:pointer" title="${escapeHtmlCT(m.label)} ${data.year} - Cost: ${escapeHtmlCT(peso(m.total))}, Profit: ${escapeHtmlCT(peso(profitVal))} - tap to view orders" onclick="showMonthBreakdown(${m.month})">
           <div class="bar-stack">
             ${m.total > 0 ? `<div class="stack-label cost-lbl" style="bottom:${costLabelBottom}">${escapeHtmlCT(pesoShort(m.total))}</div>` : ''}
             ${profitVal !== 0 ? `<div class="stack-label profit-lbl${profitNeg?' neg':''}" style="bottom:${profitLabelBottom}">${profitNeg?'-':''}${escapeHtmlCT(pesoShort(Math.abs(profitVal)))}</div>` : ''}
@@ -7901,7 +7969,7 @@ async function loadTrend(){
       labels = '<div class="month-labels">';
       months.forEach(m => {
         const pct = m.total > 0 ? Math.max(4, Math.round((m.total / maxVal) * 100)) : 0;
-        bars += `<div class="bar-col" style="cursor:pointer" title="${escapeHtmlCT(m.label)} ${data.year}: ${escapeHtmlCT(peso(m.total))} - tap para tingnan ang mga order" onclick="showMonthBreakdown(${m.month})">
+        bars += `<div class="bar-col" style="cursor:pointer" title="${escapeHtmlCT(m.label)} ${data.year}: ${escapeHtmlCT(peso(m.total))} - tap to view orders" onclick="showMonthBreakdown(${m.month})">
           <div class="bar-label">${m.total > 0 ? escapeHtmlCT(pesoShort(m.total)) : ''}</div>
           <div class="bar ${m.total===0?'zero':''}" style="height:${pct}%"></div>
         </div>`;
@@ -7960,14 +8028,14 @@ async function showMonthBreakdown(month){
     if(!data.ok){ area.innerHTML = `<div class="empty">${escapeHtmlCT(data.error||'Error')}</div>`; return; }
 
     if(!data.orders || data.orders.length === 0){
-      area.innerHTML = `<div class="empty">Walang order na nakita para sa ${MONTH_NAMES_FULL[month-1]} ${year}.</div>`;
+      area.innerHTML = `<div class="empty">No orders found for ${MONTH_NAMES_FULL[month-1]} ${year}.</div>`;
       return;
     }
 
-    let html = `<div style="font-size:11px;color:#666;margin-bottom:8px">${data.included_count} order na kasama sa total &bull; Kabuuan: ${escapeHtmlCT(peso(data.included_total))} &bull; ${data.included_kg}kg</div>`;
+    let html = `<div style="font-size:11px;color:#666;margin-bottom:8px">${data.included_count} order(s) included in the total &bull; Total: ${escapeHtmlCT(peso(data.included_total))} &bull; ${data.included_kg}kg</div>`;
     html += `<table class="profit-table"><thead><tr><th>Petsa</th><th>Qty x Kg</th><th>Halaga</th><th>Status</th>${IS_ISESMO ? '<th></th>' : ''}</tr></thead><tbody>`;
     data.orders.forEach(o => {
-      const deletedNote = o.deleted ? ' <span style="color:#c0392b;font-weight:700">(DELETED - hindi kasama sa total)</span>' : '';
+      const deletedNote = o.deleted ? ' <span style="color:#c0392b;font-weight:700">(DELETED - not included in total)</span>' : '';
       const rowStyle = o.deleted ? 'opacity:.5;text-decoration:line-through' : '';
       const deleteCell = IS_ISESMO
         ? `<td>${o.deleted ? '' : `<button onclick="deleteBreakdownOrder('${o.id}')" style="padding:4px 8px;border-radius:6px;border:1px solid #fecaca;background:#fef2f2;color:#c0392b;font-size:10px;font-weight:600">🗑️ Delete</button>`}</td>`
@@ -7982,18 +8050,18 @@ async function showMonthBreakdown(month){
     });
     html += '</tbody></table>';
     if(IS_ISESMO){
-      html += '<div class="price-hint" style="margin-top:8px">⚠️ Para lang kay ISESMO: ang pag-delete dito ay permanent at hindi na maibabalik. Gamitin lang kung sigurado kang duplicate/maling entry.</div>';
+      html += '<div class="price-hint" style="margin-top:8px">⚠️ ISESMO only: deleting here is permanent and cannot be undone. Only use this if you are sure it is a duplicate/wrong entry.</div>';
     }
     area.innerHTML = html;
   }catch(e){ area.innerHTML = `<div class="empty">Error: ${escapeHtmlCT(e.message)}</div>`; }
 }
 
 async function deleteBreakdownOrder(saleId){
-  if(!confirm('Sigurado ka bang i-delete ang order na ito? Hindi na ito maibabalik.')) return;
+  if(!confirm('Are you sure you want to delete this order? This cannot be undone.')) return;
   try{
     const res = await fetch(`/api/customer/${resellerId}/month_orders/${saleId}`, {method: 'DELETE'});
     const data = await res.json();
-    if(!data.ok){ alert('Hindi na-delete: ' + (data.error || 'Unknown error')); return; }
+    if(!data.ok){ alert('Could not delete: ' + (data.error || 'Unknown error')); return; }
     // refresh the chart/totals first (loadTrend also hides the breakdown
     // card as part of its normal reset), then re-open the breakdown for
     // the same month so staff sees the updated list right away
@@ -14379,15 +14447,27 @@ def api_admin_save_reward_catalog():
 # build/maintain and works identically on mobile.
 # =====================================================================
 
-def get_dashboard_videos():
-    """Returns every dashboard video, sorted by 'order' ascending (the
-    order ISESMO picked on /admin/videos), each dict carrying its own
-    Firebase key as 'id' so the frontend can reference it (for view
-    counting, reordering, deleting) without a separate lookup."""
+def get_dashboard_videos(include_hidden=False):
+    """Returns dashboard videos, sorted by 'order' ascending (the order
+    ISESMO picked on /admin/videos), each dict carrying its own Firebase
+    key as 'id' so the frontend can reference it (for view counting,
+    reordering, deleting, hiding) without a separate lookup.
+
+    include_hidden=False (the default, used by the public /api/videos
+    that feeds the Customer Dashboard) drops any video ISESMO marked
+    "hidden" - boss's request, Oct 3: "my hide option si admin para
+    pwd nya hide sa mga customer yung ibang video" - the video and its
+    view-count stay in Firebase untouched, it just stops being offered
+    to customers. include_hidden=True (used by the admin video-manager
+    page) returns everything, hidden or not, so ISESMO can still see
+    and un-hide it."""
     raw = fb_get("dashboard_videos") or {}
     videos = []
     for vid, v in raw.items():
         if not isinstance(v, dict):
+            continue
+        hidden = bool(v.get("hidden") or False)
+        if hidden and not include_hidden:
             continue
         videos.append({
             "id": vid,
@@ -14395,6 +14475,7 @@ def get_dashboard_videos():
             "src": v.get("src") or "",
             "order": int(v.get("order") or 0),
             "views": int(v.get("views") or 0),
+            "hidden": hidden,
         })
     videos.sort(key=lambda x: (x["order"], x["id"]))
     return videos
@@ -14405,11 +14486,46 @@ def api_videos():
     """Public list for the Customer Dashboard's video picker. Any
     logged-in customer OR staff can view - matches the same
     "must be logged in, either side" pattern used by
-    /api/customer/<id>/orders elsewhere in this file."""
+    /api/customer/<id>/orders elsewhere in this file. Videos ISESMO
+    has hidden (see get_dashboard_videos) are left out here - this is
+    the ONLY video listing customers ever see."""
     if not session.get("customer_id") and not session.get("staff_name"):
         return jsonify({"ok": False, "error": "Login required"}), 401
     try:
-        return jsonify({"ok": True, "videos": get_dashboard_videos()})
+        return jsonify({"ok": True, "videos": get_dashboard_videos(include_hidden=False)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/admin/videos")
+@login_required
+@isesmo_only
+def api_admin_list_videos():
+    """ISESMO-only list that INCLUDES hidden videos, so the admin video
+    manager page can show every video (with its hidden/visible state)
+    and let him toggle it - unlike /api/videos above, which customers
+    use and which silently drops hidden ones."""
+    try:
+        return jsonify({"ok": True, "videos": get_dashboard_videos(include_hidden=True)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/admin/videos/<video_id>/toggle_hidden", methods=["POST"])
+@login_required
+@isesmo_only
+def api_admin_toggle_video_hidden(video_id):
+    """Flips a video's hidden/visible state (boss's request, Oct 3).
+    Hiding a video does NOT delete it or reset its view count - it
+    just stops /api/videos (the customer-facing list) from returning
+    it, so ISESMO can bring it back later with another tap."""
+    try:
+        current = fb_get(f"dashboard_videos/{video_id}")
+        if not isinstance(current, dict):
+            return jsonify({"ok": False, "error": "Video not found"}), 404
+        new_hidden = not bool(current.get("hidden") or False)
+        fb_patch(f"dashboard_videos/{video_id}", {"hidden": new_hidden})
+        return jsonify({"ok": True, "hidden": new_hidden})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -14457,6 +14573,9 @@ input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:
 .vid-actions{display:flex;gap:4px;flex-shrink:0}
 .vid-actions button{padding:6px 9px;border-radius:8px;border:1px solid #cde;background:#f8fafc;font-size:12px;cursor:pointer}
 .vid-actions .del-btn{background:#fee2e2;border-color:#fecaca;color:#c0392b}
+.vid-actions .hide-btn.is-hidden{background:#fef9c3;border-color:#fde68a;color:#854d0e}
+.vid-row.is-hidden{opacity:.55}
+.vid-hidden-badge{font-size:9px;font-weight:700;color:#854d0e;background:#fef9c3;border-radius:6px;padding:2px 6px;margin-left:6px}
 .empty-hint{font-size:12px;color:#888;text-align:center;padding:20px 0}
 </style></head>
 <body>
@@ -14464,7 +14583,7 @@ input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:
 
 <div class="card">
   <div style="font-weight:700;font-size:13px;margin-bottom:6px">➕ Magdagdag ng Video</div>
-  <div class="hint">I-upload muna ang video sa GitHub repo ("omega-ice" → videos folder), tapos kopyahin ang "View raw" link at i-paste dito. Awtomatikong lalabas ito sa Customer Dashboard, pinaka-huli sa listahan - gamitin ang mga ⬆️⬇️ button sa baba para iayos ang pagkasunod-sunod.</div>
+  <div class="hint">I-upload muna ang video sa GitHub repo ("omega-ice" → videos folder), tapos kopyahin ang "View raw" link at i-paste dito. Awtomatikong lalabas ito sa Customer Dashboard, pinaka-huli sa listahan - gamitin ang mga ⬆️⬇️ button sa baba para iayos ang pagkasunod-sunod, o ang 👁️ button para itago muna ang isang video sa mga customer kung hindi mo pa gustong ipakita.</div>
   <label>Pamagat ng Video</label>
   <input type="text" id="newVideoTitle" placeholder="hal. Paano Mag-order Online">
   <label>Raw Video Link (mula GitHub)</label>
@@ -14484,7 +14603,7 @@ async function loadAdminVideos(){
   const listEl = document.getElementById('videoList');
   listEl.innerHTML = '<div class="empty-hint">Loading...</div>';
   try{
-    const res = await fetch('/api/videos');
+    const res = await fetch('/api/admin/videos');
     const data = await res.json();
     const videos = data.videos || [];
     if(!videos.length){
@@ -14492,15 +14611,16 @@ async function loadAdminVideos(){
       return;
     }
     listEl.innerHTML = videos.map((v, i) => `
-      <div class="vid-row">
+      <div class="vid-row${v.hidden ? ' is-hidden' : ''}">
         <video class="vid-thumb" src="${v.src}" muted preload="metadata"></video>
         <div class="vid-info">
-          <div class="vid-title">${v.title}</div>
+          <div class="vid-title">${v.title}${v.hidden ? '<span class="vid-hidden-badge">HIDDEN</span>' : ''}</div>
           <div class="vid-meta">👁 ${v.views || 0} views</div>
         </div>
         <div class="vid-actions">
           <button onclick="moveVideo('${v.id}','up')" ${i===0?'disabled':''} title="Ilipat sa unahan">⬆️</button>
           <button onclick="moveVideo('${v.id}','down')" ${i===videos.length-1?'disabled':''} title="Ilipat sa hulihan">⬇️</button>
+          <button class="hide-btn${v.hidden ? ' is-hidden' : ''}" onclick="toggleVideoHidden('${v.id}')" title="${v.hidden ? 'Ipakita ulit sa customer' : 'Itago mula sa customer'}">${v.hidden ? '🚫' : '👁️'}</button>
           <button class="del-btn" onclick="deleteVideo('${v.id}','${v.title.replace(/'/g,"\\\\'")}')" title="Tanggalin">🗑️</button>
         </div>
       </div>
@@ -14508,6 +14628,10 @@ async function loadAdminVideos(){
   }catch(e){
     listEl.innerHTML = '<div class="empty-hint">Error loading videos.</div>';
   }
+}
+async function toggleVideoHidden(id){
+  await fetch(`/api/admin/videos/${id}/toggle_hidden`, {method: 'POST'});
+  loadAdminVideos();
 }
 async function addVideo(){
   const title = document.getElementById('newVideoTitle').value.trim();
@@ -14587,6 +14711,7 @@ def api_admin_add_video():
             "src": src,
             "order": max_order + 1,
             "views": 0,
+            "hidden": False,
             "created_at": manila_now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         result = fb_post("dashboard_videos", new_video)
