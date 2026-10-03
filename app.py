@@ -15526,6 +15526,21 @@ input.sud-cell.incorrect{background:#fee2e2 !important;color:#c0392b}
 .sol-tableau{display:flex;gap:4px}
 .sol-col{flex:1;min-width:0;min-height:50px;position:relative}
 .sol-col .sol-card{position:relative;width:100%}
+
+/* ---- Block Puzzle (wood theme, boss's request Oct 3: "Kaya mo ba
+   gumawa neto?" re: a wood-block-placement puzzle screenshot - added
+   as a libangan-lang tab, no points, 100% client-side) ---- */
+.bp-score-row{display:flex;justify-content:space-between;font-size:12px;font-weight:700;color:#0f2942;margin-bottom:8px}
+.bp-wrap{background:#5c3a21;border-radius:12px;padding:10px;margin-bottom:12px}
+.bp-board{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px;background:#4a2e1a;border-radius:8px;padding:6px}
+.bp-cell{width:100%;aspect-ratio:1;background:#7a5230;border-radius:4px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15);cursor:pointer}
+.bp-cell.filled{background:linear-gradient(145deg,#f4c542,#d99a1f);box-shadow:inset 0 -2px 0 rgba(0,0,0,.25),inset 0 2px 0 rgba(255,255,255,.35)}
+.bp-tray{display:flex;gap:10px;justify-content:center;margin-top:12px;min-height:70px}
+.bp-tray-slot{display:grid;gap:2px;padding:6px;border-radius:8px;background:#f8fafc;border:1px solid #d7e3ef;cursor:pointer;min-width:50px;min-height:50px}
+.bp-tray-slot.selected{outline:3px solid #f59e0b;background:#fff7ed}
+.bp-tray-slot.bp-tray-empty{background:transparent;border:1px dashed #d7e3ef;cursor:default}
+.bp-mini-cell{width:14px;height:14px;background:transparent}
+.bp-mini-cell.filled{background:linear-gradient(145deg,#f4c542,#d99a1f);border-radius:3px}
 .empty-hint{text-align:center;font-size:12px;color:#888;padding:20px 0}
 </style></head>
 <body>
@@ -15538,6 +15553,7 @@ input.sud-cell.incorrect{background:#fee2e2 !important;color:#c0392b}
   <button class="tab-btn" id="tabbtn-wordsearch" onclick="switchTab('wordsearch')">🔎 Word Search</button>
   <button class="tab-btn" id="tabbtn-trivia" onclick="switchTab('trivia')">❓ Trivia</button>
   <button class="tab-btn" id="tabbtn-solitaire" onclick="switchTab('solitaire')">🃏 Solitaire</button>
+  <button class="tab-btn" id="tabbtn-blockpuzzle" onclick="switchTab('blockpuzzle')">🧱 Block Puzzle</button>
 </div>
 
 <!-- CROSSWORD TAB -->
@@ -15631,6 +15647,26 @@ input.sud-cell.incorrect{background:#fee2e2 !important;color:#c0392b}
   </div>
 </div>
 
+<!-- BLOCK PUZZLE TAB -->
+<div id="tab-blockpuzzle" class="tabpanel" style="display:none">
+  <div class="card">
+    <div class="section-head"><b>🧱 Block Puzzle</b><span class="badge fun">LIBANGAN LANG</span></div>
+    <div class="hint">I-tap ang piraso sa ibaba para piliin, tapos i-tap ang kahon sa board kung saan mo ito ilalagay. Punuin ang isang buong row o column para ma-clear ito at makakuha ng bonus score. Tapos ang laro kung wala nang kasya sa 3 pirasong natitira sa tray.</div>
+    <div class="bp-score-row">
+      <span>Score: <span id="bpScore">0</span></span>
+      <span>Best: <span id="bpBest">0</span></span>
+    </div>
+    <div class="bp-wrap">
+      <div id="bpBoard" class="bp-board"></div>
+    </div>
+    <div id="bpTray" class="bp-tray"></div>
+    <div id="bpGameOver" class="win-banner" style="background:#fee2e2;color:#991b1b;display:none">
+      😅 Tapos ang laro! Final score: <span id="bpFinalScore"></span>
+      <button class="action-link" style="margin-top:8px" onclick="newBlockGame()">🔁 Maglaro Ulit</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const IS_STAFF = {{ 'true' if is_staff else 'false' }};
 const RESELLER_ID = "{{ reseller_id or '' }}";
@@ -15651,6 +15687,7 @@ function switchTab(tab){
     if(tab==='wordsearch') renderWordSearch();
     if(tab==='trivia') loadTriviaProgress();
     if(tab==='solitaire') dealSolitaire();
+    if(tab==='blockpuzzle') newBlockGame();
   }
 }
 
@@ -16335,6 +16372,185 @@ function attemptMoveTo(dest){
   }
   sol.selected = null;
   renderSolitaire();
+}
+
+/* ===================== BLOCK PUZZLE =====================
+   boss's request, Oct 3 (screenshot of a wood-block "Block Blast"
+   style mobile game): "Kaya mo ba gumawa neto?". Confirmed scope via
+   AskUserQuestion: a new tab in this same Mini-Games Hub, "libangan
+   lang" with NO points (same no-points pattern as Sudoku/Word
+   Search/Solitaire) - 100% client-side, no backend/Firebase call
+   anywhere in here. Interaction is tap-to-select-a-piece then
+   tap-to-place (not drag-and-drop), matching how Sudoku/Word Search
+   already work here for mobile reliability. */
+const BP_GRID_SIZE = 8;
+const BP_BEST_KEY = 'omegaice_blockpuzzle_best';
+
+// Each shape is a list of [row,col] offsets from its own top-left
+// bounding box corner. Mix of singles/dominoes/trominoes/tetrominoes
+// (I/O/L/J/T/S/Z)/pentominoes (I/plus) plus the big 2x2 and 3x3
+// squares, same spirit as the reference screenshot's piece variety.
+const BLOCK_SHAPES = [
+  [[0,0]],
+  [[0,0],[0,1]],
+  [[0,0],[1,0]],
+  [[0,0],[0,1],[0,2]],
+  [[0,0],[1,0],[2,0]],
+  [[0,0],[1,0],[1,1]],
+  [[0,0],[0,1],[1,0]],
+  [[0,0],[0,1],[1,1]],
+  [[1,0],[1,1],[0,1]],
+  [[0,0],[0,1],[0,2],[0,3]],
+  [[0,0],[1,0],[2,0],[3,0]],
+  [[0,0],[0,1],[1,0],[1,1]],
+  [[0,0],[1,0],[2,0],[2,1]],
+  [[0,0],[0,1],[0,2],[1,0]],
+  [[0,1],[1,1],[2,1],[2,0]],
+  [[1,0],[1,1],[1,2],[0,2]],
+  [[0,0],[0,1],[0,2],[1,1]],
+  [[0,1],[1,0],[1,1],[2,1]],
+  [[1,0],[1,1],[1,2],[0,1]],
+  [[0,0],[1,0],[2,0],[1,1]],
+  [[0,1],[0,2],[1,0],[1,1]],
+  [[0,0],[0,1],[1,1],[1,2]],
+  [[0,1],[1,0],[1,1],[1,2],[2,1]],
+  [[0,0],[0,1],[0,2],[0,3],[0,4]],
+  [[0,0],[0,1],[0,2],[1,0],[1,1],[1,2],[2,0],[2,1],[2,2]],
+];
+
+let bp = null; // {board:[[bool x8]x8], tray:[shape|null, ...x3], score, selectedTrayIdx, gameOver}
+
+function bpShapeDims(shape){
+  let maxR = 0, maxC = 0;
+  shape.forEach(([r,c]) => { maxR = Math.max(maxR, r); maxC = Math.max(maxC, c); });
+  return { rows: maxR + 1, cols: maxC + 1 };
+}
+
+function bpRandomShape(){
+  return BLOCK_SHAPES[Math.floor(Math.random() * BLOCK_SHAPES.length)];
+}
+
+function bpNewTray(){
+  return [bpRandomShape(), bpRandomShape(), bpRandomShape()];
+}
+
+function bpBestScore(){
+  try{ return parseInt(localStorage.getItem(BP_BEST_KEY) || '0', 10) || 0; }catch(e){ return 0; }
+}
+
+function bpSaveBest(score){
+  try{
+    if(score > bpBestScore()) localStorage.setItem(BP_BEST_KEY, String(score));
+  }catch(e){ /* localStorage unavailable (private mode etc) - best-score just won't persist */ }
+}
+
+function bpCanPlaceAt(shape, anchorR, anchorC){
+  for(const [dr, dc] of shape){
+    const r = anchorR + dr, c = anchorC + dc;
+    if(r < 0 || r >= BP_GRID_SIZE || c < 0 || c >= BP_GRID_SIZE) return false;
+    if(bp.board[r][c]) return false;
+  }
+  return true;
+}
+
+function bpShapeFitsAnywhere(shape){
+  for(let r = 0; r < BP_GRID_SIZE; r++){
+    for(let c = 0; c < BP_GRID_SIZE; c++){
+      if(bpCanPlaceAt(shape, r, c)) return true;
+    }
+  }
+  return false;
+}
+
+function bpCheckGameOver(){
+  const remaining = bp.tray.filter(s => s !== null);
+  if(remaining.length === 0) return false; // empty tray just means "refill next", not game over
+  return !remaining.some(shape => bpShapeFitsAnywhere(shape));
+}
+
+function newBlockGame(){
+  bp = {
+    board: Array.from({ length: BP_GRID_SIZE }, () => Array(BP_GRID_SIZE).fill(false)),
+    tray: bpNewTray(),
+    score: 0,
+    selectedTrayIdx: null,
+    gameOver: false,
+  };
+  renderBlockPuzzle();
+}
+
+function bpSelectTray(idx){
+  if(!bp || bp.gameOver) return;
+  if(!bp.tray[idx]) return; // empty slot, nothing to select
+  bp.selectedTrayIdx = (bp.selectedTrayIdx === idx) ? null : idx;
+  renderBlockPuzzle();
+}
+
+function bpPlaceAt(anchorR, anchorC){
+  if(!bp || bp.gameOver || bp.selectedTrayIdx === null) return;
+  const shape = bp.tray[bp.selectedTrayIdx];
+  if(!shape || !bpCanPlaceAt(shape, anchorR, anchorC)) return;
+
+  shape.forEach(([dr, dc]) => { bp.board[anchorR + dr][anchorC + dc] = true; });
+  bp.score += shape.length * 10;
+  bp.tray[bp.selectedTrayIdx] = null;
+  bp.selectedTrayIdx = null;
+
+  // Clear any fully-filled rows/columns, with a bonus that scales up
+  // for clearing more than one line at once (reads multiple full
+  // rows/cols BEFORE wiping any of them, so a row+col double-clear
+  // still counts both).
+  const fullRows = [];
+  const fullCols = [];
+  for(let r = 0; r < BP_GRID_SIZE; r++){ if(bp.board[r].every(v => v)) fullRows.push(r); }
+  for(let c = 0; c < BP_GRID_SIZE; c++){ if(bp.board.every(row => row[c])) fullCols.push(c); }
+  fullRows.forEach(r => { for(let c = 0; c < BP_GRID_SIZE; c++) bp.board[r][c] = false; });
+  fullCols.forEach(c => { for(let r = 0; r < BP_GRID_SIZE; r++) bp.board[r][c] = false; });
+  const linesCleared = fullRows.length + fullCols.length;
+  if(linesCleared > 0) bp.score += linesCleared * linesCleared * 50;
+
+  if(bp.tray.every(s => s === null)) bp.tray = bpNewTray();
+
+  if(bpCheckGameOver()){
+    bp.gameOver = true;
+    bpSaveBest(bp.score);
+  }
+
+  renderBlockPuzzle();
+}
+
+function renderBlockPuzzle(){
+  if(!bp) return;
+  const boardEl = document.getElementById('bpBoard');
+  let boardHtml = '';
+  for(let r = 0; r < BP_GRID_SIZE; r++){
+    for(let c = 0; c < BP_GRID_SIZE; c++){
+      const filled = bp.board[r][c];
+      boardHtml += '<div class="bp-cell' + (filled ? ' filled' : '') + '" onclick="bpPlaceAt(' + r + ',' + c + ')"></div>';
+    }
+  }
+  boardEl.innerHTML = boardHtml;
+
+  const trayEl = document.getElementById('bpTray');
+  trayEl.innerHTML = bp.tray.map((shape, idx) => {
+    if(!shape) return '<div class="bp-tray-slot bp-tray-empty"></div>';
+    const { rows, cols } = bpShapeDims(shape);
+    const cellSet = new Set(shape.map(([r, c]) => r + ',' + c));
+    let inner = '';
+    for(let r = 0; r < rows; r++){
+      for(let c = 0; c < cols; c++){
+        inner += '<div class="bp-mini-cell' + (cellSet.has(r + ',' + c) ? ' filled' : '') + '"></div>';
+      }
+    }
+    const selectedCls = (bp.selectedTrayIdx === idx) ? ' selected' : '';
+    return '<div class="bp-tray-slot' + selectedCls + '" onclick="bpSelectTray(' + idx + ')" ' +
+      'style="grid-template-columns:repeat(' + cols + ',1fr);grid-template-rows:repeat(' + rows + ',1fr)">' + inner + '</div>';
+  }).join('');
+
+  document.getElementById('bpScore').textContent = bp.score;
+  document.getElementById('bpBest').textContent = bpBestScore();
+  document.getElementById('bpFinalScore').textContent = bp.score;
+  document.getElementById('bpGameOver').style.display = bp.gameOver ? 'block' : 'none';
 }
 </script>
 </body></html>
