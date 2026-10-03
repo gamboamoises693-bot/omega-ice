@@ -15431,9 +15431,14 @@ GAMES_HUB_HTML = """<!DOCTYPE html>
 .level-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;max-height:420px;overflow-y:auto;padding-right:2px;margin-bottom:4px}
 .level-btn{width:100%;min-width:0;aspect-ratio:1;border-radius:10px;border:1px solid #d7e3ef;background:#f8fafc;color:#334155;font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .level-btn:active{background:#eef4fb}
+.level-btn.locked{background:#e2e8f0;color:#94a3b8;cursor:not-allowed}
+.level-btn.done{background:#dcfce7;border-color:#86efac;color:#166534}
 .timer-label{text-align:center;font-size:16px;font-weight:800;color:#00609C;background:#eef4fb;border-radius:10px;padding:8px;margin-bottom:10px}
 .timer-label.warn{color:#c2410c;background:#fff7ed}
 .timer-label.expired{color:#c0392b;background:#fee2e2}
+.spin-banner{background:#fef9c3;color:#854d0e}
+@keyframes trivSpinPulse{0%{transform:scale(1)}50%{transform:scale(1.12)}100%{transform:scale(1)}}
+.spin-rolling{animation:trivSpinPulse .45s ease-in-out infinite}
 
 /* ---- Sudoku ---- */
 .sud-diff-row{display:flex;gap:6px;margin-bottom:12px}
@@ -15529,10 +15534,11 @@ input.sud-cell.incorrect{background:#fee2e2 !important;color:#c0392b}
 <!-- TRIVIA TAB -->
 <div id="tab-trivia" class="tabpanel" style="display:none">
   <div class="card">
-    <div class="section-head"><b>❓ Trivia Quiz</b><span class="badge fun">LIBANGAN LANG</span></div>
-    <div class="hint">1000 levels, 20 tanong bawat level, 3 minuto ang oras bawat level. Kung maubusan ng oras, mag-re-restart ang level mula sa tanong 1 na may panibagong mga tanong.</div>
+    <div class="section-head"><b>❓ Trivia Quiz</b><span class="badge {{ 'points' if show_points_badge else 'fun' }}">{% if show_points_badge %}FREE SPIN /30 LVLS{% else %}LIBANGAN LANG{% endif %}</span></div>
+    <div class="hint">1000 levels, 20 tanong bawat level. Kailangan PERFECT 20/20 para ma-unlock ang susunod na level. {% if show_points_badge %}Tuwing makumpleto ang bawat ika-30 level (30, 60, 90...), may makukuhang 1 FREE SPIN na pwedeng magbigay ng hanggang 1 point.{% else %}Staff mode - makikita pa rin ang lock/unlock progression at milestone banner, pero walang spin o points dito.{% endif %} May 3-minutong timer bawat round - kung maubusan ng oras, mag-re-restart mula sa tanong 1 na may panibagong mga tanong.</div>
 
     <div id="triviaLevelListView">
+      <div id="trivSpinBanner" class="win-banner spin-banner" style="display:none"></div>
       <div id="trivLevelGrid" class="level-grid"><div class="empty-hint">Loading...</div></div>
     </div>
 
@@ -15550,9 +15556,11 @@ input.sud-cell.incorrect{background:#fee2e2 !important;color:#c0392b}
       <div id="triviaTimeoutMsg" class="win-banner" style="background:#fee2e2;color:#991b1b">⏰ Lumipas ang 3 minuto! Panibagong tanong, simula ulit...</div>
       <div id="triviaRoundDone" style="display:none;text-align:center">
         <div style="font-size:14px;font-weight:800;color:#0f2942;margin-bottom:6px">Tapos ang Level!</div>
-        <div style="font-size:24px;font-weight:800;color:#00609C;margin-bottom:14px" id="triviaScoreFinal"></div>
+        <div style="font-size:24px;font-weight:800;color:#00609C;margin-bottom:10px" id="triviaScoreFinal"></div>
+        <div style="font-size:12px;font-weight:700;margin-bottom:14px" id="triviaUnlockMsg"></div>
         <button class="action-link" onclick="startTriviaRound()">🔁 Ulitin ang Level (bagong tanong)</button>
-        <button class="action-link" id="trivNextLevelBtn" style="display:none;margin-top:8px" onclick="goToNextTriviaLevel()">➡️ Susunod na Level</button>
+        <button class="action-link" id="trivNextLevelBtn" style="display:none;margin-top:8px" onclick="openTriviaLevel(currentTriviaLevel+1)">➡️ Susunod na Level</button>
+        <button class="action-link" style="margin-top:8px;background:#eef4fb;color:#00609C" onclick="backToTriviaLevels()">📋 Bumalik sa Listahan</button>
       </div>
     </div>
   </div>
@@ -15577,6 +15585,7 @@ input.sud-cell.incorrect{background:#fee2e2 !important;color:#c0392b}
 
 <script>
 const IS_STAFF = {{ 'true' if is_staff else 'false' }};
+const RESELLER_ID = "{{ reseller_id or '' }}";
 const CROSSWORD_PROGRESS_URL = "{{ crossword_progress_url }}";
 
 function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
@@ -15592,7 +15601,7 @@ function switchTab(tab){
     initializedTabs.add(tab);
     if(tab==='sudoku') newSudoku('medium');
     if(tab==='wordsearch') renderWordSearch();
-    if(tab==='trivia') renderTriviaLevelGrid();
+    if(tab==='trivia') loadTriviaProgress();
     if(tab==='solitaire') dealSolitaire();
   }
 }
@@ -15829,197 +15838,154 @@ function onWsTap(r,c){
    3min timer pag naubos oras babalik sa unang tanong sa level na yun
    at magiging bago ulit ang tanong."
 
-   NOTE on scope (read this before touching TRIVIA_BANK): writing
-   20,000 unique hand-checked questions (1000 levels x 20) is not
-   practical or good practice - mababa ang quality kung puro padagdag
-   lang ng tanong na hindi na-verify. Same pattern ginamit na sa
-   Sudoku/Word Search: ang 1000 "levels" ay 1000 REPLAYABLE ROUNDS, at
-   bawat round ay kumukuha ng 20 random, non-repeating questions mula
-   sa isang solidong bank (~140 items sa ibaba, lahat na-verify na
-   evergreen facts - wala kaming nilagay na tungkol sa kasalukuyang
-   mga opisyal/pulitiko dahil maaari na itong maging mali paglipas ng
-   panahon). Ganito rin gumagana ang Sudoku generator - bagong puzzle
-   bawat laro imbes na 1000 pre-made puzzles. */
+   boss's FOLLOW-UP request, same day: "Dapat nakalock muna yung next
+   level. tapos kada tapos every 30 level mu free spin na pwd makakuha
+   ng 1 max 1 point." This is why Trivia no longer keeps its own
+   question bank + answer key in this <script> - once level locking
+   and real loyalty points are on the line, the answer key CANNOT live
+   in the browser (anyone could read it from devtools and never miss a
+   question). The bank now lives server-side as the Python TRIVIA_BANK
+   (app.py, right after CROSSWORD_POINTS_HARD) and every network call
+   below talks to /api/customer/trivia/... (or /api/staff/trivia/...
+   for staff) - same "shape only, server validates" pattern already
+   proven by the Crossword feature. See api_customer_trivia_submit /
+   api_customer_trivia_spin in app.py for the actual locking + spin
+   logic; this file is just the UI for it.
+*/
 const TRIVIA_TOTAL_LEVELS = 1000;
-const TRIVIA_QUESTIONS_PER_LEVEL = 20;
-const TRIVIA_TIME_LIMIT_SECONDS = 180;
-const TRIVIA_BANK = [
-  // ---- Kasaysayan ng Pilipinas (History) ----
-  {q:"Sino ang pambansang bayani ng Pilipinas, sumulat ng Noli Me Tangere?", choices:["Jose Rizal","Andres Bonifacio","Emilio Aguinaldo"], answer:0},
-  {q:"Sino ang nagtatag ng Katipunan noong 1892?", choices:["Jose Rizal","Andres Bonifacio","Apolinario Mabini"], answer:1},
-  {q:"Anong taon idineklara ang kalayaan ng Pilipinas mula sa Espanya sa Kawit, Cavite?", choices:["1898","1901","1946"], answer:0},
-  {q:"Sino ang unang Pangulo ng Republika ng Pilipinas?", choices:["Emilio Aguinaldo","Manuel Quezon","Sergio Osmeña"], answer:0},
-  {q:"Sino ang sumulat ng El Filibusterismo?", choices:["Andres Bonifacio","Jose Rizal","Marcelo del Pilar"], answer:1},
-  {q:"Anong taon binaril si Jose Rizal sa Bagumbayan?", choices:["1896","1898","1901"], answer:0},
-  {q:"Saan isinilang si Jose Rizal?", choices:["Calamba, Laguna","Kawit, Cavite","Malolos, Bulacan"], answer:0},
-  {q:"Anong taon dumating si Ferdinand Magellan sa Pilipinas?", choices:["1521","1565","1898"], answer:0},
-  {q:"Sino ang pinunong Pilipino na pumatay kay Magellan sa Labanan sa Mactan?", choices:["Lapu-Lapu","Humabon","Sikatuna"], answer:0},
-  {q:"Sino ang Espanyol na nagtatag ng unang permanenteng kolonya sa Cebu noong 1565?", choices:["Miguel López de Legazpi","Ferdinand Magellan","Juan de Salcedo"], answer:0},
-  {q:"Sino ang tinaguriang 'Utak ng Himagsikan' (Brains of the Revolution)?", choices:["Apolinario Mabini","Emilio Jacinto","Antonio Luna"], answer:0},
-  {q:"Sino ang pintor ng kilalang obrang 'Spoliarium'?", choices:["Juan Luna","Antonio Luna","Fernando Amorsolo"], answer:0},
-  {q:"Sino ang unang Pangulo ng Commonwealth ng Pilipinas?", choices:["Manuel L. Quezon","Sergio Osmeña","Manuel Roxas"], answer:0},
-  {q:"Anong taon dumating ang mga Hapones at sinalakay ang Pilipinas noong Ikalawang Digmaang Pandaigdig?", choices:["1941","1898","1972"], answer:0},
-  {q:"Saang lalawigan naganap ang Death March noong 1942?", choices:["Bataan","Batangas","Bulacan"], answer:0},
-  {q:"Sino ang Heneral ng US na nangakong 'I shall return' nang umalis sa Pilipinas noong 1942?", choices:["Douglas MacArthur","Dwight Eisenhower","George Patton"], answer:0},
-  {q:"Saan bumalik si Heneral MacArthur noong 1944 para simulan ang paglaya ng Pilipinas?", choices:["Leyte","Luzon","Mindanao"], answer:0},
-  {q:"Anong taon binigyan ng tunay na kasarinlan ang Pilipinas mula sa Estados Unidos?", choices:["1946","1935","1898"], answer:0},
-  {q:"Sino ang Pangulong nanungkulan nang idineklara ang Batas Militar noong 1972?", choices:["Ferdinand Marcos Sr.","Diosdado Macapagal","Corazon Aquino"], answer:0},
-  {q:"Sino ang unang babaeng Pangulo ng Pilipinas?", choices:["Corazon Aquino","Gloria Macapagal-Arroyo","Imelda Marcos"], answer:0},
-  {q:"Anong taon namatay si Ninoy Aquino sa paliparan ng Maynila?", choices:["1983","1986","1981"], answer:0},
-  {q:"Anong kilusan ang nagpabagsak sa diktaduryang Marcos noong 1986?", choices:["EDSA People Power Revolution","Propaganda Movement","Cry of Pugad Lawin"], answer:0},
-  {q:"Anong taon inilipat ang opisyal na Araw ng Kalayaan mula July 4 patungong June 12?", choices:["1962","1946","1986"], answer:0},
-  {q:"Sino ang sumulat ng Florante at Laura?", choices:["Francisco Balagtas","Jose Rizal","Lope K. Santos"], answer:0},
-  {q:"Anong pangkat ang Propaganda Movement, naglalayong magkaroon ng repormang legal mula sa Espanya?", choices:["Mga Ilustrado","Mga Katipunero","Mga Prayle"], answer:0},
-  {q:"Anong unibersidad sa Maynila ang itinuturing na pinakamatandang unibersidad sa Asya, itinatag noong 1611?", choices:["University of Santo Tomas","University of the Philippines","Ateneo de Manila"], answer:0},
-  {q:"Anong pader-bayan sa Maynila ang itinayo ng mga Espanyol bilang sentro ng kolonyal na pamahalaan?", choices:["Intramuros","Binondo","Ermita"], answer:0},
-  {q:"Anong distrito sa Maynila ang itinuturing na pinakamatandang Chinatown sa mundo?", choices:["Binondo","Intramuros","Quiapo"], answer:0},
-  {q:"Anong simbahan sa Intramuros ang Baroque-style at UNESCO World Heritage Site?", choices:["San Agustin Church","Quiapo Church","Manila Cathedral"], answer:0},
-  {q:"Ilang taon humigit-kumulang ang pananakop ng Espanya sa Pilipinas?", choices:["Mga 300 taon","Mga 100 taon","Mga 50 taon"], answer:0},
-  // ---- Heograpiya (Geography) ----
-  {q:"Ano ang pinakamalaking isla sa Pilipinas?", choices:["Luzon","Mindanao","Palawan"], answer:0},
-  {q:"Humigit-kumulang ilang isla ang bumubuo sa Pilipinas?", choices:["Mga 7,000+","Mga 1,000","Mga 500"], answer:0},
-  {q:"Alin ang pinakamataas na bundok sa Pilipinas?", choices:["Mount Apo","Mount Pulag","Mount Mayon"], answer:0},
-  {q:"Saan matatagpuan ang Mount Apo?", choices:["Davao","Benguet","Albay"], answer:0},
-  {q:"Alin ang kilalang bulkang halos perpekto ang hugis-kono sa Albay?", choices:["Mayon Volcano","Taal Volcano","Pinatubo"], answer:0},
-  {q:"Alin ang pinakamahabang ilog sa Pilipinas?", choices:["Cagayan River","Pasig River","Agno River"], answer:0},
-  {q:"Saan matatagpuan ang Chocolate Hills?", choices:["Bohol","Cebu","Palawan"], answer:0},
-  {q:"Anong lungsod ang tinaguriang 'Queen City of the South'?", choices:["Cebu City","Davao City","Iloilo City"], answer:0},
-  {q:"Anong isla sa pinakahilagang bahagi ng Pilipinas, malapit sa Taiwan?", choices:["Batanes","Palawan","Mindoro"], answer:0},
-  {q:"Saang lalawigan matatagpuan ang Banaue Rice Terraces?", choices:["Ifugao","Benguet","Mountain Province"], answer:0},
-  {q:"Alin ang pinakamalaking lawa sa Pilipinas?", choices:["Laguna de Bay","Taal Lake","Lake Lanao"], answer:0},
-  {q:"Saan matatagpuan ang Lake Lanao?", choices:["Lanao del Sur","Bukidnon","Palawan"], answer:0},
-  {q:"Anong karagatan ang nasa kanlurang bahagi ng Pilipinas?", choices:["West Philippine Sea","Atlantic Ocean","Caribbean Sea"], answer:0},
-  {q:"Alin ang opisyal na kabisera ng Pilipinas?", choices:["Maynila","Quezon City","Makati"], answer:0},
-  {q:"Anong puno ang itinuturing na pambansang puno ng Pilipinas?", choices:["Narra","Mahogany","Molave"], answer:0},
-  {q:"Anong bulaklak ang pambansang bulaklak ng Pilipinas?", choices:["Sampaguita","Rosas","Gumamela"], answer:0},
-  {q:"Anong ibon ang pambansang ibon ng Pilipinas?", choices:["Philippine Eagle","Maya","Agila"], answer:0},
-  {q:"Anong isda ang pambansang isda ng Pilipinas?", choices:["Bangus (Milkfish)","Tilapia","Tulingan"], answer:0},
-  {q:"Saan pinaka-matatagpuan ang Philippine Eagle?", choices:["Mindanao","Palawan","Batanes"], answer:0},
-  {q:"Saang lungsod matatagpuan ang Hundred Islands National Park?", choices:["Alaminos, Pangasinan","Puerto Princesa","El Nido"], answer:0},
-  {q:"Anong UNESCO World Heritage Site sa Palawan ang may underground river?", choices:["Puerto Princesa Subterranean River","Tubbataha Reefs","El Nido Lagoon"], answer:0},
-  {q:"Anong marine park sa Sulu Sea ang UNESCO World Heritage Site, kilala sa coral reefs?", choices:["Tubbataha Reefs Natural Park","Apo Reef","Hundred Islands"], answer:0},
-  {q:"Anong bagong rehiyon ang naitatag noong 2019 sa Mindanao matapos ang plebisito?", choices:["BARMM (Bangsamoro)","ARMM","CARAGA"], answer:0},
-  {q:"Anong taon sumabog ang Mount Pinatubo, isa sa pinakamalaking pagsabog ng bulkan noong ika-20 siglo?", choices:["1991","1986","2000"], answer:0},
-  {q:"Anong hayop na pinakamaliit na kalabaw sa mundo ang endemiko sa Mindoro?", choices:["Tamaraw","Carabao","Kalabaw"], answer:0},
-  {q:"Anong malaking isda ang madalas makita sa Donsol, Sorsogon, tinatawag ding 'Butanding'?", choices:["Whale Shark","Dolphin","Manta Ray"], answer:0},
-  // ---- Kultura (Culture) ----
-  {q:"Anong kilalang pista sa Cebu ang ginaganap taon-taon bilang parangal kay Santo Niño?", choices:["Sinulog Festival","Ati-Atihan","Pahiyas"], answer:0},
-  {q:"Saan ginaganap ang Ati-Atihan Festival?", choices:["Kalibo, Aklan","Cebu","Iloilo"], answer:0},
-  {q:"Anong pista sa Lucban, Quezon ang kilala sa palamuting kakanin at gulay sa mga bahay?", choices:["Pahiyas Festival","Masskara Festival","Panagbenga"], answer:0},
-  {q:"Saang lungsod ginaganap ang MassKara Festival?", choices:["Bacolod City","Davao City","Baguio City"], answer:0},
-  {q:"Anong taunang Festival ng mga bulaklak ang ginaganap sa Baguio?", choices:["Panagbenga Festival","Kadayawan","Dinagyang"], answer:0},
-  {q:"Anong Festival sa Iloilo ang parangal din kay Santo Niño?", choices:["Dinagyang Festival","Ati-Atihan","Pahiyas"], answer:0},
-  {q:"Anong putahe ang binubuo ng manok o baboy na niluto sa suka, toyo, bawang, at paminta?", choices:["Adobo","Sinigang","Kare-kare"], answer:0},
-  {q:"Anong putahe ang maasim na sabaw mula sa sampalok o iba pang maasim na sangkap?", choices:["Sinigang","Nilaga","Bulalo"], answer:0},
-  {q:"Anong tradisyonal na sayaw ang gumagamit ng dalawang kawayan na pinagsasalit-salit habang sumasayaw?", choices:["Tinikling","Pandanggo sa Ilaw","Cariñosa"], answer:0},
-  {q:"Anong sayaw ang gumagamit ng mga ilaw/lampara na balanse sa ulo at kamay ng mananayaw?", choices:["Pandanggo sa Ilaw","Tinikling","Singkil"], answer:0},
-  {q:"Anong sayaw mula Mindanao ang gumagamit ng apat na kawayan bilang palakpakan?", choices:["Singkil","Tinikling","Itik-Itik"], answer:0},
-  {q:"Anong anyo ng panitikan ang Ibong Adarna?", choices:["Korido (epiko sa tula)","Nobela","Dula"], answer:0},
-  {q:"Anong tawag sa tradisyonal na bahay na gawa sa kawayan at kugon, nakatayo sa poste?", choices:["Bahay Kubo","Bahay na Bato","Kamalig"], answer:0},
-  {q:"Anong gitarang Pilipino ang may labing-apat na kwerdas at mas maliit kaysa karaniwang gitara?", choices:["Bandurria","Rondalla","Kutyapi"], answer:0},
-  {q:"Anong instrumento ang binubuo ng hanay ng maliliit na gong, ginagamit ng mga Maguindanao/Maranao?", choices:["Kulintang","Rondalla","Bandurria"], answer:0},
-  {q:"Anong katutubong pagsulat ng mga sinaunang Pilipino bago dumating ang mga Espanyol?", choices:["Baybayin","Kanji","Hiragana"], answer:0},
-  {q:"Ilang titik mayroon ang makabagong alpabetong Filipino?", choices:["28","26","20"], answer:0},
-  {q:"Anong matamis na meryenda ang gawa sa dinurog na yelo, gatas, at iba't ibang matamis na sangkap?", choices:["Halo-halo","Taho","Buko Pandan"], answer:0},
-  // ---- Agham at Kalikasan (Science & Nature) ----
-  {q:"Ano ang tawag sa tubig na pinalamig hanggang maging solid?", choices:["Yelo","Singaw","Ulan"], answer:0},
-  {q:"Alin ang pinakamalamig sa mga ito?", choices:["Yelo","Tubig sa gripo","Init ng araw"], answer:0},
-  {q:"Alin ang tamang pagkakasunod mula pinakamaliit hanggang pinakamalaki?", choices:["Gramo, Kilo, Tonelada","Kilo, Gramo, Tonelada","Tonelada, Kilo, Gramo"], answer:0},
-  {q:"Alin sa mga ito ang yunit ng timbang?", choices:["Kilo","Litro","Metro"], answer:0},
-  {q:"Alin sa mga ito ang yunit ng dami ng likido?", choices:["Litro","Kilo","Metro"], answer:0},
-  // ---- Pamahalaan at Lipunan (Government & Society, evergreen facts only) ----
-  {q:"Ilang taon ang termino ng Pangulo ng Pilipinas?", choices:["6 taon","4 taon","5 taon"], answer:0},
-  {q:"Pwede bang muling tumakbo ang isang Pangulo ng Pilipinas pagkatapos ng isang termino?", choices:["Hindi na pwede (isang termino lang)","Pwede, isang beses pa","Pwede nang walang limitasyon"], answer:0},
-  {q:"Ilang sangay (branches) mayroon ang pamahalaan ng Pilipinas?", choices:["3 (Executive, Legislative, Judicial)","2","4"], answer:0},
-  {q:"Anong tawag sa mambabatas sa Kamara de Representante?", choices:["Kongresista","Senador","Gobernador"], answer:0},
-  {q:"Ilang Senador mayroon sa Senado ng Pilipinas?", choices:["24","12","50"], answer:0},
-  {q:"Anong tawag sa opisyal na tirahan ng Pangulo ng Pilipinas?", choices:["Malacañang Palace","Batasang Pambansa","Senado"], answer:0},
-  {q:"Anong taon idineklara ang kasalukuyang (1987) Saligang Batas ng Pilipinas?", choices:["1987","1986","1935"], answer:0},
-  {q:"Ilang taong gulang pataas ang pwedeng bumoto sa Pilipinas?", choices:["18 taong gulang pataas","21 taong gulang pataas","16 taong gulang pataas"], answer:0},
-  {q:"Anong edukasyong programa ng gobyerno ang sumasaklaw mula Kindergarten hanggang Grade 12?", choices:["K to 12 Program","Alternative Learning System","DepEd Commons"], answer:0},
-  {q:"Anong programa ng gobyerno ang nagbibigay ng cash assistance sa mahihirap na pamilya?", choices:["Pantawid Pamilyang Pilipino Program (4Ps)","SSS","PhilHealth"], answer:0},
-  {q:"Anong ahensya ng gobyerno ang responsable sa national health insurance ng mga Pilipino?", choices:["PhilHealth","SSS","Pag-IBIG"], answer:0},
-  {q:"Anong ahensya ang namamahala sa pabahay/housing loan ng mga empleyado?", choices:["Pag-IBIG Fund","SSS","GSIS"], answer:0},
-  {q:"Anong ahensya ang pondo ng pensyon ng mga pribadong empleyado?", choices:["SSS (Social Security System)","GSIS","Pag-IBIG"], answer:0},
-  {q:"Anong ahensya ang pondo ng pensyon ng mga government employee?", choices:["GSIS","SSS","Pag-IBIG"], answer:0},
-  {q:"Anong pera ang ginagamit sa Pilipinas?", choices:["Piso","Dolyar","Ringgit"], answer:0},
-  {q:"Sino ang mga nasa lumang 500-piso bill (dilaw ang kulay)?", choices:["Ninoy at Cory Aquino","Jose Rizal","Andres Bonifacio"], answer:0},
-  {q:"Anong simbolo ang nasa gitna ng bandila ng Pilipinas?", choices:["Araw na may walong sinag at tatlong bituin","Buwan at bituin","Agila"], answer:0},
-  {q:"Anong organisasyon ng mga bansa sa Timog-Silangang Asya ang kasapi ang Pilipinas?", choices:["ASEAN","NATO","European Union"], answer:0},
-  {q:"Anong taon itinatag ang ASEAN?", choices:["1967","1945","1986"], answer:0},
-  {q:"Anong pandaigdigang organisasyon ang kasapi ang Pilipinas bilang isa sa founding members noong 1945?", choices:["United Nations","WHO","WTO"], answer:0},
-  {q:"Anong orihinal na pangalan ang itinawag ng mga Espanyol sa Pilipinas, parangal kay Haring Philip II?", choices:["Las Islas Filipinas","Las Islas Marianas","Nueva España"], answer:0},
-  // ---- Isports (Sports) ----
-  {q:"Sino ang kilalang Pilipinong boksingero na naging World Champion sa walong magkaibang weight division?", choices:["Manny Pacquiao","Gabriel Elorde","Flash Elorde"], answer:0},
-  {q:"Anong isport ang opisyal na pambansang isport ng Pilipinas (2009)?", choices:["Arnis","Basketball","Sepak Takraw"], answer:0},
-  {q:"Anong palakasan ang pinakasikat/pinaka-popular sa Pilipinas?", choices:["Basketball","Baseball","Rugby"], answer:0},
-  {q:"Sino ang unang Pilipinong nanalo ng Olympic gold medal, sa weightlifting noong Tokyo 2020?", choices:["Hidilyn Diaz","Manny Pacquiao","Efren Reyes"], answer:0},
-  {q:"Sino ang kilalang Pilipinong world champion sa billiards/pool, tinaguriang 'The Magician'?", choices:["Efren Reyes","Django Bustamante","Dennis Orcollo"], answer:0},
-  // ---- Sari-sari Store (dating laman, pinanatili para sa flavor) ----
-  {q:"Ilang litro ang laman ng isang standard na pitsel ng tubig dito sa Pilipinas?", choices:["10 litro","5 litro","20 litro"], answer:0},
-  {q:"Alin sa mga ito ang HINDI karaniwang paraan ng pagbabayad sa sari-sari store?", choices:["Cryptocurrency","Cash","Utang/listahan"], answer:0},
-  {q:"Ano ang tawag sa paninda na binibili ng tingi-tingi (hindi buo/bulto)?", choices:["Tingi","Wholesale","Bulto"], answer:0},
-  {q:"Ano ang katawagan sa resibo o listahan ng utang sa tindahan?", choices:["Listahan ng utang","Resibo lang","Invoice"], answer:0},
-  {q:"Ano ang tawag sa pera na isinusuklian sa customer?", choices:["Sukli","Puhunan","Kita"], answer:0},
-  {q:"Alin sa mga ito ang hindi parte ng isang karaniwang sari-sari store?", choices:["Swimming pool","Timbangan","Ref o chiller"], answer:0},
-  {q:"Anong oras karaniwang nagbubukas ang mga sari-sari store sa umaga?", choices:["Madaling-araw o maaga","Tanghali","Gabi lang"], answer:0},
-  {q:"Ano ang tawag sa paulit-ulit na suki o regular na customer?", choices:["Suki","Bagong customer","Estranghero"], answer:0},
-  {q:"Ano ang tawag sa paninda na nangangailangan ng refrigeration o pagpapalamig?", choices:["Perishable/Nabubulok","Dry goods","Hardware"], answer:0},
-  {q:"Alin ang karaniwang gamit ng plastic bag sa tindahan?", choices:["Pambalot ng paninda","Panlinis ng sahig","Pantimbang"], answer:0},
-  {q:"Ano ang tawag sa aparato na ginagamit para malaman ang presyo ng paninda?", choices:["Timbangan o price tag","Telepono","Relo"], answer:0},
-  {q:"Ano ang tawag kapag mas marami ang paninda kaysa sa kinakailangan?", choices:["Sobra/Stock","Kulang","Ubos"], answer:0},
-];
+const TRIVIA_SPIN_EVERY_N_LEVELS = 30;
+const TRIVIA_TIME_LIMIT_SECONDS = 180;  // display/UX only - server doesn't gate points on speed, only on a perfect score (see app.py)
 
+function triviaProgressUrl(){
+  return IS_STAFF ? "/api/staff/trivia/progress" : ("/api/customer/trivia/progress" + (RESELLER_ID ? ("?reseller_id=" + encodeURIComponent(RESELLER_ID)) : ""));
+}
+function triviaLevelUrl(level){
+  return IS_STAFF ? `/api/staff/trivia/level/${level}` : (`/api/customer/trivia/level/${level}` + (RESELLER_ID ? `?reseller_id=${encodeURIComponent(RESELLER_ID)}` : ''));
+}
+function triviaSubmitUrl(level){
+  return IS_STAFF ? `/api/staff/trivia/level/${level}/submit` : `/api/customer/trivia/level/${level}/submit`;
+}
+function triviaCheckAnswerUrl(level){
+  return IS_STAFF ? `/api/staff/trivia/level/${level}/check_answer` : `/api/customer/trivia/level/${level}/check_answer`;
+}
+const TRIVIA_SPIN_URL = "/api/customer/trivia/spin";
+
+let triviaProgressData = { unlocked_level: 1, completed_levels: [], spins_available: 0 };
 let currentTriviaLevel = null;
-let triviaQuestions = [];
+let triviaQuestions = [];   // [{q, choices}] - no answer key, that stays server-side
 let triviaQIndex = 0;
 let triviaScore = 0;
+let triviaAnswers = [];     // chosen choice index per question, in order - sent to /submit for the authoritative server-side score
 let triviaTimerInterval = null;
 let triviaSecondsLeft = TRIVIA_TIME_LIMIT_SECONDS;
 
+async function loadTriviaProgress(){
+  const gridEl = document.getElementById('trivLevelGrid');
+  try{
+    const res = await fetch(triviaProgressUrl());
+    const data = await res.json();
+    if(data.ok) triviaProgressData = data;
+  }catch(e){
+    // keep whatever was already loaded (or the level-1-only default) -
+    // the grid below still renders something playable even offline.
+  }
+  renderTriviaLevelGrid();
+  renderTriviaSpinBanner();
+}
+
 function renderTriviaLevelGrid(){
   const el = document.getElementById('trivLevelGrid');
+  const unlocked = triviaProgressData.unlocked_level || 1;
+  const completedSet = new Set(triviaProgressData.completed_levels || []);
   let html = '';
   for(let lvl=1; lvl<=TRIVIA_TOTAL_LEVELS; lvl++){
-    html += `<button class="level-btn" onclick="openTriviaLevel(${lvl})">${lvl}</button>`;
+    const done = completedSet.has(lvl);
+    const locked = lvl > unlocked;
+    const cls = 'level-btn' + (done ? ' done' : '') + (locked ? ' locked' : '');
+    const label = done ? '✓' : (locked ? '🔒' : lvl);
+    html += locked
+      ? `<button class="${cls}" disabled title="Tapusin muna ang Level ${lvl-1}">${label}</button>`
+      : `<button class="${cls}" onclick="openTriviaLevel(${lvl})">${label}</button>`;
   }
   el.innerHTML = html;
 }
 
-function sampleTriviaQuestions(){
-  // boss's request, Oct 3: "gawing random mga tanong" - a fresh,
-  // non-repeating random sample every time a level (re)starts, never
-  // a fixed set per level number. See the scope note above TRIVIA_BANK
-  // for why 1000 levels draw from one shared pool instead of 20,000
-  // hand-written questions.
-  const idxs = shuffle(Array.from({length: TRIVIA_BANK.length}, (_,i)=>i));
-  const count = Math.min(TRIVIA_QUESTIONS_PER_LEVEL, TRIVIA_BANK.length);
-  return idxs.slice(0, count).map(i => TRIVIA_BANK[i]);
+function renderTriviaSpinBanner(){
+  const el = document.getElementById('trivSpinBanner');
+  if(!el) return;
+  const spins = triviaProgressData.spins_available || 0;
+  if(!IS_STAFF && spins > 0){
+    el.style.display = 'block';
+    el.innerHTML = `🎰 May ${spins} FREE SPIN ka (bonus sa every ${TRIVIA_SPIN_EVERY_N_LEVELS} levels)! <br><button class="action-link" style="margin-top:8px" onclick="doTriviaSpin()">🎰 I-spin!</button>`;
+  } else {
+    el.style.display = 'none';
+  }
 }
 
-function openTriviaLevel(level){
+async function doTriviaSpin(){
+  const el = document.getElementById('trivSpinBanner');
+  const btn = el.querySelector('button');
+  if(btn){ btn.disabled = true; btn.classList.add('spin-rolling'); btn.textContent = '🎰 Sumpi-spin...'; }
+  try{
+    const res = await fetch(TRIVIA_SPIN_URL, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reseller_id: RESELLER_ID}),
+    });
+    const data = await res.json();
+    if(data.ok){
+      triviaProgressData.spins_available = data.spins_available;
+      el.innerHTML = data.won
+        ? `🎉 Panalo! +${data.points_awarded} point sa loyalty points mo!`
+        : `😅 Walang panalo this time - sige lang, susunod na 30-level milestone ulit!`;
+      setTimeout(() => renderTriviaSpinBanner(), 2800);
+    } else {
+      renderTriviaSpinBanner();
+    }
+  }catch(e){
+    renderTriviaSpinBanner();
+  }
+}
+
+async function openTriviaLevel(level){
+  if(level < 1 || level > TRIVIA_TOTAL_LEVELS) return;
   currentTriviaLevel = level;
   document.getElementById('triviaLevelListView').style.display = 'none';
   document.getElementById('triviaRoundView').style.display = 'block';
   document.getElementById('trivLevelLabel').textContent = `Level ${level} / ${TRIVIA_TOTAL_LEVELS}`;
-  startTriviaRound();
+  await startTriviaRound();
 }
 
 function backToTriviaLevels(){
   stopTriviaTimer();
   document.getElementById('triviaRoundView').style.display = 'none';
   document.getElementById('triviaLevelListView').style.display = 'block';
+  loadTriviaProgress();  // refresh lock/done states - may bagong na-unlock kung kakatapos lang
 }
 
-function startTriviaRound(){
-  triviaQuestions = sampleTriviaQuestions();
-  triviaQIndex = 0;
-  triviaScore = 0;
+async function startTriviaRound(){
   document.getElementById('triviaRoundDone').style.display = 'none';
   document.getElementById('triviaTimeoutMsg').style.display = 'none';
   document.getElementById('triviaCard').style.display = 'block';
-  renderTriviaQuestion();
-  startTriviaTimer();
+  document.getElementById('triviaProgress').textContent = 'Loading...';
+  document.getElementById('triviaQ').textContent = '';
+  document.getElementById('triviaChoices').innerHTML = '';
+  stopTriviaTimer();
+  try{
+    const res = await fetch(triviaLevelUrl(currentTriviaLevel));
+    const data = await res.json();
+    if(!data.ok){
+      document.getElementById('triviaProgress').textContent = data.error || 'Hindi ma-buksan ang level.';
+      return;
+    }
+    triviaQuestions = data.questions;
+    triviaQIndex = 0;
+    triviaScore = 0;
+    triviaAnswers = new Array(triviaQuestions.length).fill(null);
+    renderTriviaQuestion();
+    startTriviaTimer();
+  }catch(e){
+    document.getElementById('triviaProgress').textContent = 'Error sa koneksyon - subukan ulit.';
+  }
 }
 
 function startTriviaTimer(){
@@ -16053,8 +16019,8 @@ function updateTriviaTimerLabel(){
 function onTriviaTimeout(){
   // boss's request, Oct 3: "pag naubos oras babalik sa unang tanong sa
   // level na yun at magiging bago ulit ang tanong" - restart the SAME
-  // level number from question 1, with a FRESH randomized set of
-  // questions (never the literal same 20 again).
+  // level number from question 1, with a FRESH randomized set fetched
+  // from the server (never the literal same 20 again).
   document.getElementById('triviaCard').style.display = 'none';
   document.getElementById('triviaTimeoutMsg').style.display = 'block';
   setTimeout(() => startTriviaRound(), 1800);
@@ -16068,16 +16034,34 @@ function renderTriviaQuestion(){
   choicesEl.innerHTML = item.choices.map((c,i)=>`<div class="triv-option" id="triv-opt-${i}" onclick="answerTrivia(${i})">${String.fromCharCode(65+i)}. ${c}</div>`).join('');
 }
 
-function answerTrivia(i){
+async function answerTrivia(i){
   if(!triviaQuestions.length) return;
-  const item = triviaQuestions[triviaQIndex];
+  triviaAnswers[triviaQIndex] = i;
   document.querySelectorAll('.triv-option').forEach(el => el.onclick = null);
-  if(i === item.answer){
+  // boss's original Trivia design flashed correct/wrong instantly -
+  // kept here via a tiny server round-trip (check_answer) instead of
+  // a local answer key, since the key no longer ships to the browser.
+  let correct = false, correctIndex = null;
+  try{
+    const res = await fetch(triviaCheckAnswerUrl(currentTriviaLevel), {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reseller_id: RESELLER_ID, position: triviaQIndex, choice: i}),
+    });
+    const data = await res.json();
+    if(data.ok){ correct = data.correct; correctIndex = data.correct_index; }
+  }catch(e){ /* network hiccup - just advance without the color flash */ }
+
+  if(correct){
     triviaScore++;
-    document.getElementById(`triv-opt-${i}`).classList.add('correct');
+    const optEl = document.getElementById(`triv-opt-${i}`);
+    if(optEl) optEl.classList.add('correct');
   } else {
-    document.getElementById(`triv-opt-${i}`).classList.add('wrong');
-    document.getElementById(`triv-opt-${item.answer}`).classList.add('correct');
+    const wrongEl = document.getElementById(`triv-opt-${i}`);
+    if(wrongEl) wrongEl.classList.add('wrong');
+    if(correctIndex !== null){
+      const rightEl = document.getElementById(`triv-opt-${correctIndex}`);
+      if(rightEl) rightEl.classList.add('correct');
+    }
   }
   setTimeout(() => {
     triviaQIndex++;
@@ -16089,23 +16073,51 @@ function answerTrivia(i){
   }, 700);
 }
 
-function finishTriviaRound(){
+async function finishTriviaRound(){
   stopTriviaTimer();
   document.getElementById('triviaCard').style.display = 'none';
   document.getElementById('triviaRoundDone').style.display = 'block';
   document.getElementById('triviaScoreFinal').textContent = `${triviaScore} / ${triviaQuestions.length}`;
-  document.getElementById('trivNextLevelBtn').style.display = currentTriviaLevel < TRIVIA_TOTAL_LEVELS ? 'block' : 'none';
-}
-
-function goToNextTriviaLevel(){
-  if(currentTriviaLevel < TRIVIA_TOTAL_LEVELS){
-    currentTriviaLevel++;
-    document.getElementById('trivLevelLabel').textContent = `Level ${currentTriviaLevel} / ${TRIVIA_TOTAL_LEVELS}`;
-    startTriviaRound();
+  document.getElementById('trivNextLevelBtn').style.display = 'none';
+  const unlockMsgEl = document.getElementById('triviaUnlockMsg');
+  unlockMsgEl.textContent = 'Kinukumpirma...';
+  try{
+    // boss's request, Oct 3: "dapat nakalock muna yung next level" -
+    // the server independently recomputes the score from the real
+    // answer key (using triviaAnswers below) and ONLY unlocks the next
+    // level / grants a spin when it's a genuine PERFECT 20/20 -
+    // whatever triviaScore says locally is just for display, this call
+    // is what actually counts.
+    const res = await fetch(triviaSubmitUrl(currentTriviaLevel), {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reseller_id: RESELLER_ID, answers: triviaAnswers}),
+    });
+    const data = await res.json();
+    if(data.ok){
+      triviaProgressData.unlocked_level = data.unlocked_level;
+      triviaProgressData.spins_available = data.spins_available != null ? data.spins_available : triviaProgressData.spins_available;
+      if(data.all_correct){
+        unlockMsgEl.style.color = '#059669';
+        unlockMsgEl.textContent = data.milestone_reached
+          ? `🎉 Perfect! Naka-unlock ang Level ${currentTriviaLevel+1} + may bago kang FREE SPIN!`
+          : `🎉 Perfect! Naka-unlock na ang Level ${currentTriviaLevel+1}.`;
+        if(currentTriviaLevel < TRIVIA_TOTAL_LEVELS) document.getElementById('trivNextLevelBtn').style.display = 'block';
+      } else {
+        unlockMsgEl.style.color = '#c2410c';
+        unlockMsgEl.textContent = `${data.score}/${data.total} lang - kailangan PERFECT 20/20 para ma-unlock ang susunod. Subukan ulit!`;
+      }
+    } else {
+      unlockMsgEl.style.color = '#c2410c';
+      unlockMsgEl.textContent = data.error || 'May error sa pag-save ng score.';
+    }
+  }catch(e){
+    unlockMsgEl.style.color = '#c2410c';
+    unlockMsgEl.textContent = 'Error sa koneksyon - hindi na-save ang score.';
   }
 }
 
 /* ===================== SOLITAIRE ===================== */
+
 const SUITS = ['♠','♥','♦','♣'];
 const SUIT_COLOR = ['black','red','red','black'];
 const RANK_LABELS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
@@ -16290,6 +16302,200 @@ CROSSWORD_STALE_RESET_SECONDS = 3600  # 1 hour
 CROSSWORD_HARD_MODE_START_LEVEL = 500  # boss's request, Oct 2: "level 500 pataas 5 points, mahihirap na yung words"
 CROSSWORD_POINTS_NORMAL = 1
 CROSSWORD_POINTS_HARD = 5
+
+TRIVIA_BANK = [
+    # Ported 1:1 from the client-side TRIVIA_BANK in GAMES_HUB_HTML's
+    # <script> (same 117 verified evergreen Q&A items) so the server can
+    # validate submitted answers itself instead of trusting the browser -
+    # see _trivia_sample_question_indices() and api_customer_trivia_submit.
+    # IMPORTANT: keep this list and the JS TRIVIA_BANK in sync if either
+    # is ever edited (add/remove a question in BOTH places).
+    {"q": "Sino ang pambansang bayani ng Pilipinas, sumulat ng Noli Me Tangere?", "choices": ["Jose Rizal", "Andres Bonifacio", "Emilio Aguinaldo"], "answer": 0},
+    {"q": "Sino ang nagtatag ng Katipunan noong 1892?", "choices": ["Jose Rizal", "Andres Bonifacio", "Apolinario Mabini"], "answer": 1},
+    {"q": "Anong taon idineklara ang kalayaan ng Pilipinas mula sa Espanya sa Kawit, Cavite?", "choices": ["1898", "1901", "1946"], "answer": 0},
+    {"q": "Sino ang unang Pangulo ng Republika ng Pilipinas?", "choices": ["Emilio Aguinaldo", "Manuel Quezon", "Sergio Osmeña"], "answer": 0},
+    {"q": "Sino ang sumulat ng El Filibusterismo?", "choices": ["Andres Bonifacio", "Jose Rizal", "Marcelo del Pilar"], "answer": 1},
+    {"q": "Anong taon binaril si Jose Rizal sa Bagumbayan?", "choices": ["1896", "1898", "1901"], "answer": 0},
+    {"q": "Saan isinilang si Jose Rizal?", "choices": ["Calamba, Laguna", "Kawit, Cavite", "Malolos, Bulacan"], "answer": 0},
+    {"q": "Anong taon dumating si Ferdinand Magellan sa Pilipinas?", "choices": ["1521", "1565", "1898"], "answer": 0},
+    {"q": "Sino ang pinunong Pilipino na pumatay kay Magellan sa Labanan sa Mactan?", "choices": ["Lapu-Lapu", "Humabon", "Sikatuna"], "answer": 0},
+    {"q": "Sino ang Espanyol na nagtatag ng unang permanenteng kolonya sa Cebu noong 1565?", "choices": ["Miguel López de Legazpi", "Ferdinand Magellan", "Juan de Salcedo"], "answer": 0},
+    {"q": "Sino ang tinaguriang 'Utak ng Himagsikan' (Brains of the Revolution)?", "choices": ["Apolinario Mabini", "Emilio Jacinto", "Antonio Luna"], "answer": 0},
+    {"q": "Sino ang pintor ng kilalang obrang 'Spoliarium'?", "choices": ["Juan Luna", "Antonio Luna", "Fernando Amorsolo"], "answer": 0},
+    {"q": "Sino ang unang Pangulo ng Commonwealth ng Pilipinas?", "choices": ["Manuel L. Quezon", "Sergio Osmeña", "Manuel Roxas"], "answer": 0},
+    {"q": "Anong taon dumating ang mga Hapones at sinalakay ang Pilipinas noong Ikalawang Digmaang Pandaigdig?", "choices": ["1941", "1898", "1972"], "answer": 0},
+    {"q": "Saang lalawigan naganap ang Death March noong 1942?", "choices": ["Bataan", "Batangas", "Bulacan"], "answer": 0},
+    {"q": "Sino ang Heneral ng US na nangakong 'I shall return' nang umalis sa Pilipinas noong 1942?", "choices": ["Douglas MacArthur", "Dwight Eisenhower", "George Patton"], "answer": 0},
+    {"q": "Saan bumalik si Heneral MacArthur noong 1944 para simulan ang paglaya ng Pilipinas?", "choices": ["Leyte", "Luzon", "Mindanao"], "answer": 0},
+    {"q": "Anong taon binigyan ng tunay na kasarinlan ang Pilipinas mula sa Estados Unidos?", "choices": ["1946", "1935", "1898"], "answer": 0},
+    {"q": "Sino ang Pangulong nanungkulan nang idineklara ang Batas Militar noong 1972?", "choices": ["Ferdinand Marcos Sr.", "Diosdado Macapagal", "Corazon Aquino"], "answer": 0},
+    {"q": "Sino ang unang babaeng Pangulo ng Pilipinas?", "choices": ["Corazon Aquino", "Gloria Macapagal-Arroyo", "Imelda Marcos"], "answer": 0},
+    {"q": "Anong taon namatay si Ninoy Aquino sa paliparan ng Maynila?", "choices": ["1983", "1986", "1981"], "answer": 0},
+    {"q": "Anong kilusan ang nagpabagsak sa diktaduryang Marcos noong 1986?", "choices": ["EDSA People Power Revolution", "Propaganda Movement", "Cry of Pugad Lawin"], "answer": 0},
+    {"q": "Anong taon inilipat ang opisyal na Araw ng Kalayaan mula July 4 patungong June 12?", "choices": ["1962", "1946", "1986"], "answer": 0},
+    {"q": "Sino ang sumulat ng Florante at Laura?", "choices": ["Francisco Balagtas", "Jose Rizal", "Lope K. Santos"], "answer": 0},
+    {"q": "Anong pangkat ang Propaganda Movement, naglalayong magkaroon ng repormang legal mula sa Espanya?", "choices": ["Mga Ilustrado", "Mga Katipunero", "Mga Prayle"], "answer": 0},
+    {"q": "Anong unibersidad sa Maynila ang itinuturing na pinakamatandang unibersidad sa Asya, itinatag noong 1611?", "choices": ["University of Santo Tomas", "University of the Philippines", "Ateneo de Manila"], "answer": 0},
+    {"q": "Anong pader-bayan sa Maynila ang itinayo ng mga Espanyol bilang sentro ng kolonyal na pamahalaan?", "choices": ["Intramuros", "Binondo", "Ermita"], "answer": 0},
+    {"q": "Anong distrito sa Maynila ang itinuturing na pinakamatandang Chinatown sa mundo?", "choices": ["Binondo", "Intramuros", "Quiapo"], "answer": 0},
+    {"q": "Anong simbahan sa Intramuros ang Baroque-style at UNESCO World Heritage Site?", "choices": ["San Agustin Church", "Quiapo Church", "Manila Cathedral"], "answer": 0},
+    {"q": "Ilang taon humigit-kumulang ang pananakop ng Espanya sa Pilipinas?", "choices": ["Mga 300 taon", "Mga 100 taon", "Mga 50 taon"], "answer": 0},
+    {"q": "Ano ang pinakamalaking isla sa Pilipinas?", "choices": ["Luzon", "Mindanao", "Palawan"], "answer": 0},
+    {"q": "Humigit-kumulang ilang isla ang bumubuo sa Pilipinas?", "choices": ["Mga 7,000+", "Mga 1,000", "Mga 500"], "answer": 0},
+    {"q": "Alin ang pinakamataas na bundok sa Pilipinas?", "choices": ["Mount Apo", "Mount Pulag", "Mount Mayon"], "answer": 0},
+    {"q": "Saan matatagpuan ang Mount Apo?", "choices": ["Davao", "Benguet", "Albay"], "answer": 0},
+    {"q": "Alin ang kilalang bulkang halos perpekto ang hugis-kono sa Albay?", "choices": ["Mayon Volcano", "Taal Volcano", "Pinatubo"], "answer": 0},
+    {"q": "Alin ang pinakamahabang ilog sa Pilipinas?", "choices": ["Cagayan River", "Pasig River", "Agno River"], "answer": 0},
+    {"q": "Saan matatagpuan ang Chocolate Hills?", "choices": ["Bohol", "Cebu", "Palawan"], "answer": 0},
+    {"q": "Anong lungsod ang tinaguriang 'Queen City of the South'?", "choices": ["Cebu City", "Davao City", "Iloilo City"], "answer": 0},
+    {"q": "Anong isla sa pinakahilagang bahagi ng Pilipinas, malapit sa Taiwan?", "choices": ["Batanes", "Palawan", "Mindoro"], "answer": 0},
+    {"q": "Saang lalawigan matatagpuan ang Banaue Rice Terraces?", "choices": ["Ifugao", "Benguet", "Mountain Province"], "answer": 0},
+    {"q": "Alin ang pinakamalaking lawa sa Pilipinas?", "choices": ["Laguna de Bay", "Taal Lake", "Lake Lanao"], "answer": 0},
+    {"q": "Saan matatagpuan ang Lake Lanao?", "choices": ["Lanao del Sur", "Bukidnon", "Palawan"], "answer": 0},
+    {"q": "Anong karagatan ang nasa kanlurang bahagi ng Pilipinas?", "choices": ["West Philippine Sea", "Atlantic Ocean", "Caribbean Sea"], "answer": 0},
+    {"q": "Alin ang opisyal na kabisera ng Pilipinas?", "choices": ["Maynila", "Quezon City", "Makati"], "answer": 0},
+    {"q": "Anong puno ang itinuturing na pambansang puno ng Pilipinas?", "choices": ["Narra", "Mahogany", "Molave"], "answer": 0},
+    {"q": "Anong bulaklak ang pambansang bulaklak ng Pilipinas?", "choices": ["Sampaguita", "Rosas", "Gumamela"], "answer": 0},
+    {"q": "Anong ibon ang pambansang ibon ng Pilipinas?", "choices": ["Philippine Eagle", "Maya", "Agila"], "answer": 0},
+    {"q": "Anong isda ang pambansang isda ng Pilipinas?", "choices": ["Bangus (Milkfish)", "Tilapia", "Tulingan"], "answer": 0},
+    {"q": "Saan pinaka-matatagpuan ang Philippine Eagle?", "choices": ["Mindanao", "Palawan", "Batanes"], "answer": 0},
+    {"q": "Saang lungsod matatagpuan ang Hundred Islands National Park?", "choices": ["Alaminos, Pangasinan", "Puerto Princesa", "El Nido"], "answer": 0},
+    {"q": "Anong UNESCO World Heritage Site sa Palawan ang may underground river?", "choices": ["Puerto Princesa Subterranean River", "Tubbataha Reefs", "El Nido Lagoon"], "answer": 0},
+    {"q": "Anong marine park sa Sulu Sea ang UNESCO World Heritage Site, kilala sa coral reefs?", "choices": ["Tubbataha Reefs Natural Park", "Apo Reef", "Hundred Islands"], "answer": 0},
+    {"q": "Anong bagong rehiyon ang naitatag noong 2019 sa Mindanao matapos ang plebisito?", "choices": ["BARMM (Bangsamoro)", "ARMM", "CARAGA"], "answer": 0},
+    {"q": "Anong taon sumabog ang Mount Pinatubo, isa sa pinakamalaking pagsabog ng bulkan noong ika-20 siglo?", "choices": ["1991", "1986", "2000"], "answer": 0},
+    {"q": "Anong hayop na pinakamaliit na kalabaw sa mundo ang endemiko sa Mindoro?", "choices": ["Tamaraw", "Carabao", "Kalabaw"], "answer": 0},
+    {"q": "Anong malaking isda ang madalas makita sa Donsol, Sorsogon, tinatawag ding 'Butanding'?", "choices": ["Whale Shark", "Dolphin", "Manta Ray"], "answer": 0},
+    {"q": "Anong kilalang pista sa Cebu ang ginaganap taon-taon bilang parangal kay Santo Niño?", "choices": ["Sinulog Festival", "Ati-Atihan", "Pahiyas"], "answer": 0},
+    {"q": "Saan ginaganap ang Ati-Atihan Festival?", "choices": ["Kalibo, Aklan", "Cebu", "Iloilo"], "answer": 0},
+    {"q": "Anong pista sa Lucban, Quezon ang kilala sa palamuting kakanin at gulay sa mga bahay?", "choices": ["Pahiyas Festival", "Masskara Festival", "Panagbenga"], "answer": 0},
+    {"q": "Saang lungsod ginaganap ang MassKara Festival?", "choices": ["Bacolod City", "Davao City", "Baguio City"], "answer": 0},
+    {"q": "Anong taunang Festival ng mga bulaklak ang ginaganap sa Baguio?", "choices": ["Panagbenga Festival", "Kadayawan", "Dinagyang"], "answer": 0},
+    {"q": "Anong Festival sa Iloilo ang parangal din kay Santo Niño?", "choices": ["Dinagyang Festival", "Ati-Atihan", "Pahiyas"], "answer": 0},
+    {"q": "Anong putahe ang binubuo ng manok o baboy na niluto sa suka, toyo, bawang, at paminta?", "choices": ["Adobo", "Sinigang", "Kare-kare"], "answer": 0},
+    {"q": "Anong putahe ang maasim na sabaw mula sa sampalok o iba pang maasim na sangkap?", "choices": ["Sinigang", "Nilaga", "Bulalo"], "answer": 0},
+    {"q": "Anong tradisyonal na sayaw ang gumagamit ng dalawang kawayan na pinagsasalit-salit habang sumasayaw?", "choices": ["Tinikling", "Pandanggo sa Ilaw", "Cariñosa"], "answer": 0},
+    {"q": "Anong sayaw ang gumagamit ng mga ilaw/lampara na balanse sa ulo at kamay ng mananayaw?", "choices": ["Pandanggo sa Ilaw", "Tinikling", "Singkil"], "answer": 0},
+    {"q": "Anong sayaw mula Mindanao ang gumagamit ng apat na kawayan bilang palakpakan?", "choices": ["Singkil", "Tinikling", "Itik-Itik"], "answer": 0},
+    {"q": "Anong anyo ng panitikan ang Ibong Adarna?", "choices": ["Korido (epiko sa tula)", "Nobela", "Dula"], "answer": 0},
+    {"q": "Anong tawag sa tradisyonal na bahay na gawa sa kawayan at kugon, nakatayo sa poste?", "choices": ["Bahay Kubo", "Bahay na Bato", "Kamalig"], "answer": 0},
+    {"q": "Anong gitarang Pilipino ang may labing-apat na kwerdas at mas maliit kaysa karaniwang gitara?", "choices": ["Bandurria", "Rondalla", "Kutyapi"], "answer": 0},
+    {"q": "Anong instrumento ang binubuo ng hanay ng maliliit na gong, ginagamit ng mga Maguindanao/Maranao?", "choices": ["Kulintang", "Rondalla", "Bandurria"], "answer": 0},
+    {"q": "Anong katutubong pagsulat ng mga sinaunang Pilipino bago dumating ang mga Espanyol?", "choices": ["Baybayin", "Kanji", "Hiragana"], "answer": 0},
+    {"q": "Ilang titik mayroon ang makabagong alpabetong Filipino?", "choices": ["28", "26", "20"], "answer": 0},
+    {"q": "Anong matamis na meryenda ang gawa sa dinurog na yelo, gatas, at iba't ibang matamis na sangkap?", "choices": ["Halo-halo", "Taho", "Buko Pandan"], "answer": 0},
+    {"q": "Ano ang tawag sa tubig na pinalamig hanggang maging solid?", "choices": ["Yelo", "Singaw", "Ulan"], "answer": 0},
+    {"q": "Alin ang pinakamalamig sa mga ito?", "choices": ["Yelo", "Tubig sa gripo", "Init ng araw"], "answer": 0},
+    {"q": "Alin ang tamang pagkakasunod mula pinakamaliit hanggang pinakamalaki?", "choices": ["Gramo, Kilo, Tonelada", "Kilo, Gramo, Tonelada", "Tonelada, Kilo, Gramo"], "answer": 0},
+    {"q": "Alin sa mga ito ang yunit ng timbang?", "choices": ["Kilo", "Litro", "Metro"], "answer": 0},
+    {"q": "Alin sa mga ito ang yunit ng dami ng likido?", "choices": ["Litro", "Kilo", "Metro"], "answer": 0},
+    {"q": "Ilang taon ang termino ng Pangulo ng Pilipinas?", "choices": ["6 taon", "4 taon", "5 taon"], "answer": 0},
+    {"q": "Pwede bang muling tumakbo ang isang Pangulo ng Pilipinas pagkatapos ng isang termino?", "choices": ["Hindi na pwede (isang termino lang)", "Pwede, isang beses pa", "Pwede nang walang limitasyon"], "answer": 0},
+    {"q": "Ilang sangay (branches) mayroon ang pamahalaan ng Pilipinas?", "choices": ["3 (Executive, Legislative, Judicial)", "2", "4"], "answer": 0},
+    {"q": "Anong tawag sa mambabatas sa Kamara de Representante?", "choices": ["Kongresista", "Senador", "Gobernador"], "answer": 0},
+    {"q": "Ilang Senador mayroon sa Senado ng Pilipinas?", "choices": ["24", "12", "50"], "answer": 0},
+    {"q": "Anong tawag sa opisyal na tirahan ng Pangulo ng Pilipinas?", "choices": ["Malacañang Palace", "Batasang Pambansa", "Senado"], "answer": 0},
+    {"q": "Anong taon idineklara ang kasalukuyang (1987) Saligang Batas ng Pilipinas?", "choices": ["1987", "1986", "1935"], "answer": 0},
+    {"q": "Ilang taong gulang pataas ang pwedeng bumoto sa Pilipinas?", "choices": ["18 taong gulang pataas", "21 taong gulang pataas", "16 taong gulang pataas"], "answer": 0},
+    {"q": "Anong edukasyong programa ng gobyerno ang sumasaklaw mula Kindergarten hanggang Grade 12?", "choices": ["K to 12 Program", "Alternative Learning System", "DepEd Commons"], "answer": 0},
+    {"q": "Anong programa ng gobyerno ang nagbibigay ng cash assistance sa mahihirap na pamilya?", "choices": ["Pantawid Pamilyang Pilipino Program (4Ps)", "SSS", "PhilHealth"], "answer": 0},
+    {"q": "Anong ahensya ng gobyerno ang responsable sa national health insurance ng mga Pilipino?", "choices": ["PhilHealth", "SSS", "Pag-IBIG"], "answer": 0},
+    {"q": "Anong ahensya ang namamahala sa pabahay/housing loan ng mga empleyado?", "choices": ["Pag-IBIG Fund", "SSS", "GSIS"], "answer": 0},
+    {"q": "Anong ahensya ang pondo ng pensyon ng mga pribadong empleyado?", "choices": ["SSS (Social Security System)", "GSIS", "Pag-IBIG"], "answer": 0},
+    {"q": "Anong ahensya ang pondo ng pensyon ng mga government employee?", "choices": ["GSIS", "SSS", "Pag-IBIG"], "answer": 0},
+    {"q": "Anong pera ang ginagamit sa Pilipinas?", "choices": ["Piso", "Dolyar", "Ringgit"], "answer": 0},
+    {"q": "Sino ang mga nasa lumang 500-piso bill (dilaw ang kulay)?", "choices": ["Ninoy at Cory Aquino", "Jose Rizal", "Andres Bonifacio"], "answer": 0},
+    {"q": "Anong simbolo ang nasa gitna ng bandila ng Pilipinas?", "choices": ["Araw na may walong sinag at tatlong bituin", "Buwan at bituin", "Agila"], "answer": 0},
+    {"q": "Anong organisasyon ng mga bansa sa Timog-Silangang Asya ang kasapi ang Pilipinas?", "choices": ["ASEAN", "NATO", "European Union"], "answer": 0},
+    {"q": "Anong taon itinatag ang ASEAN?", "choices": ["1967", "1945", "1986"], "answer": 0},
+    {"q": "Anong pandaigdigang organisasyon ang kasapi ang Pilipinas bilang isa sa founding members noong 1945?", "choices": ["United Nations", "WHO", "WTO"], "answer": 0},
+    {"q": "Anong orihinal na pangalan ang itinawag ng mga Espanyol sa Pilipinas, parangal kay Haring Philip II?", "choices": ["Las Islas Filipinas", "Las Islas Marianas", "Nueva España"], "answer": 0},
+    {"q": "Sino ang kilalang Pilipinong boksingero na naging World Champion sa walong magkaibang weight division?", "choices": ["Manny Pacquiao", "Gabriel Elorde", "Flash Elorde"], "answer": 0},
+    {"q": "Anong isport ang opisyal na pambansang isport ng Pilipinas (2009)?", "choices": ["Arnis", "Basketball", "Sepak Takraw"], "answer": 0},
+    {"q": "Anong palakasan ang pinakasikat/pinaka-popular sa Pilipinas?", "choices": ["Basketball", "Baseball", "Rugby"], "answer": 0},
+    {"q": "Sino ang unang Pilipinong nanalo ng Olympic gold medal, sa weightlifting noong Tokyo 2020?", "choices": ["Hidilyn Diaz", "Manny Pacquiao", "Efren Reyes"], "answer": 0},
+    {"q": "Sino ang kilalang Pilipinong world champion sa billiards/pool, tinaguriang 'The Magician'?", "choices": ["Efren Reyes", "Django Bustamante", "Dennis Orcollo"], "answer": 0},
+    {"q": "Ilang litro ang laman ng isang standard na pitsel ng tubig dito sa Pilipinas?", "choices": ["10 litro", "5 litro", "20 litro"], "answer": 0},
+    {"q": "Alin sa mga ito ang HINDI karaniwang paraan ng pagbabayad sa sari-sari store?", "choices": ["Cryptocurrency", "Cash", "Utang/listahan"], "answer": 0},
+    {"q": "Ano ang tawag sa paninda na binibili ng tingi-tingi (hindi buo/bulto)?", "choices": ["Tingi", "Wholesale", "Bulto"], "answer": 0},
+    {"q": "Ano ang katawagan sa resibo o listahan ng utang sa tindahan?", "choices": ["Listahan ng utang", "Resibo lang", "Invoice"], "answer": 0},
+    {"q": "Ano ang tawag sa pera na isinusuklian sa customer?", "choices": ["Sukli", "Puhunan", "Kita"], "answer": 0},
+    {"q": "Alin sa mga ito ang hindi parte ng isang karaniwang sari-sari store?", "choices": ["Swimming pool", "Timbangan", "Ref o chiller"], "answer": 0},
+    {"q": "Anong oras karaniwang nagbubukas ang mga sari-sari store sa umaga?", "choices": ["Madaling-araw o maaga", "Tanghali", "Gabi lang"], "answer": 0},
+    {"q": "Ano ang tawag sa paulit-ulit na suki o regular na customer?", "choices": ["Suki", "Bagong customer", "Estranghero"], "answer": 0},
+    {"q": "Ano ang tawag sa paninda na nangangailangan ng refrigeration o pagpapalamig?", "choices": ["Perishable/Nabubulok", "Dry goods", "Hardware"], "answer": 0},
+    {"q": "Alin ang karaniwang gamit ng plastic bag sa tindahan?", "choices": ["Pambalot ng paninda", "Panlinis ng sahig", "Pantimbang"], "answer": 0},
+    {"q": "Ano ang tawag sa aparato na ginagamit para malaman ang presyo ng paninda?", "choices": ["Timbangan o price tag", "Telepono", "Relo"], "answer": 0},
+    {"q": "Ano ang tawag kapag mas marami ang paninda kaysa sa kinakailangan?", "choices": ["Sobra/Stock", "Kulang", "Ubos"], "answer": 0},
+]
+
+# =====================================================================
+# TRIVIA QUIZ - server-side backing (boss's request, Oct 3: "dapat
+# nakalock muna yung next level. tapos kada tapos every 30 level mu
+# free spin na pwd makakuha ng 1 max 1 point").
+#
+# This upgrades Trivia from a pure-client-side "libangan lang" game
+# (like Sudoku/Word Search/Solitaire) into one with real stakes -
+# level locking (must score PERFECT 20/20 to unlock the next level)
+# and real loyalty points (one free spin credited every
+# TRIVIA_SPIN_EVERY_N_LEVELS levels cleared, worth 0 or 1 point - boss
+# was explicit: "max 1 point"). Once real points are on the line, the
+# question bank and its answer key CANNOT live only in the browser's
+# JS anymore (anyone could read TRIVIA_BANK's `answer` field straight
+# out of devtools and always pick the right choice) - so this mirrors
+# the crossword's proven pattern instead: the server samples the
+# question set, remembers which exact questions it handed out (just
+# the indices, under active_attempt/<level>), and is the ONLY thing
+# that ever compares submitted answers against the real answer key.
+#
+# Scope note: boss's "Customer lang" answer means only customers can
+# earn points from the spin - staff still gets the lock/unlock
+# progression and a milestone banner every 30 levels (so staff
+# accounts can still demo/QA the whole flow), but staff NEVER calls
+# the spin endpoint and NEVER touches loyalty_points, same hard rule
+# already enforced for staff crossword play.
+# =====================================================================
+
+TRIVIA_TOTAL_LEVELS = 1000
+TRIVIA_QUESTIONS_PER_LEVEL = 20
+TRIVIA_TIME_LIMIT_SECONDS = 180  # informal/client-side only - no server-side time anti-cheat (no points ride on speed, only on getting all 20 right)
+TRIVIA_SPIN_EVERY_N_LEVELS = 30  # boss's request, Oct 3: "kada tapos every 30 level mu free spin"
+TRIVIA_SPIN_WIN_CHANCE = 0.4  # 40% chance of winning the 1 point; "max 1 point" means never more than 1 per spin
+
+
+def _trivia_sample_question_indices():
+    """Picks TRIVIA_QUESTIONS_PER_LEVEL random, non-repeating indices
+    into TRIVIA_BANK - fresh every time a level is (re)opened, matching
+    boss's "magiging bago ulit ang tanong" requirement. Returns indices
+    only (never the answer key) so the caller can persist + re-serve
+    them without ever handing the browser a correct-answer map."""
+    count = min(TRIVIA_QUESTIONS_PER_LEVEL, len(TRIVIA_BANK))
+    return random.sample(range(len(TRIVIA_BANK)), count)
+
+
+def get_customer_trivia_progress(reseller_id):
+    data = fb_get(f"customer_trivia_progress/{reseller_id}") or {}
+    unlocked = int(data.get("unlocked_level") or 1)
+    # Reuses the crossword's array-vs-dict normalizer - same Firebase
+    # quirk (all-small-integer-string keys silently become a JSON
+    # array) applies to ANY {"<level>": value} shaped node, not just
+    # crossword's.
+    completed = _crossword_normalize_completed(data.get("completed_levels"))
+    completed_list = sorted(int(k) for k in completed.keys() if str(k).isdigit())
+    spins_available = int(data.get("spins_available") or 0)
+    return {"unlocked_level": unlocked, "completed_levels": completed_list, "spins_available": spins_available}
+
+
+def get_staff_trivia_progress(staff_name):
+    """Staff version - staff_trivia_progress/{staff_name}, completely
+    separate from customer_trivia_progress, and no spins_available
+    field at all (staff never earns spins/points here)."""
+    data = fb_get(f"staff_trivia_progress/{staff_name}") or {}
+    unlocked = int(data.get("unlocked_level") or 1)
+    completed = _crossword_normalize_completed(data.get("completed_levels"))
+    completed_list = sorted(int(k) for k in completed.keys() if str(k).isdigit())
+    return {"unlocked_level": unlocked, "completed_levels": completed_list}
+
 
 
 def _crossword_points_for_level(level):
@@ -16530,10 +16736,13 @@ def customer_crossword_page(reseller_id):
 @app.route("/customer/<reseller_id>/games")
 def customer_games_page(reseller_id):
     """Mini-Games Hub for customers (boss's request, Oct 3: "I add sa
-    omega ice app" the suggested sari-sari-store games). Crossword stays
-    the only one that earns loyalty points - Sudoku/Word Search/Trivia/
-    Solitaire are pure client-side libangan, no server calls at all, so
-    there's nothing here that can touch loyalty_points."""
+    omega ice app" the suggested sari-sari-store games). Crossword and
+    Trivia are the two games that can earn real loyalty points -
+    Crossword per level, Trivia via a free spin every 30 levels cleared
+    (boss's later request, Oct 3: "dapat nakalock muna yung next level
+    ... kada tapos every 30 level mu free spin na pwd makakuha ng 1 max
+    1 point"). Sudoku/Word Search/Solitaire stay pure client-side
+    libangan with no server calls at all."""
     if not session.get("customer_id") and not session.get("staff_name"):
         return redirect(url_for("customer_login_page"))
     if session.get("customer_id") and session.get("customer_id") != reseller_id and not session.get("staff_name"):
@@ -16541,9 +16750,10 @@ def customer_games_page(reseller_id):
     return render_template_string(
         GAMES_HUB_HTML,
         is_staff=False,
+        reseller_id=reseller_id,
         back_url=f"/customer/{reseller_id}/dashboard",
         back_label="Dashboard",
-        title_sub="Crossword may points - ang Sudoku/Word Search/Trivia/Solitaire ay libangan lang",
+        title_sub="Crossword at Trivia may points - ang Sudoku/Word Search/Solitaire ay libangan lang",
         crossword_url=f"/customer/{reseller_id}/crossword",
         crossword_progress_url=f"/api/crossword/progress?reseller_id={reseller_id}",
         crossword_badge_label="1-5 PTS / LEVEL",
@@ -16782,6 +16992,310 @@ def api_crossword_check(level):
 
 
 # =====================================================================
+# TRIVIA QUIZ ROUTES (boss's request, Oct 3: locking + every-30-level
+# free spin). Customer routes first, staff-mirror routes right after -
+# same parallel-routes pattern as crossword, so a bug in one can never
+# bleed into the other, and staff truly never touches loyalty_points.
+# =====================================================================
+
+@app.route("/api/customer/trivia/progress")
+def api_customer_trivia_progress():
+    if not _crossword_auth_ok():
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    reseller_id = session.get("customer_id") or request.args.get("reseller_id")
+    if not reseller_id:
+        return jsonify({"ok": False, "error": "reseller_id required"}), 400
+    try:
+        progress = get_customer_trivia_progress(reseller_id)
+        progress["total_levels"] = TRIVIA_TOTAL_LEVELS
+        progress["spin_every_n_levels"] = TRIVIA_SPIN_EVERY_N_LEVELS
+        return jsonify({"ok": True, **progress})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/customer/trivia/level/<int:level>")
+def api_customer_trivia_get_level(level):
+    """Returns a FRESH random sample of 20 questions (text + choices
+    only, never the answer key) and remembers which exact bank indices
+    were handed out, under active_attempt/<level> - so the later
+    /submit call can validate against the real answer key server-side.
+    Staff previews (viewing a customer's own crossword/trivia the same
+    way they already can) bypass the lock/already-completed checks,
+    same as the crossword preview behavior."""
+    if not _crossword_auth_ok():
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    if level < 1 or level > TRIVIA_TOTAL_LEVELS:
+        return jsonify({"ok": False, "error": "Invalid level"}), 404
+    reseller_id = session.get("customer_id") or request.args.get("reseller_id")
+    if not reseller_id:
+        return jsonify({"ok": False, "error": "reseller_id required"}), 400
+    try:
+        is_customer = bool(session.get("customer_id") and not session.get("staff_name"))
+        if is_customer:
+            progress = get_customer_trivia_progress(reseller_id)
+            if level > progress["unlocked_level"]:
+                return jsonify({"ok": False, "error": "Naka-lock pa ang level na ito"}), 403
+            if level in progress["completed_levels"]:
+                return jsonify({"ok": False, "error": "Tapos na ang level na ito"}), 403
+        idxs = _trivia_sample_question_indices()
+        fb_put(f"customer_trivia_progress/{reseller_id}/active_attempt/{level}", idxs)
+        questions = [{"q": TRIVIA_BANK[i]["q"], "choices": TRIVIA_BANK[i]["choices"]} for i in idxs]
+        return jsonify({
+            "ok": True, "level": level, "questions": questions,
+            "time_limit_seconds": TRIVIA_TIME_LIMIT_SECONDS,
+            "total_questions": len(questions),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/customer/trivia/level/<int:level>/submit", methods=["POST"])
+def api_customer_trivia_submit(level):
+    """Scores the just-played round against the answer set stashed by
+    the GET above - PERFECT 20/20 required to unlock the next level
+    (boss's request, Oct 3: "dapat nakalock muna yung next level").
+    Clearing a level that's a multiple of TRIVIA_SPIN_EVERY_N_LEVELS
+    for the first time credits one free-spin (spins_available += 1);
+    the actual point roll happens in /api/customer/trivia/spin below,
+    never here."""
+    if not _crossword_auth_ok():
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    if level < 1 or level > TRIVIA_TOTAL_LEVELS:
+        return jsonify({"ok": False, "error": "Invalid level"}), 404
+    data = request.json or {}
+    reseller_id = session.get("customer_id") or data.get("reseller_id")
+    if not reseller_id:
+        return jsonify({"ok": False, "error": "reseller_id required"}), 400
+    try:
+        idxs = fb_get(f"customer_trivia_progress/{reseller_id}/active_attempt/{level}")
+        if not idxs or not isinstance(idxs, list):
+            return jsonify({"ok": False, "error": "Walang aktibong round - buksan muna ang level"}), 400
+        submitted = data.get("answers") or []
+        if not isinstance(submitted, list):
+            submitted = []
+        score = 0
+        for pos, bank_idx in enumerate(idxs):
+            given = submitted[pos] if pos < len(submitted) else None
+            if isinstance(given, int) and not isinstance(given, bool) and given == TRIVIA_BANK[bank_idx]["answer"]:
+                score += 1
+        total = len(idxs)
+        all_correct = (score == total)
+
+        is_customer = bool(session.get("customer_id") and not session.get("staff_name"))
+        progress_raw = fb_get(f"customer_trivia_progress/{reseller_id}") or {}
+        completed = _crossword_normalize_completed(progress_raw.get("completed_levels"))
+        unlocked = int(progress_raw.get("unlocked_level") or 1)
+        spins_available = int(progress_raw.get("spins_available") or 0)
+        response = {
+            "ok": True, "score": score, "total": total, "all_correct": all_correct,
+            "newly_completed": False, "milestone_reached": False,
+            "unlocked_level": unlocked, "spins_available": spins_available,
+        }
+
+        if is_customer and all_correct and str(level) not in completed:
+            completed[str(level)] = True
+            new_unlocked = max(unlocked, level + 1) if level == unlocked else unlocked
+            patch = {"completed_levels": completed, "unlocked_level": new_unlocked}
+            if level % TRIVIA_SPIN_EVERY_N_LEVELS == 0:
+                spins_available += 1
+                patch["spins_available"] = spins_available
+                response["milestone_reached"] = True
+            fb_patch(f"customer_trivia_progress/{reseller_id}", patch)
+            response["newly_completed"] = True
+            response["unlocked_level"] = new_unlocked
+            response["spins_available"] = spins_available
+
+        fb_delete(f"customer_trivia_progress/{reseller_id}/active_attempt/{level}")  # attempt is over either way - no replay-with-same-questions exploit
+        return jsonify(response)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/customer/trivia/level/<int:level>/check_answer", methods=["POST"])
+def api_customer_trivia_check_answer(level):
+    """Lightweight per-question instant-feedback helper - the original
+    shipped Trivia UX flashed green/red right after each tap, before
+    this level-locking rework moved the answer key server-side. Safe
+    to expose because it only ever reveals the answer for a question
+    the player has ALREADY committed a choice for (the UI disables
+    that question's options the instant it's tapped - see
+    answerTrivia() in GAMES_HUB_HTML). The real, authoritative scoring
+    that actually unlocks levels and grants spin credits still happens
+    independently in /submit above, recomputed from scratch against
+    TRIVIA_BANK - this endpoint never writes anything and can't be
+    used to inflate that score."""
+    if not _crossword_auth_ok():
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    if level < 1 or level > TRIVIA_TOTAL_LEVELS:
+        return jsonify({"ok": False, "error": "Invalid level"}), 404
+    data = request.json or {}
+    reseller_id = session.get("customer_id") or data.get("reseller_id")
+    if not reseller_id:
+        return jsonify({"ok": False, "error": "reseller_id required"}), 400
+    try:
+        idxs = fb_get(f"customer_trivia_progress/{reseller_id}/active_attempt/{level}")
+        if not idxs or not isinstance(idxs, list):
+            return jsonify({"ok": False, "error": "Walang aktibong round"}), 400
+        position = data.get("position")
+        if not isinstance(position, int) or isinstance(position, bool) or position < 0 or position >= len(idxs):
+            return jsonify({"ok": False, "error": "Invalid position"}), 400
+        bank_idx = idxs[position]
+        correct_index = TRIVIA_BANK[bank_idx]["answer"]
+        given = data.get("choice")
+        correct = isinstance(given, int) and not isinstance(given, bool) and given == correct_index
+        return jsonify({"ok": True, "correct": correct, "correct_index": correct_index})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/customer/trivia/spin", methods=["POST"])
+def api_customer_trivia_spin():
+    """boss's request, Oct 3: "kada tapos every 30 level mu free spin
+    na pwd makakuha ng 1 max 1 point". Consumes ONE spins_available
+    credit (granted by /submit above on a 30/60/90/... milestone
+    clear) and rolls for 0 or 1 point - never more than 1, "max 1
+    point" was explicit. Customer-only, matching boss's "Customer lang"
+    answer - staff accounts get 403 here even if they somehow had
+    spins_available (they never do; staff_trivia_progress has no such
+    field)."""
+    if not _crossword_auth_ok():
+        return jsonify({"ok": False, "error": "Login required"}), 401
+    if not (session.get("customer_id") and not session.get("staff_name")):
+        return jsonify({"ok": False, "error": "Customer-only feature"}), 403
+    data = request.json or {}
+    reseller_id = session.get("customer_id") or data.get("reseller_id")
+    if not reseller_id:
+        return jsonify({"ok": False, "error": "reseller_id required"}), 400
+    try:
+        progress_raw = fb_get(f"customer_trivia_progress/{reseller_id}") or {}
+        spins_available = int(progress_raw.get("spins_available") or 0)
+        if spins_available <= 0:
+            return jsonify({"ok": False, "error": "Walang available na free spin"}), 400
+        won = (random.random() < TRIVIA_SPIN_WIN_CHANCE)
+        points_awarded = 1 if won else 0
+        new_spins = spins_available - 1
+        fb_patch(f"customer_trivia_progress/{reseller_id}", {"spins_available": new_spins})
+        if points_awarded and not is_loyalty_program_paused():
+            award_loyalty_points(reseller_id, points_awarded, "Trivia Quiz Free Spin (every 30 levels)", ref_order_id=None, touch_activity=False)
+        return jsonify({"ok": True, "won": won, "points_awarded": points_awarded, "spins_available": new_spins})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ---- Staff mirror: lock/unlock progression + milestone banner only,
+# NEVER a spin endpoint, NEVER loyalty_points (boss's "Customer lang"
+# answer) - staff_trivia_progress is a completely separate Firebase
+# root from customer_trivia_progress. ----
+
+@app.route("/api/staff/trivia/progress")
+@login_required
+def api_staff_trivia_progress():
+    staff_name = session.get("staff_name")
+    try:
+        progress = get_staff_trivia_progress(staff_name)
+        progress["total_levels"] = TRIVIA_TOTAL_LEVELS
+        progress["spin_every_n_levels"] = TRIVIA_SPIN_EVERY_N_LEVELS
+        return jsonify({"ok": True, **progress})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/staff/trivia/level/<int:level>")
+@login_required
+def api_staff_trivia_get_level(level):
+    if level < 1 or level > TRIVIA_TOTAL_LEVELS:
+        return jsonify({"ok": False, "error": "Invalid level"}), 404
+    staff_name = session.get("staff_name")
+    try:
+        progress = get_staff_trivia_progress(staff_name)
+        if level > progress["unlocked_level"]:
+            return jsonify({"ok": False, "error": "Naka-lock pa ang level na ito"}), 403
+        if level in progress["completed_levels"]:
+            return jsonify({"ok": False, "error": "Tapos na ang level na ito"}), 403
+        idxs = _trivia_sample_question_indices()
+        fb_put(f"staff_trivia_progress/{staff_name}/active_attempt/{level}", idxs)
+        questions = [{"q": TRIVIA_BANK[i]["q"], "choices": TRIVIA_BANK[i]["choices"]} for i in idxs]
+        return jsonify({
+            "ok": True, "level": level, "questions": questions,
+            "time_limit_seconds": TRIVIA_TIME_LIMIT_SECONDS,
+            "total_questions": len(questions),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/staff/trivia/level/<int:level>/submit", methods=["POST"])
+@login_required
+def api_staff_trivia_submit(level):
+    if level < 1 or level > TRIVIA_TOTAL_LEVELS:
+        return jsonify({"ok": False, "error": "Invalid level"}), 404
+    staff_name = session.get("staff_name")
+    data = request.json or {}
+    try:
+        idxs = fb_get(f"staff_trivia_progress/{staff_name}/active_attempt/{level}")
+        if not idxs or not isinstance(idxs, list):
+            return jsonify({"ok": False, "error": "Walang aktibong round - buksan muna ang level"}), 400
+        submitted = data.get("answers") or []
+        if not isinstance(submitted, list):
+            submitted = []
+        score = 0
+        for pos, bank_idx in enumerate(idxs):
+            given = submitted[pos] if pos < len(submitted) else None
+            if isinstance(given, int) and not isinstance(given, bool) and given == TRIVIA_BANK[bank_idx]["answer"]:
+                score += 1
+        total = len(idxs)
+        all_correct = (score == total)
+
+        progress_raw = fb_get(f"staff_trivia_progress/{staff_name}") or {}
+        completed = _crossword_normalize_completed(progress_raw.get("completed_levels"))
+        unlocked = int(progress_raw.get("unlocked_level") or 1)
+        response = {
+            "ok": True, "score": score, "total": total, "all_correct": all_correct,
+            "newly_completed": False, "milestone_reached": False, "unlocked_level": unlocked,
+        }
+
+        if all_correct and str(level) not in completed:
+            completed[str(level)] = True
+            new_unlocked = max(unlocked, level + 1) if level == unlocked else unlocked
+            fb_patch(f"staff_trivia_progress/{staff_name}", {"completed_levels": completed, "unlocked_level": new_unlocked})
+            response["newly_completed"] = True
+            response["unlocked_level"] = new_unlocked
+            if level % TRIVIA_SPIN_EVERY_N_LEVELS == 0:
+                response["milestone_reached"] = True  # banner only - no spins_available field exists for staff, no points ever
+
+        fb_delete(f"staff_trivia_progress/{staff_name}/active_attempt/{level}")
+        return jsonify(response)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/staff/trivia/level/<int:level>/check_answer", methods=["POST"])
+@login_required
+def api_staff_trivia_check_answer(level):
+    """Staff mirror of api_customer_trivia_check_answer - same
+    instant-feedback-without-exposing-the-full-key reasoning."""
+    if level < 1 or level > TRIVIA_TOTAL_LEVELS:
+        return jsonify({"ok": False, "error": "Invalid level"}), 404
+    staff_name = session.get("staff_name")
+    data = request.json or {}
+    try:
+        idxs = fb_get(f"staff_trivia_progress/{staff_name}/active_attempt/{level}")
+        if not idxs or not isinstance(idxs, list):
+            return jsonify({"ok": False, "error": "Walang aktibong round"}), 400
+        position = data.get("position")
+        if not isinstance(position, int) or isinstance(position, bool) or position < 0 or position >= len(idxs):
+            return jsonify({"ok": False, "error": "Invalid position"}), 400
+        bank_idx = idxs[position]
+        correct_index = TRIVIA_BANK[bank_idx]["answer"]
+        given = data.get("choice")
+        correct = isinstance(given, int) and not isinstance(given, bool) and given == correct_index
+        return jsonify({"ok": True, "correct": correct, "correct_index": correct_index})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# =====================================================================
 # STAFF-ONLY CROSSWORD (boss's request, Oct 3: "sa admin/staff account
 # idagdag din yung puzzle ... Wala silang makukuhang point pero gusto
 # ko may hiwalay na monitoring kung ilan na completed nilang puzzle,
@@ -16834,7 +17348,9 @@ def staff_games_page():
     "I add sa omega ice app" the suggested sari-sari-store games, same
     one-page-with-tabs layout as the mockup boss approved). Staff
     crossword here ALSO earns no points (consistent with the existing
-    /staff/crossword mode) - the other 4 games never did either."""
+    /staff/crossword mode) - same for Trivia's lock/unlock progression
+    and milestone banner (shown for QA/demo purposes) - the other 3
+    games never earned points either."""
     return render_template_string(
         GAMES_HUB_HTML,
         is_staff=True,
