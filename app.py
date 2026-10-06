@@ -846,7 +846,7 @@ h1{font-size:20px;color:#fff;margin:0 0 4px}
 <div class="logo-wrap"><img src="/icon-512.webp" alt="Omega Purified Ice"></div>
 <div class="wordmark">&Omega;MEGA</div>
 <div class="wordmark-sub">PURIFIED ICE CUBES</div>
-<div id="installBanner"><div>📲 I-install ang Cashier App sa device na ito para mas mabilis at parang native app.</div><button onclick="doInstallPrompt()">Install App</button></div>
+<div id="installBanner"><div>📲 Install the Cashier App on this device for faster, native app-like access.</div><button onclick="doInstallPrompt()">Install App</button></div>
 <p class="subtitle">STAFF LOGIN</p><p class="tagline">Sales quick access</p><div class="dots" id="dots">o o o o</div><p class="msg" id="msg">Enter PIN</p>
 <div class="keypad">
 <button type="button" onclick="addDigit('1')">1</button>
@@ -1009,8 +1009,8 @@ td:nth-child(2){white-space:normal}
 .alarm-active{animation:pulse 0.5s infinite;background:#ff0000 !important}
 </style></head>
 <body>
-<div id="installBannerC"><span>📲 I-install ang app na ito para mas mabilis gamit tuwing shift.</span><button onclick="doInstallPromptC()">Install</button></div>
-<div id="pushBannerC" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:#991b1b;justify-content:space-between;align-items:center;gap:8px"><span>🔔 I-enable ang Order Alarm para may notification ka kahit closed ang app.</span><button onclick="enablePushAlerts()" style="padding:6px 12px;border-radius:8px;border:none;background:#c0392b;color:#fff;font-size:11px;font-weight:600;white-space:nowrap">Enable</button></div>
+<div id="installBannerC"><span>📲 Install this app for faster use every shift.</span><button onclick="doInstallPromptC()">Install</button></div>
+<div id="pushBannerC" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:#991b1b;justify-content:space-between;align-items:center;gap:8px"><span>🔔 Enable the Order Alarm to get notified even when the app is closed.</span><button onclick="enablePushAlerts()" style="padding:6px 12px;border-radius:8px;border:none;background:#c0392b;color:#fff;font-size:11px;font-weight:600;white-space:nowrap">Enable</button></div>
 <div class="topbar"><div style="display:flex;align-items:center;gap:8px"><img src="/icon-192.png" alt="" style="width:26px;height:26px;border-radius:6px"><h1 id="cashierTitle">OMEGA PURIFIED ICE</h1></div><div style="display:flex;align-items:center;gap:10px"><span class="staff">{{ staff_name }}</span><button class="logout" onclick="logout()">Logout</button></div></div>
 <button id="kioskBtn" onclick="toggleKiosk()" title="Kiosk mode">⛶</button>
 <div class="one-row">
@@ -1073,11 +1073,11 @@ td:nth-child(2){white-space:normal}
   <div id="subPeriodPicker" style="display:none;margin-top:10px;background:rgba(255,255,255,.15);border-radius:10px;padding:10px">
     <label style="font-size:10px;color:#fff;opacity:.9;margin:0 0 6px;display:block" id="subPeriodLabel">Select Week</label>
     <select id="subPeriodSelect" onchange="onSubPeriodChange()" style="width:100%;padding:8px;border-radius:8px;border:none;font-size:12px"></select>
-    <label style="font-size:10px;color:#fff;opacity:.8;margin:8px 0 6px;display:block">🔎 O maghanap gamit ang date</label>
+    <label style="font-size:10px;color:#fff;opacity:.8;margin:8px 0 6px;display:block">🔎 Or search by date</label>
     <input type="date" id="periodDateSearchInput" onchange="onPeriodDateSearch()" style="width:100%;padding:8px;border-radius:8px;border:none;font-size:12px">
   </div>
   <div id="dailyDatePicker" class="daily-date-picker">
-    <label style="font-size:10px;color:#fff;opacity:.9;margin:0 0 6px;display:block">📅 Pili ng Date (Daily)</label>
+    <label style="font-size:10px;color:#fff;opacity:.9;margin:0 0 6px;display:block">📅 Pick a Date (Daily)</label>
     <input type="date" id="dailyDateInput" onchange="onDailyDateChange()">
     <div style="display:flex;gap:6px;margin-top:6px">
       <button onclick="setDailyToday()" style="flex:1;padding:6px;border-radius:8px;border:none;background:rgba(255,255,255,.3);color:#fff;font-size:11px">Today</button>
@@ -2269,12 +2269,12 @@ async function enablePushAlerts(){
   const banner = document.getElementById('pushBannerC');
   try{
     if(!PUSH_ENABLED_C){
-      alert('Hindi pa naka-configure ang push notifications sa server. Sabihin kay Isesmo na i-set up ang VAPID keys.');
+      alert('Push notifications are not configured on the server yet. Tell Isesmo to set up the VAPID keys.');
       return;
     }
     const perm = await Notification.requestPermission();
     if(perm !== 'granted'){
-      alert('Kailangan payagan ang Notifications para gumana ang Order Alarm kahit closed ang app.');
+      alert('Please allow Notifications so the Order Alarm works even when the app is closed.');
       return;
     }
     const reg = await navigator.serviceWorker.ready;
@@ -2293,7 +2293,7 @@ async function enablePushAlerts(){
     });
     if(banner) banner.style.display = 'none';
   }catch(err){
-    alert('Hindi na-enable ang push alerts: ' + err.message);
+    alert('Could not enable push alerts: ' + err.message);
   }
 }
 if('serviceWorker' in navigator){
@@ -2688,7 +2688,7 @@ def send_points_backup_email(trigger="scheduled"):
     clean result either way. No-op (returns False) if SMTP_EMAIL /
     SMTP_APP_PASSWORD aren't configured - see BACKUP_ENABLED above."""
     if not BACKUP_ENABLED:
-        return False, "Email backup hindi pa naka-configure (kulang ang SMTP_EMAIL / SMTP_APP_PASSWORD sa Render Environment)"
+        return False, "Email backup is not configured yet (SMTP_EMAIL / SMTP_APP_PASSWORD missing in Render Environment)"
     try:
         payload = build_points_backup_data()
         reseller_count = len(payload["loyalty_points"])
@@ -2701,13 +2701,13 @@ def send_points_backup_email(trigger="scheduled"):
         msg["To"] = BACKUP_EMAIL_TO
         msg["Subject"] = f"[Omega Ice] Points Backup - {manila_now().strftime('%Y-%m-%d %H:%M')} ({trigger})"
         body = (
-            "Automatic backup ng loyalty points program (Omega Ice).\n\n"
-            f"Bilang ng reseller na may points: {reseller_count}\n"
-            f"Kabuuang points ng lahat: {total_points:,}\n"
+            "Automatic backup of the loyalty points program (Omega Ice).\n\n"
+            f"Number of resellers with points: {reseller_count}\n"
+            f"Total points across all resellers: {total_points:,}\n"
             f"Trigger: {trigger}\n\n"
-            "Paano i-restore: pumunta sa /admin/rewards -> 'Points Backup & Restore' "
-            "section, i-upload itong naka-attach na .json file, tapos i-click ang "
-            "'I-restore Ngayon'. I-save/i-keep ang email na ito bilang backup copy."
+            "How to restore: go to /admin/rewards -> 'Points Backup & Restore' "
+            "section, upload this attached .json file, then click "
+            "'Restore Now'. Keep/save this email as a backup copy."
         )
         msg.attach(MIMEText(body, "plain"))
 
@@ -2724,10 +2724,10 @@ def send_points_backup_email(trigger="scheduled"):
                 server.send_message(msg)
 
         fb_put("loyalty_settings/last_backup_at", manila_now().strftime("%Y-%m-%d %H:%M:%S"))
-        return True, f"Naipadala ang backup email ({reseller_count} reseller, {total_points:,} points)"
+        return True, f"Backup email sent ({reseller_count} reseller(s), {total_points:,} points)"
     except Exception as e:
         print(f"send_points_backup_email error: {e}")
-        return False, f"Hindi naipadala ang backup email: {e}"
+        return False, f"Backup email failed to send: {e}"
 
 def _points_backup_scheduler_loop():
     """Runs forever in a background daemon thread, firing
@@ -3128,7 +3128,7 @@ def _program_schedule_check():
                 fb_put("loyalty_settings/scheduled_pause_at", None)
                 send_push_to_all_resellers(
                     title="⏸️ Points Program Paused",
-                    body="Pansamantalang naka-pause na ang Points Rewards Program. Ligtas at buo pa rin ang points mo - babalik ito once na-resume na.",
+                    body="The Points Rewards Program is now temporarily paused. Your points are safe and still intact - this will come back once resumed.",
                 )
         resume_at = fb_get("loyalty_settings/scheduled_resume_at")
         if resume_at:
@@ -3142,7 +3142,7 @@ def _program_schedule_check():
                 fb_put("loyalty_settings/scheduled_resume_at", None)
                 send_push_to_all_resellers(
                     title="▶️ Points Program Resumed",
-                    body="Bumalik na ang Points Rewards Program! Kumikita ka na ulit ng points sa mga order mo.",
+                    body="The Points Rewards Program is back! You are earning points on your orders again.",
                 )
     except Exception as e:
         print(f"_program_schedule_check error: {e}")
@@ -3743,7 +3743,7 @@ def notify_new_device_login(reseller_id, store_name):
         send_push_to_reseller(
             reseller_id,
             title="🔐 Bagong Device Login",
-            body="May bagong device/browser na nag-login sa account mo. Kung hindi ikaw ito, palitan agad ang password mo.",
+            body="A new device/browser just logged into your account. If this was not you, change your password right away.",
             url=f"/customer/{reseller_id}/dashboard",
             tag=f"omega-new-device-{reseller_id}",
         )
@@ -4058,7 +4058,7 @@ def _notify_isesmo_of_new_sale(reseller_name, qty, kg_size, total, offline=False
         prefix = "📴 (Offline) " if offline else ""
         send_push_to_isesmo(
             title=f"{prefix}🧾 Bagong Sale Naitala",
-            body=f"{staff_who_sold or 'Staff'} nag-record ng sale: {qty}x {kg_size} kay {reseller_name} - ₱{total:.2f}",
+            body=f"{staff_who_sold or 'Staff'} recorded a sale: {qty}x {kg_size} for {reseller_name} - ₱{total:.2f}",
             url="/cashier",
             tag="omega-new-sale",
         )
@@ -5724,6 +5724,15 @@ input{width:100%;padding:clamp(7px,1.5dvh,12px);border-radius:12px;border:1.5px 
 <input type="file" id="qrFileInput" accept="image/*" style="display:none" onchange="handleQRUpload(event)">
 <button class="btn" style="background:transparent;color:#eaf6ff;border:1.5px solid rgba(255,255,255,.35);margin-top:8px;box-shadow:none" onclick="document.getElementById('qrFileInput').click()">🖼️ Upload QR Image Instead</button>
 <p style="font-size:10px;color:#bcd9ee;text-align:center;margin-top:4px">Just point the camera at the QR code given to you by ISESMO - login happens automatically.</p>
+<!-- TUTORIAL VIDEO BUTTON (boss's request, Oct 6: "sa login gusto ko may
+     button para sa tutorial video how to use omega app") - reuses the
+     SAME video list ISESMO already manages on /admin/videos (the
+     "Watch Videos" section on the Customer Dashboard), so there's
+     nothing new for him to upload or maintain: whichever video is
+     sorted first there (already "How to Login" as of this writing) is
+     what plays here. No login needed to watch it - see
+     /api/login_tutorial_video. -->
+<button class="btn" style="background:transparent;color:#eaf6ff;border:1.5px solid rgba(255,255,255,.35);margin-top:8px;box-shadow:none" onclick="openTutorialModal()">📹 How to Use the App</button>
 <p style="font-size:11px;color:#cfe6f5;text-align:center;margin-top:8px;border-top:1px solid rgba(255,255,255,.15);padding-top:8px">Forgot your password?<br><button class="link-btn" onclick="openForgotModal()">🔑 Reset using OTP</button></p>
 <div style="text-align:center;font-size:9px;color:#89a8bf;margin-top:6px">Developed by Moises Orio Gamboa</div>
 </div>
@@ -5783,6 +5792,21 @@ input{width:100%;padding:clamp(7px,1.5dvh,12px);border-radius:12px;border:1.5px 
   </div>
 </div>
 
+<!-- TUTORIAL VIDEO modal (boss's request, Oct 6) - same dark-backdrop
+     treatment as the QR scanner modal above (video content reads best on
+     a dark background), plays the first non-hidden video from
+     /api/login_tutorial_video with native <video controls>. -->
+<div class="modal-overlay" id="tutorialModal" style="background:rgba(0,10,20,.88)">
+  <div style="background:#0a1f2e;border-radius:16px;padding:16px;max-width:420px;width:100%;text-align:center">
+    <h3 id="tutorialModalTitle" style="margin:0 0 10px;font-size:15px;color:#fff">📹 How to Use the App</h3>
+    <div style="position:relative;border-radius:12px;overflow:hidden;background:#000">
+      <video id="tutorialVideoEl" controls playsinline style="width:100%;max-height:60dvh;display:block"></video>
+    </div>
+    <p class="status" id="tutorialModalStatus" style="color:#dcecf7;min-height:20px;margin:10px 0 4px"></p>
+    <button onclick="closeTutorialModal()" style="width:100%;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,.3);background:transparent;color:#fff;font-size:13px;font-weight:600">Close</button>
+  </div>
+</div>
+
 <script>
 // Show/hide password toggle - flips an <input type="password"> to
 // type="text" (and the 👁️/🙈 icon) so the customer can visually confirm
@@ -5809,6 +5833,48 @@ function openForgotModal(){
 }
 function closeForgotModal(){
   document.getElementById('forgotModal').classList.remove('open');
+}
+
+// TUTORIAL VIDEO modal (boss's request, Oct 6) - fetches the one video
+// /api/login_tutorial_video picks (no login needed) and plays it with the
+// native <video> controls. Fetched fresh on every open instead of once on
+// page load, so a video ISESMO just uploaded shows up without a refresh.
+async function openTutorialModal(){
+  const videoEl = document.getElementById('tutorialVideoEl');
+  const statusEl = document.getElementById('tutorialModalStatus');
+  const titleEl = document.getElementById('tutorialModalTitle');
+  videoEl.removeAttribute('src');
+  videoEl.style.display = 'none';
+  statusEl.textContent = 'Loading...';
+  statusEl.className = 'status';
+  titleEl.textContent = '📹 How to Use the App';
+  document.getElementById('tutorialModal').classList.add('open');
+  try{
+    const res = await fetch('/api/login_tutorial_video');
+    const data = await res.json();
+    if(!data.ok){
+      statusEl.textContent = data.error || 'Could not load the tutorial video.';
+      return;
+    }
+    if(!data.video || !data.video.src){
+      statusEl.textContent = 'No tutorial video has been uploaded yet.';
+      return;
+    }
+    titleEl.textContent = '📹 ' + data.video.title;
+    videoEl.src = data.video.src;
+    videoEl.style.display = 'block';
+    statusEl.textContent = '';
+    videoEl.play().catch(() => {});
+  }catch(e){
+    statusEl.textContent = 'Connection error - try again.';
+  }
+}
+function closeTutorialModal(){
+  const videoEl = document.getElementById('tutorialVideoEl');
+  videoEl.pause();
+  videoEl.removeAttribute('src');
+  videoEl.load();
+  document.getElementById('tutorialModal').classList.remove('open');
 }
 async function requestForgotOtp(){
   const phone = document.getElementById('forgotPhone').value.trim();
@@ -8543,7 +8609,7 @@ def api_customer_login():
             log_customer_login(None, None, phone, False, "Locked out - too many failed attempts")
             return jsonify({
                 "ok": False,
-                "error": "Sobrang daming maling attempt. Naka-lock muna ang account na ito - subukan ulit pagkalipas ng 15 minuto, o makipag-ugnayan kay ISESMO.",
+                "error": "Too many failed attempts. This account is now locked - try again in 15 minutes, or contact ISESMO.",
             }), 429
         resellers = fb_get("resellers") or {}
         matched = None
@@ -8622,7 +8688,7 @@ def api_customer_request_otp():
         if is_rate_limited(otp_key, max_attempts=3, window_seconds=900):
             return jsonify({
                 "ok": False,
-                "error": "Sobrang daming OTP request. Subukan ulit pagkalipas ng 15 minuto, o makipag-ugnayan kay ISESMO.",
+                "error": "Too many OTP requests. Try again in 15 minutes, or contact ISESMO.",
             }), 429
         resellers = fb_get("resellers") or {}
         found = False
@@ -8676,7 +8742,7 @@ def api_customer_verify_otp():
         if is_rate_limited(verify_key, max_attempts=5, window_seconds=300):
             return jsonify({
                 "ok": False,
-                "error": "Sobrang daming maling OTP attempt. Humingi ng bagong OTP pagkalipas ng ilang minuto.",
+                "error": "Too many failed OTP attempts. Request a new OTP in a few minutes.",
             }), 429
         otps = fb_get("customer_otps") or {}
         valid = None
@@ -8715,7 +8781,7 @@ def api_customer_verify_otp():
         fb_patch(f"resellers/{target_id}", {"password_hash": hashed, "status": "active"})
         fb_patch(f"customer_otps/{valid_id}", {"used": True})
         log_customer_activity(target_id, resellers.get(target_id, {}).get("store_name"),
-                               "Nag-reset ng password (OTP)", "")
+                               "Reset password (OTP)", "")
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -8742,7 +8808,7 @@ def api_customer_change_password(reseller_id):
         current_pwd = data.get("current_password") or ""
         new_pwd = (data.get("new_password") or "").strip()
         if not current_pwd or not new_pwd:
-            return jsonify({"ok": False, "error": "Current at bagong password kailangan"}), 400
+            return jsonify({"ok": False, "error": "Current and new password are required"}), 400
         if len(new_pwd) < 4:
             return jsonify({"ok": False, "error": "Password min 4 chars"}), 400
         # Brute-force guard on the CURRENT-password check, same
@@ -8754,7 +8820,7 @@ def api_customer_change_password(reseller_id):
         if is_rate_limited(guard_key, max_attempts=5, window_seconds=900):
             return jsonify({
                 "ok": False,
-                "error": "Sobrang daming maling attempt. Subukan ulit pagkalipas ng 15 minuto.",
+                "error": "Too many failed attempts. Try again in 15 minutes.",
             }), 429
         reseller = fb_get(f"resellers/{reseller_id}") or {}
         stored_hash = reseller.get("password_hash") or ""
@@ -8764,7 +8830,7 @@ def api_customer_change_password(reseller_id):
         clear_attempts(guard_key)
         hashed = hash_customer_password(new_pwd)
         fb_patch(f"resellers/{reseller_id}", {"password_hash": hashed})
-        log_customer_activity(reseller_id, reseller.get("store_name"), "Binago ang password", "")
+        log_customer_activity(reseller_id, reseller.get("store_name"), "Changed password", "")
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -9239,7 +9305,7 @@ def api_customer_set_retail_price(reseller_id):
         try:
             datetime.strptime(effective_date, "%Y-%m-%d")
         except ValueError:
-            return jsonify({"ok": False, "error": "Invalid effective date (dapat YYYY-MM-DD)"}), 400
+            return jsonify({"ok": False, "error": "Invalid effective date (must be YYYY-MM-DD)"}), 400
 
         fb_post(f"resellers/{reseller_id}/retail_price_history", {
             "price": price,
@@ -9372,7 +9438,7 @@ def api_customer_delete_month_order(reseller_id, sale_id):
     """
     staff = (session.get("staff_name") or "").strip().lower()
     if staff not in ["isesmo", "isesmo gamboa"]:
-        return jsonify({"ok": False, "error": "Si ISESMO lang ang pwedeng mag-delete dito."}), 403
+        return jsonify({"ok": False, "error": "Only ISESMO can delete here."}), 403
     try:
         sale = fb_get(f"daily_sales/{sale_id}")
         if not sale:
@@ -9438,7 +9504,7 @@ def api_customer_rate_order(reseller_id, order_id):
             "rated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         })
         if session.get("customer_id") == reseller_id:
-            log_customer_activity(reseller_id, reseller.get("store_name"), "Nag-rate ng order",
+            log_customer_activity(reseller_id, reseller.get("store_name"), "Rated an order",
                                    f"{rating}★" + (f" - {feedback}" if feedback else ""))
         return jsonify({"ok": True, "rating": rating, "feedback": feedback})
     except Exception as e:
@@ -9509,7 +9575,7 @@ def api_customer_place_order(reseller_id):
                 if (now_dt - ca_dt).total_seconds() < 10:
                     return jsonify({
                         "ok": False,
-                        "error": "Parang na-submit mo na ito kanina lang - hindi na ulit isinend para hindi madoble.",
+                        "error": "Looks like you just submitted this a moment ago - it was not sent again to avoid duplicates.",
                         "duplicate": True,
                     }), 409
         except Exception as dup_check_err:
@@ -9669,7 +9735,7 @@ def api_customer_redeem(reseller_id):
         if is_loyalty_program_paused():
             return jsonify({
                 "ok": False,
-                "error": "Pansamantalang naka-pause ang Points Rewards Program - hindi muna pwede mag-redeem. Ligtas at buo pa rin ang points mo, babalik ito once na-resume na.",
+                "error": "The Points Rewards Program is temporarily paused - redeeming is unavailable for now. Your points are safe and still intact, this will come back once resumed.",
                 "program_paused": True,
             }), 400
         data = request.json or {}
@@ -9687,12 +9753,12 @@ def api_customer_redeem(reseller_id):
         if cooldown_days_left > 0:
             return jsonify({
                 "ok": False,
-                "error": f"Hindi pa pwede mag-redeem ulit - hintayin muna ang {cooldown_days_left} (na) araw bago ka makapag-redeem ulit.",
+                "error": f"You cannot redeem again yet - please wait {cooldown_days_left} more day(s) before redeeming again.",
                 "cooldown_days_left": cooldown_days_left,
             }), 400
         balance = check_and_expire_points(reseller_id)
         if balance < required:
-            return jsonify({"ok": False, "error": f"Kulang pa ng points - kailangan {required}, meron ka lang {balance}"}), 400
+            return jsonify({"ok": False, "error": f"Not enough points yet - you need {required}, you only have {balance}"}), 400
         reseller = fb_get(f"resellers/{reseller_id}") or {}
         if not reseller:
             return jsonify({"ok": False, "error": "Reseller not found"}), 404
@@ -9730,7 +9796,7 @@ def api_customer_redeem(reseller_id):
         except Exception as e:
             print(f"push (reward redeemed) failed: {e}")
         if session.get("customer_id") == reseller_id:
-            log_customer_activity(reseller_id, reseller.get("store_name"), "Nag-redeem ng reward",
+            log_customer_activity(reseller_id, reseller.get("store_name"), "Redeemed a reward",
                                    f"{reward.get('label','')} (-{required} pts)")
         return jsonify({"ok": True, "new_balance": new_balance if new_balance is not None else (balance - required)})
     except Exception as e:
@@ -9867,7 +9933,7 @@ def api_order_edit_quantity(order_id):
         if not existing:
             return jsonify({"ok": False, "error": "Order not found"}), 404
         if existing.get("order_status") in ("Cancelled", "Declined"):
-            return jsonify({"ok": False, "error": "Hindi na pwede i-edit ang Cancelled/Declined na order"}), 400
+            return jsonify({"ok": False, "error": "A Cancelled/Declined order can no longer be edited"}), 400
 
         new_qty = int(data.get("quantity") or 0)
         if new_qty <= 0:
@@ -9963,7 +10029,7 @@ def api_update_order_status(order_id):
     # at all defeats the whole point of the feature.
     decline_reason = (data.get("reason") or "").strip()
     if new_status == "Declined" and not decline_reason:
-        return jsonify({"ok": False, "error": "Kailangan ng reason para sa Decline"}), 400
+        return jsonify({"ok": False, "error": "A reason is required to Decline"}), 400
 
     existing = fb_get(f"daily_sales/{order_id}") or {}
     update_data = {"order_status": new_status, "status_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status_updated_by": session.get("staff_name")}
@@ -10063,7 +10129,7 @@ def api_order_follow_up(order_id):
                 send_push_to_reseller(
                     reseller_id,
                     title="📞 Order Follow-Up",
-                    body=f"Sinusundan namin ang order mo ({order.get('quantity')}x {order.get('kg_size')}) - kasalukuyang status: {status}. Salamat sa pasensya!",
+                    body=f"We are following up on your order ({order.get('quantity')}x {order.get('kg_size')}) - current status: {status}. Thanks for your patience!",
                     url=f"/customer/{reseller_id}/dashboard",
                     tag=f"omega-followup-{order_id}",
                 )
@@ -10126,7 +10192,7 @@ def api_customer_order_follow_up(reseller_id, order_id):
 
         status = order.get("order_status") or "New Order"
         if status in ["Delivered", "Cancelled", "Declined"]:
-            return jsonify({"ok": False, "error": "Tapos na ang order na ito - wala nang kailangang i-follow up."}), 400
+            return jsonify({"ok": False, "error": "This order is already done - no follow-up needed."}), 400
 
         # Small cooldown (3 minutes) so double/triple-tapping the button
         # doesn't spam staff with duplicate notifications for one order.
@@ -10135,7 +10201,7 @@ def api_customer_order_follow_up(reseller_id, order_id):
             try:
                 last_dt = datetime.strptime(last_at, "%Y-%m-%d %H:%M:%S")
                 if (datetime.now() - last_dt).total_seconds() < 180:
-                    return jsonify({"ok": False, "error": "Na-follow up mo na ito kanina lang - sandali na lang, sinusundan na namin ang order mo."}), 429
+                    return jsonify({"ok": False, "error": "You already followed up on this a moment ago - hang on, we are already following up on your order."}), 429
             except Exception:
                 pass
 
@@ -10239,7 +10305,7 @@ def api_customer_claim_spin(reseller_id, order_id):
 
         is_test_account = is_free_spin_test_account(reseller_id)
         if existing.get("spin_claimed") and not is_test_account:
-            return jsonify({"ok": False, "error": "Na-claim mo na ang Free Spin ng order na ito."}), 400
+            return jsonify({"ok": False, "error": "You already claimed the Free Spin for this order."}), 400
 
         status = existing.get("order_status") or "New Order"
         self_confirming = (status == "Out for Delivery")
@@ -10278,7 +10344,7 @@ def api_customer_claim_spin(reseller_id, order_id):
             except Exception as e:
                 print(f"push (customer-confirmed delivered) failed: {e}")
         elif status != "Delivered":
-            return jsonify({"ok": False, "error": "Hindi pa pwedeng mag-Free Spin - hintayin munang maging 'Out for Delivery' ang order."}), 400
+            return jsonify({"ok": False, "error": "Free Spin is not available yet - wait until the order is 'Out for Delivery'."}), 400
 
         # PROGRAM PAUSE (boss's request, Sept 27: "dapat same setting na
         # October 1 start yung tempo stop yung points sasabay sya mag
@@ -10296,12 +10362,12 @@ def api_customer_claim_spin(reseller_id, order_id):
                 "status": "Delivered" if self_confirming else status,
                 "spin_paused": True,
                 "spin_points": None,
-                "error": "Pansamantalang naka-pause ang Points Rewards Program - wala munang Free Spin ngayon. Ligtas at buo pa rin ang points mo, babalik ito once na-resume na.",
+                "error": "The Points Rewards Program is temporarily paused - no Free Spin for now. Your points are safe and still intact, this will come back once resumed.",
             }), (200 if self_confirming else 400)
 
         can_spin, _ = compute_spin_eligibility(existing, is_test_account=is_test_account)
         if not can_spin:
-            return jsonify({"ok": False, "error": f"Lumipas na ang {FREE_SPIN_CLAIM_WINDOW_MINUTES}-minutong window para sa Free Spin ng order na ito."}), 400
+            return jsonify({"ok": False, "error": f"The {FREE_SPIN_CLAIM_WINDOW_MINUTES}-minute window for this order's Free Spin has passed."}), 400
 
         spin_points = spin_free_spin_prize()
         fb_patch(f"daily_sales/{order_id}", {
@@ -10401,8 +10467,8 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:10px 6px;
 </div>
 <p id="editStatus" style="font-size:12px;margin-top:8px"></p>
 <hr style="margin:14px 0;border:none;border-top:1px solid #eee">
-<label>🚚 Delivery Route (para sa route delivery alerts - hal. "Route A - Sta Monica")</label>
-<input id="editRoute" placeholder="Iwan blangko kung wala pang route">
+<label>🚚 Delivery Route (for route delivery alerts - e.g. "Route A - Sta Monica")</label>
+<input id="editRoute" placeholder="Leave blank if there is no route yet">
 <button class="btn" style="background:#059669;color:#fff;margin-top:8px" onclick="saveRoute()">Save Route</button>
 <p id="routeStatus" style="font-size:12px;margin-top:8px"></p>
 </div>
@@ -10460,7 +10526,7 @@ function closeQR(){
 }
 async function regenerateQR(){
   if(!currentQRResellerId) return;
-  if(!confirm('Regenerate QR? Yung dating QR na naka-print/share na sa customer na ito ay hindi na gagana.')) return;
+  if(!confirm('Regenerate QR? The old QR already printed/shared with this customer will stop working.')) return;
   await loadQR(currentQRResellerId, true);
 }
 async function copyQRLink(){
@@ -14040,7 +14106,7 @@ ADMIN_REWARDS_HTML = """<!DOCTYPE html>
       <input type="checkbox" id="restoreIncludeCatalog">
       Isama rin ang Reward Catalog at Settings (expiry/cooldown days)
     </label>
-    <button class="btn-save" style="background:#c0392b" onclick="restoreFromBackup()">♻️ I-restore Ngayon</button>
+    <button class="btn-save" style="background:#c0392b" onclick="restoreFromBackup()">♻️ Restore Now</button>
     <p class="status-msg" id="restoreStatus"></p>
   </div>
 </div>
@@ -14497,6 +14563,26 @@ def api_videos():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/login_tutorial_video")
+def api_login_tutorial_video():
+    """Public (no-login-required) single-video lookup for the "How to Use
+    the App" button on the Customer Login page (boss's request, Oct 6).
+    Unlike /api/videos above, this has NO login check - a customer who
+    hasn't logged in yet is exactly who needs this button - so it only
+    ever returns the FIRST non-hidden video (lowest 'order' on
+    /admin/videos, same list ISESMO already manages for the Dashboard's
+    "Watch Videos" section). No new Firebase field or admin UI needed:
+    ISESMO just keeps the intended tutorial (e.g. "How to Login") sorted
+    first on /admin/videos, exactly as it already is today. Returns
+    video: null (not an error) when no videos exist yet, so the button
+    can show a friendly "not uploaded yet" message instead of breaking."""
+    try:
+        videos = get_dashboard_videos(include_hidden=False)
+        return jsonify({"ok": True, "video": videos[0] if videos else None})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/admin/videos")
 @login_required
 @isesmo_only
@@ -14582,19 +14668,19 @@ input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:
 <div class="topbar"><h1>🎬 Dashboard Videos (ISESMO Only)</h1><a href="/cashier" class="nav-pill">← Sales</a></div>
 
 <div class="card">
-  <div style="font-weight:700;font-size:13px;margin-bottom:6px">➕ Magdagdag ng Video</div>
-  <div class="hint">I-upload muna ang video sa GitHub repo ("omega-ice" → videos folder), tapos kopyahin ang "View raw" link at i-paste dito. Awtomatikong lalabas ito sa Customer Dashboard, pinaka-huli sa listahan - gamitin ang mga ⬆️⬇️ button sa baba para iayos ang pagkasunod-sunod, o ang 👁️ button para itago muna ang isang video sa mga customer kung hindi mo pa gustong ipakita.</div>
-  <label>Pamagat ng Video</label>
-  <input type="text" id="newVideoTitle" placeholder="hal. Paano Mag-order Online">
-  <label>Raw Video Link (mula GitHub)</label>
+  <div style="font-weight:700;font-size:13px;margin-bottom:6px">➕ Add a Video</div>
+  <div class="hint">First upload the video to the GitHub repo ("omega-ice" → videos folder), then copy the "View raw" link and paste it here. It will automatically appear on the Customer Dashboard, last in the list - use the ⬆️⬇️ buttons below to reorder it, or the 👁️ button to hide a video from customers for now.</div>
+  <label>Video Title</label>
+  <input type="text" id="newVideoTitle" placeholder="e.g. How to Order Online">
+  <label>Raw Video Link (from GitHub)</label>
   <input type="text" id="newVideoSrc" placeholder="https://raw.githubusercontent.com/.../video.mp4">
-  <button class="btn-save" onclick="addVideo()">💾 I-save ang Video</button>
+  <button class="btn-save" onclick="addVideo()">💾 Save Video</button>
   <p class="status-msg" id="addStatus"></p>
 </div>
 
 <div class="card">
-  <div style="font-weight:700;font-size:13px;margin-bottom:6px">📋 Listahan ng Videos</div>
-  <div class="hint">Ang unang video sa listahan ang unang makikita ng customer pagka-bukas nila ng video panel. Gamitin ang ⬆️⬇️ para baguhin.</div>
+  <div style="font-weight:700;font-size:13px;margin-bottom:6px">📋 Video List</div>
+  <div class="hint">The first video in the list is the first one customers see when they open the video panel. Use ⬆️⬇️ to change the order.</div>
   <div id="videoList"><div class="empty-hint">Loading...</div></div>
 </div>
 
@@ -14607,7 +14693,7 @@ async function loadAdminVideos(){
     const data = await res.json();
     const videos = data.videos || [];
     if(!videos.length){
-      listEl.innerHTML = '<div class="empty-hint">Walang video pa. Magdagdag sa taas.</div>';
+      listEl.innerHTML = '<div class="empty-hint">No videos yet. Add one above.</div>';
       return;
     }
     listEl.innerHTML = videos.map((v, i) => `
@@ -14618,10 +14704,10 @@ async function loadAdminVideos(){
           <div class="vid-meta">👁 ${v.views || 0} views</div>
         </div>
         <div class="vid-actions">
-          <button onclick="moveVideo('${v.id}','up')" ${i===0?'disabled':''} title="Ilipat sa unahan">⬆️</button>
-          <button onclick="moveVideo('${v.id}','down')" ${i===videos.length-1?'disabled':''} title="Ilipat sa hulihan">⬇️</button>
-          <button class="hide-btn${v.hidden ? ' is-hidden' : ''}" onclick="toggleVideoHidden('${v.id}')" title="${v.hidden ? 'Ipakita ulit sa customer' : 'Itago mula sa customer'}">${v.hidden ? '🚫' : '👁️'}</button>
-          <button class="del-btn" onclick="deleteVideo('${v.id}','${v.title.replace(/'/g,"\\\\'")}')" title="Tanggalin">🗑️</button>
+          <button onclick="moveVideo('${v.id}','up')" ${i===0?'disabled':''} title="Move up">⬆️</button>
+          <button onclick="moveVideo('${v.id}','down')" ${i===videos.length-1?'disabled':''} title="Move down">⬇️</button>
+          <button class="hide-btn${v.hidden ? ' is-hidden' : ''}" onclick="toggleVideoHidden('${v.id}')" title="${v.hidden ? 'Show to customers again' : 'Hide from customers'}">${v.hidden ? '🚫' : '👁️'}</button>
+          <button class="del-btn" onclick="deleteVideo('${v.id}','${v.title.replace(/'/g,"\\\\'")}')" title="Delete">🗑️</button>
         </div>
       </div>
     `).join('');
@@ -14638,11 +14724,11 @@ async function addVideo(){
   const src = document.getElementById('newVideoSrc').value.trim();
   const statusEl = document.getElementById('addStatus');
   if(!title || !src){
-    statusEl.textContent = 'Kailangan ang parehong pamagat at link.';
+    statusEl.textContent = 'Both a title and a link are required.';
     statusEl.className = 'status-msg err';
     return;
   }
-  statusEl.textContent = 'Sinasave...';
+  statusEl.textContent = 'Saving...';
   statusEl.className = 'status-msg';
   try{
     const res = await fetch('/api/admin/videos/add', {
@@ -14651,7 +14737,7 @@ async function addVideo(){
     });
     const data = await res.json();
     if(data.ok){
-      statusEl.textContent = '✅ Na-save!';
+      statusEl.textContent = '✅ Saved!';
       statusEl.className = 'status-msg ok';
       document.getElementById('newVideoTitle').value = '';
       document.getElementById('newVideoSrc').value = '';
@@ -14673,7 +14759,7 @@ async function moveVideo(id, direction){
   loadAdminVideos();
 }
 async function deleteVideo(id, title){
-  if(!confirm(`Tanggalin ang video na "${title}"? Hindi na ito mababawi.`)) return;
+  if(!confirm(`Delete the video "${title}"? This cannot be undone.`)) return;
   await fetch(`/api/admin/videos/${id}/delete`, {method: 'POST'});
   loadAdminVideos();
 }
@@ -14698,9 +14784,9 @@ def api_admin_add_video():
         title = (data.get("title") or "").strip()[:120]
         src = (data.get("src") or "").strip()
         if not title or not src:
-            return jsonify({"ok": False, "error": "Title at video link kailangan"}), 400
+            return jsonify({"ok": False, "error": "Title and video link are required"}), 400
         if not (src.startswith("http://") or src.startswith("https://")):
-            return jsonify({"ok": False, "error": "Hindi valid na link - dapat nagsisimula sa https://"}), 400
+            return jsonify({"ok": False, "error": "Not a valid link - it must start with https://"}), 400
         existing = fb_get("dashboard_videos") or {}
         max_order = -1
         for v in existing.values():
@@ -14716,8 +14802,28 @@ def api_admin_add_video():
         }
         result = fb_post("dashboard_videos", new_video)
         if not result:
-            return jsonify({"ok": False, "error": "Failed to save sa Firebase"}), 500
+            return jsonify({"ok": False, "error": "Failed to save to Firebase"}), 500
         new_video["id"] = result.get("name")
+        # Boss's request, Oct 3: "my notification kay customer na my new
+        # video uploaded sa dashboard nila" - broadcasts a Web Push to
+        # every subscribed customer device the moment ISESMO adds a new
+        # video, same mechanism as the Points Program pause/resume
+        # announcements above. Silently no-ops for anyone who never
+        # tapped "Enable" on their dashboard's push banner (no
+        # subscription on file) - the video still shows up in their
+        # video list regardless, this is purely an extra heads-up.
+        # Tag includes the new video's own id so back-to-back video
+        # uploads each show their own notification instead of the
+        # newest one silently replacing/hiding the previous unread one.
+        try:
+            send_push_to_all_resellers(
+                title="🎬 New Video!",
+                body=f'A new video, "{title}", was just added to your dashboard.',
+                url="/customer",
+                tag=f"omega-new-video-{new_video['id']}",
+            )
+        except Exception as e:
+            print(f"api_admin_add_video: push notify failed: {e}")
         return jsonify({"ok": True, "video": new_video})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -15743,6 +15849,7 @@ input.sud-cell.incorrect{background:#fee2e2 !important;color:#c0392b}
         <div id="triviaChoices"></div>
       </div>
       <div id="triviaTimeoutMsg" class="win-banner" style="background:#fee2e2;color:#991b1b">⏰ Lumipas ang 3 minuto! Panibagong tanong, simula ulit...</div>
+      <div id="triviaWrongMsg" class="win-banner" style="background:#fee2e2;color:#991b1b">❌ Mali! Panibagong tanong, simula ulit...</div>
       <div id="triviaRoundDone" style="display:none;text-align:center">
         <div style="font-size:14px;font-weight:800;color:#0f2942;margin-bottom:6px">Tapos ang Level!</div>
         <div style="font-size:24px;font-weight:800;color:#00609C;margin-bottom:10px" id="triviaScoreFinal"></div>
@@ -16183,6 +16290,7 @@ function backToTriviaLevels(){
 async function startTriviaRound(){
   document.getElementById('triviaRoundDone').style.display = 'none';
   document.getElementById('triviaTimeoutMsg').style.display = 'none';
+  document.getElementById('triviaWrongMsg').style.display = 'none';
   document.getElementById('triviaCard').style.display = 'block';
   document.getElementById('triviaProgress').textContent = 'Loading...';
   document.getElementById('triviaQ').textContent = '';
@@ -16244,6 +16352,21 @@ function onTriviaTimeout(){
   setTimeout(() => startTriviaRound(), 1800);
 }
 
+function onTriviaWrongAnswer(){
+  // boss's request, Oct 6: "pag nagkamali na may retry na agad para di
+  // syang oras, babalik ulit sa unang tanong" - a single wrong answer
+  // restarts the SAME level from question 1 right away (no need to wait
+  // out the remaining questions, since a perfect 20/20 is required to
+  // unlock the next level anyway). Mirrors onTriviaTimeout() exactly,
+  // just with a shorter delay and a different message, and a fresh
+  // randomized question set is fetched again via startTriviaRound()
+  // (same as the timeout path) - never a replay of the same 20.
+  stopTriviaTimer();
+  document.getElementById('triviaCard').style.display = 'none';
+  document.getElementById('triviaWrongMsg').style.display = 'block';
+  setTimeout(() => startTriviaRound(), 1500);
+}
+
 function renderTriviaQuestion(){
   const item = triviaQuestions[triviaQIndex];
   document.getElementById('triviaProgress').textContent = `Tanong ${triviaQIndex+1} / ${triviaQuestions.length} • Tama: ${triviaScore}`;
@@ -16282,6 +16405,11 @@ async function answerTrivia(i){
     }
   }
   setTimeout(() => {
+    if(!correct){
+      // instant retry on a wrong answer - see onTriviaWrongAnswer()
+      onTriviaWrongAnswer();
+      return;
+    }
     triviaQIndex++;
     if(triviaQIndex >= triviaQuestions.length){
       finishTriviaRound();
