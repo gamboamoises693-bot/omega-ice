@@ -49,74 +49,6 @@ def add_security_headers(resp):
     return resp
 
 
-# =====================================================================
-# STAFF IDLE AUTO-LOGOUT (boss's request, Oct 3: "pag sa staff
-# nakalimutan maglogout auto logout na after 5 mins"). Implemented as
-# a response-injection hook instead of editing every single staff
-# template by hand: ANY html page response that goes out while
-# session["staff_name"] is set gets a tiny <script> tag injected
-# right before </body>, which starts a 5-minute no-activity timer in
-# the browser (reset on mousemove/keydown/click/touch/scroll) and
-# calls /api/logout + redirects to /login once it fires. This covers
-# every current staff page (cashier, dashboard, crossword, games hub,
-# sales analytics, admin pages, etc.) AND any future one, with zero
-# per-template wiring.
-# =====================================================================
-STAFF_IDLE_TIMEOUT_MS = 5 * 60 * 1000  # 5 minutes
-
-STAFF_IDLE_LOGOUT_JS = """
-(function(){
-  var IDLE_LIMIT_MS = %d;
-  var idleTimer = null;
-  var loggingOut = false;
-
-  function doIdleLogout(){
-    if(loggingOut) return;
-    loggingOut = true;
-    fetch('/api/logout', {method:'POST', headers:{'Content-Type':'application/json'}})
-      .catch(function(){})
-      .then(function(){ window.location.href = '/login?idle=1'; });
-  }
-
-  function resetIdleTimer(){
-    if(idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(doIdleLogout, IDLE_LIMIT_MS);
-  }
-
-  ['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(function(evt){
-    document.addEventListener(evt, resetIdleTimer, {passive:true});
-  });
-  document.addEventListener('visibilitychange', function(){
-    if(document.visibilityState === 'visible') resetIdleTimer();
-  });
-
-  resetIdleTimer();
-})();
-""" % STAFF_IDLE_TIMEOUT_MS
-
-
-@app.route("/js/staff-idle-logout.js")
-def staff_idle_logout_js():
-    return Response(STAFF_IDLE_LOGOUT_JS, mimetype="application/javascript")
-
-
-@app.after_request
-def inject_staff_idle_logout(resp):
-    try:
-        if session.get("staff_name") and resp.mimetype == "text/html":
-            body = resp.get_data(as_text=True)
-            if "</body>" in body and "staff-idle-logout.js" not in body:
-                body = body.replace(
-                    "</body>",
-                    '<script src="/js/staff-idle-logout.js"></script></body>',
-                    1,
-                )
-                resp.set_data(body)
-    except Exception:
-        pass  # never let the idle-logout injection break a real page
-    return resp
-
-
 # --- SECURITY HARDENING ---
 SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:
@@ -667,6 +599,7 @@ from modules.admin_import import admin_import_bp
 from modules.home_dashboard import home_bp, _sales_totals, _expense_breakdown, _fixed_asset_expense_for_period
 from modules.advance_orders import advance_orders_bp
 from modules.duplicate_finder import duplicate_finder_bp
+from modules.shared import page_access_required, staff_has_page_access, STAFF_PAGE_KEYS
 from modules.price_manager import price_manager_bp
 # NOTE (Sept 26, boss's report: "Ask AI nawala sa dropdown"): this
 # blueprint/registration was missing from THIS shared app.py - the module
@@ -1047,6 +980,7 @@ td:nth-child(2){white-space:normal}
       <a href="/admin/rewards">🎁 Rewards Catalog</a>
       <a href="/admin/reseller_sales">📊 Reseller Sales Tracking</a>
       <a href="/admin/videos">🎬 Dashboard Videos</a>
+      <a href="/admin/staff">🔑 Manage Staff</a>
 {% endif %}
       <a href="/staff/games">🎮 Mini-Games</a>
 {% if (staff_name or '')|lower in ['isesmo', 'isesmo gamboa'] %}
@@ -3855,6 +3789,13 @@ def root():
         sales_first_staff = ["omega", "yhel"]
         if (staff_name or "").strip().lower() in sales_first_staff:
             return redirect(url_for("cashier_page"))
+        # Per-staff page access (boss's request, Oct 7) can restrict a
+        # staff member out of /home itself - if so, fall back to
+        # /cashier (ALWAYS open to every staff member, never gated)
+        # instead of landing them straight on an Access Denied page
+        # the instant they log in.
+        if not staff_has_page_access("home"):
+            return redirect(url_for("cashier_page"))
         return redirect(url_for("home_dashboard.home_page"))
     return redirect(url_for("login_page"))
 
@@ -3955,6 +3896,323 @@ def api_logout():
         log_staff_login(staff_id, staff_name, staff_position, "Logout", True, "Manual logout")
     session.clear()
     return jsonify({"ok": True})
+
+# =====================================================================
+# MANAGE STAFF - change PIN (boss's request, Oct 7: "gusto ko may ui si
+# isesmo para magpalit ng password ng mga staff"). Staff log in with a
+# 4-digit PIN (see /api/login above), not a text password, so "password"
+# here means that PIN. Before this, the ONLY way to set a staff PIN was
+# the one-time /api/setup (env vars, Render-only, no UI) - there was no
+# way to change a PIN afterward without touching Firebase by hand. This
+# adds an ISESMO-only page to do it from the app itself. Scope kept
+# intentionally narrow to what was asked (PIN only) - NOT a full staff
+# add/remove/edit-position screen, which is a separate, bigger feature.
+# =====================================================================
+ADMIN_STAFF_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Manage Staff - ISESMO Only</title>
+<style>
+*{box-sizing:border-box}body{font-family:sans-serif;background:#eef7ff;margin:0;padding:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap}
+.topbar h1{font-size:15px;color:#00609C;margin:0}
+.nav-pill{padding:7px 14px;border-radius:20px;font-size:11px;text-decoration:none;border:1px solid #cde;background:#fff;color:#00609C;display:inline-flex;align-items:center;white-space:nowrap}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.hint{font-size:11px;color:#666;line-height:1.5;margin-bottom:12px}
+.staff-row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #f0f4f8;gap:10px}
+.staff-row:last-child{border-bottom:none}
+.staff-name{font-weight:700;font-size:13px;color:#0f2942}
+.staff-meta{font-size:11px;color:#888;margin-top:2px}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;margin-left:6px}
+.badge.active{background:#dcfce7;color:#166534}
+.badge.inactive{background:#fee2e2;color:#991b1b}
+.btn-pin{padding:8px 14px;border-radius:8px;border:none;background:#00609C;color:#fff;font-size:11px;font-weight:700;white-space:nowrap}
+.btn-pages{padding:8px 14px;border-radius:8px;border:1px solid #00609C;background:#fff;color:#00609C;font-size:11px;font-weight:700;white-space:nowrap}
+.staff-actions{display:flex;flex-direction:column;gap:6px}
+.page-check-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f4f8;font-size:13px}
+.page-check-row:last-child{border-bottom:none}
+.page-check-row input[type=checkbox]{width:auto;padding:0;border:none;border-radius:0;accent-color:#00609C;margin:0}
+.pages-modal-box{max-width:380px}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;align-items:center;justify-content:center;padding:16px}
+.modal-overlay.open{display:flex}
+.modal-box{background:#fff;border-radius:16px;padding:20px;max-width:360px;width:100%}
+.modal-box h3{margin:0 0 4px;font-size:15px;color:#00609C}
+.modal-box .hint{margin:0 0 12px}
+label{font-size:12px;color:#666;display:block;margin:10px 0 4px}
+input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:16px;letter-spacing:4px;text-align:center}
+.modal-actions{display:flex;gap:8px;margin-top:16px}
+.modal-actions button{flex:1;padding:12px;border-radius:10px;border:1px solid #ccd;font-size:13px;font-weight:600}
+.modal-btn-primary{background:#00609C;color:#fff;border-color:#00609C}
+.status-msg{font-size:12px;text-align:center;margin-top:8px;min-height:16px}
+.status-msg.ok{color:#166534}.status-msg.err{color:#c0392b}
+</style></head>
+<body>
+<div class="topbar"><h1>🔑 Manage Staff (ISESMO Only)</h1><a href="/cashier" class="nav-pill">← Sales</a></div>
+
+<div class="card">
+  <div class="hint">Baguhin ang 4-digit PIN ng kahit sinong staff dito - hindi na kailangang gamitin ang Firebase mismo. Ang staff na nabago ang PIN ay kailangang mag-login ulit gamit ang BAGONG PIN sa susunod niyang pag-gamit ng app.</div>
+  <div id="staffList">Loading...</div>
+</div>
+
+<div class="modal-overlay" id="pinModal">
+  <div class="modal-box">
+    <h3 id="pinModalTitle">🔑 Change PIN</h3>
+    <p class="hint">Maglagay ng bagong 4-digit PIN para kay <b id="pinModalStaffName"></b>.</p>
+    <label>New PIN</label>
+    <input type="password" id="newPinInput" maxlength="4" inputmode="numeric" placeholder="0000">
+    <label>Confirm New PIN</label>
+    <input type="password" id="confirmPinInput" maxlength="4" inputmode="numeric" placeholder="0000">
+    <p class="status-msg" id="pinModalStatus"></p>
+    <div class="modal-actions">
+      <button onclick="closePinModal()">Cancel</button>
+      <button class="modal-btn-primary" onclick="confirmSetPin()">Save PIN</button>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE ACCESS modal (boss's request, Oct 7: "pwd magseset ano lang
+     pwd access sa app") - a checkbox per toggle-able feature page.
+     Every checkbox starts CHECKED for a staff member ISESMO hasn't
+     restricted yet (allowed_pages === null), matching the default-open
+     behavior enforced server-side - see STAFF_PAGE_KEYS's big comment
+     in modules/shared.py. Sales/Cashier itself is NOT in this list -
+     it's every staff member's core job and is never gated. -->
+<div class="modal-overlay" id="pagesModal">
+  <div class="modal-box pages-modal-box">
+    <h3>🧭 Page Access</h3>
+    <p class="hint">Piliin kung anong mga page ang pwedeng buksan ni <b id="pagesModalStaffName"></b>. Lagi niyang open/accessible ang Sales - hindi ito kasama dito.</p>
+    <div id="pageCheckList"></div>
+    <p class="status-msg" id="pagesModalStatus"></p>
+    <div class="modal-actions">
+      <button onclick="closePagesModal()">Cancel</button>
+      <button class="modal-btn-primary" onclick="confirmSetPages()">Save Access</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let staffData = {};
+let pinTargetKey = null;
+let pagesTargetKey = null;
+let pageKeys = [];
+
+function escapeHtmlS(t){
+  const d = document.createElement('div');
+  d.textContent = (t===null||t===undefined) ? '' : String(t);
+  return d.innerHTML;
+}
+
+async function loadStaffList(){
+  const wrap = document.getElementById('staffList');
+  try{
+    const res = await fetch('/api/admin/staff');
+    const data = await res.json();
+    if(!data.ok){ wrap.innerHTML = `<div class="hint">${escapeHtmlS(data.error||'Error')}</div>`; return; }
+    pageKeys = data.page_keys || [];
+    staffData = {};
+    (data.staff||[]).forEach(s => staffData[s.id] = s);
+    if(!data.staff || !data.staff.length){ wrap.innerHTML = '<div class="hint">Walang staff na naka-record.</div>'; return; }
+    wrap.innerHTML = data.staff.map(s => `
+      <div class="staff-row">
+        <div>
+          <div class="staff-name">${escapeHtmlS(s.name)}<span class="badge ${s.status==='Active'?'active':'inactive'}">${escapeHtmlS(s.status||'-')}</span></div>
+          <div class="staff-meta">${escapeHtmlS(s.position||'Staff')}${s.pin_changed_at ? ` • PIN last changed ${escapeHtmlS(s.pin_changed_at)} ni ${escapeHtmlS(s.pin_changed_by||'-')}` : ''}${(s.allowed_pages===null||s.allowed_pages===undefined) ? '' : ` • Restricted: ${s.allowed_pages.length}/${pageKeys.length} pages`}</div>
+        </div>
+        <div class="staff-actions">
+          <button class="btn-pin" onclick="openPinModal('${escapeHtmlS(s.id)}')">🔑 Change PIN</button>
+          <button class="btn-pages" onclick="openPagesModal('${escapeHtmlS(s.id)}')">🧭 Page Access</button>
+        </div>
+      </div>
+    `).join('');
+  }catch(e){ wrap.innerHTML = `<div class="hint">Error: ${escapeHtmlS(e.message)}</div>`; }
+}
+
+function openPinModal(key){
+  pinTargetKey = key;
+  const s = staffData[key] || {};
+  document.getElementById('pinModalStaffName').textContent = s.name || key;
+  document.getElementById('newPinInput').value = '';
+  document.getElementById('confirmPinInput').value = '';
+  document.getElementById('pinModalStatus').textContent = '';
+  document.getElementById('pinModalStatus').className = 'status-msg';
+  document.getElementById('pinModal').classList.add('open');
+}
+
+function closePinModal(){
+  pinTargetKey = null;
+  document.getElementById('pinModal').classList.remove('open');
+}
+
+function openPagesModal(key){
+  pagesTargetKey = key;
+  const s = staffData[key] || {};
+  document.getElementById('pagesModalStaffName').textContent = s.name || key;
+  // null/undefined allowed_pages = full access (default-open) - every
+  // checkbox starts checked, matching staff_has_page_access() server-side.
+  const allowed = s.allowed_pages;
+  const checkList = document.getElementById('pageCheckList');
+  checkList.innerHTML = pageKeys.map(([pkey, label]) => {
+    const checked = (allowed === null || allowed === undefined) ? true : allowed.includes(pkey);
+    return `<label class="page-check-row"><input type="checkbox" data-page="${escapeHtmlS(pkey)}" ${checked ? 'checked' : ''}> ${escapeHtmlS(label)}</label>`;
+  }).join('');
+  document.getElementById('pagesModalStatus').textContent = '';
+  document.getElementById('pagesModalStatus').className = 'status-msg';
+  document.getElementById('pagesModal').classList.add('open');
+}
+
+function closePagesModal(){
+  pagesTargetKey = null;
+  document.getElementById('pagesModal').classList.remove('open');
+}
+
+async function confirmSetPages(){
+  const st = document.getElementById('pagesModalStatus');
+  const checked = Array.from(document.querySelectorAll('#pageCheckList input[type=checkbox]:checked')).map(el => el.dataset.page);
+  st.textContent = 'Saving...'; st.className = 'status-msg';
+  try{
+    const res = await fetch(`/api/admin/staff/${pagesTargetKey}/set_pages`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({allowed_pages: checked}),
+    });
+    const data = await res.json();
+    if(data.ok){
+      st.textContent = 'Na-update na ang page access!'; st.className = 'status-msg ok';
+      setTimeout(() => { closePagesModal(); loadStaffList(); }, 900);
+    } else {
+      st.textContent = data.error || 'May error.'; st.className = 'status-msg err';
+    }
+  }catch(e){ st.textContent = 'Error: ' + e.message; st.className = 'status-msg err'; }
+}
+
+async function confirmSetPin(){
+  const st = document.getElementById('pinModalStatus');
+  const newPin = document.getElementById('newPinInput').value.trim();
+  const confirmPin = document.getElementById('confirmPinInput').value.trim();
+  if(!/^[0-9]{4}$/.test(newPin)){
+    st.textContent = 'Dapat eksaktong 4 digits ang PIN.'; st.className = 'status-msg err'; return;
+  }
+  if(newPin !== confirmPin){
+    st.textContent = 'Hindi magkatugma ang 2 PIN na nilagay mo.'; st.className = 'status-msg err'; return;
+  }
+  st.textContent = 'Saving...'; st.className = 'status-msg';
+  try{
+    const res = await fetch(`/api/admin/staff/${pinTargetKey}/set_pin`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({new_pin: newPin}),
+    });
+    const data = await res.json();
+    if(data.ok){
+      st.textContent = 'Na-update na ang PIN!'; st.className = 'status-msg ok';
+      setTimeout(() => { closePinModal(); loadStaffList(); }, 900);
+    } else {
+      st.textContent = data.error || 'May error.'; st.className = 'status-msg err';
+    }
+  }catch(e){ st.textContent = 'Error: ' + e.message; st.className = 'status-msg err'; }
+}
+
+loadStaffList();
+</script>
+</body></html>
+"""
+
+
+@app.route("/admin/staff")
+@login_required
+@isesmo_only
+def admin_staff_page():
+    return render_template_string(ADMIN_STAFF_HTML)
+
+
+@app.route("/api/admin/staff")
+@login_required
+@isesmo_only
+def api_admin_staff_list():
+    """Lists every staff account for the Manage Staff page. The PIN
+    itself is NEVER sent to the browser (not even to ISESMO) - only
+    name/position/status and a last-changed audit trail, same
+    never-expose-the-secret principle as every password field
+    elsewhere in this app."""
+    try:
+        staff_data = fb_get("staff") or {}
+        staff_list = []
+        for key, val in staff_data.items():
+            if not isinstance(val, dict):
+                continue
+            staff_list.append({
+                "id": key,
+                "name": val.get("name") or key,
+                "position": val.get("position") or "Staff",
+                "status": val.get("status") or "Active",
+                "pin_changed_at": val.get("pin_changed_at"),
+                "pin_changed_by": val.get("pin_changed_by"),
+                # None (field absent in Firebase) = full access, not
+                # "no access" - see staff_has_page_access()'s docstring
+                # in modules/shared.py. The frontend treats None the
+                # same way: every checkbox starts CHECKED.
+                "allowed_pages": val.get("allowed_pages"),
+            })
+        staff_list.sort(key=lambda s: s["name"].lower())
+        return jsonify({"ok": True, "staff": staff_list, "page_keys": STAFF_PAGE_KEYS})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/admin/staff/<staff_key>/set_pin", methods=["POST"])
+@login_required
+@isesmo_only
+def api_admin_staff_set_pin(staff_key):
+    """Sets a NEW 4-digit login PIN for one staff account. Does not
+    touch their active session - if that staff member is logged in
+    right now, they keep working until they log out; the new PIN only
+    takes effect on their NEXT /api/login."""
+    try:
+        existing = fb_get(f"staff/{staff_key}")
+        if not isinstance(existing, dict):
+            return jsonify({"ok": False, "error": "Staff not found"}), 404
+        data = request.json or {}
+        new_pin = (data.get("new_pin") or "").strip()
+        if len(new_pin) != 4 or not new_pin.isdigit():
+            return jsonify({"ok": False, "error": "PIN must be exactly 4 digits"}), 400
+        fb_patch(f"staff/{staff_key}", {
+            "pin": new_pin,
+            "pin_changed_at": manila_now().strftime("%Y-%m-%d %H:%M:%S"),
+            "pin_changed_by": session.get("staff_name"),
+        })
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/admin/staff/<staff_key>/set_pages", methods=["POST"])
+@login_required
+@isesmo_only
+def api_admin_staff_set_pages(staff_key):
+    """Saves which feature pages this ONE staff member may open
+    (boss's request, Oct 7: "pwd magseset ano lang pwd access sa
+    app"). Scoped to the PAGE level only - see the big comment above
+    STAFF_PAGE_KEYS in modules/shared.py for why the underlying APIs
+    aren't individually gated. Sending every known key back (i.e.
+    "check everything") is equivalent to never restricting this staff
+    member at all, EXCEPT it's now explicitly recorded rather than
+    just defaulting that way - both behave identically from the
+    staff member's side."""
+    try:
+        existing = fb_get(f"staff/{staff_key}")
+        if not isinstance(existing, dict):
+            return jsonify({"ok": False, "error": "Staff not found"}), 404
+        data = request.json or {}
+        submitted = data.get("allowed_pages")
+        if not isinstance(submitted, list):
+            return jsonify({"ok": False, "error": "allowed_pages must be a list"}), 400
+        valid_keys = {k for k, _ in STAFF_PAGE_KEYS}
+        clean = [p for p in submitted if p in valid_keys]
+        fb_patch(f"staff/{staff_key}", {
+            "allowed_pages": clean,
+            "pages_changed_at": manila_now().strftime("%Y-%m-%d %H:%M:%S"),
+            "pages_changed_by": session.get("staff_name"),
+        })
+        return jsonify({"ok": True, "allowed_pages": clean})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 @app.route("/api/kiosk/verify_unlock", methods=["POST"])
 @login_required
@@ -5263,6 +5521,7 @@ def fix_reseller_duplicates():
 
 @app.route("/machines")
 @login_required
+@page_access_required("machines")
 def machines_page():
     return render_template_string(MACHINES_HTML)
 
@@ -12088,6 +12347,7 @@ populateHistSubPicker('daily');
 
 @app.route("/dashboard")
 @login_required
+@page_access_required("dashboard")
 def dashboard_page():
     return render_template_string(SALES_ANALYTICS_HTML, staff_name=session.get("staff_name"))
 
@@ -18007,6 +18267,7 @@ def staff_crossword_page():
 
 @app.route("/staff/games")
 @login_required
+@page_access_required("games")
 def staff_games_page():
     """Mini-Games Hub for staff/admin accounts (boss's request, Oct 3:
     "I add sa omega ice app" the suggested sari-sari-store games, same
