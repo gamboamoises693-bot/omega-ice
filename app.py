@@ -3949,7 +3949,32 @@ input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:
 
 <div class="card">
   <div class="hint">Baguhin ang 4-digit PIN ng kahit sinong staff dito - hindi na kailangang gamitin ang Firebase mismo. Ang staff na nabago ang PIN ay kailangang mag-login ulit gamit ang BAGONG PIN sa susunod niyang pag-gamit ng app.</div>
+  <button class="modal-btn-primary" style="width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;font-weight:600;margin-bottom:14px" onclick="openAddStaffModal()">➕ Add Staff</button>
   <div id="staffList">Loading...</div>
+</div>
+
+<!-- ADD STAFF modal (boss's request, Oct 7: "lagyan ng add" - before
+     this, a new staff account could ONLY be created once via env vars
+     on Render (/api/setup) - no UI. Mirrors the same PIN-format /
+     match validation as the Change PIN modal above. -->
+<div class="modal-overlay" id="addStaffModal">
+  <div class="modal-box">
+    <h3>➕ Add Staff</h3>
+    <p class="hint">Gagawa ng bagong staff account. Ang bagong staff ay puwede nang mag-login gamit ang PIN na ito.</p>
+    <label>Staff Name</label>
+    <input type="text" id="addStaffNameInput" maxlength="60" placeholder="e.g. Juan Dela Cruz" style="letter-spacing:normal;text-align:left;font-size:15px">
+    <label>Position (optional)</label>
+    <input type="text" id="addStaffPositionInput" maxlength="40" placeholder="Staff" style="letter-spacing:normal;text-align:left;font-size:15px">
+    <label>New PIN</label>
+    <input type="password" id="addStaffPinInput" maxlength="4" inputmode="numeric" placeholder="0000">
+    <label>Confirm New PIN</label>
+    <input type="password" id="addStaffConfirmPinInput" maxlength="4" inputmode="numeric" placeholder="0000">
+    <p class="status-msg" id="addStaffModalStatus"></p>
+    <div class="modal-actions">
+      <button onclick="closeAddStaffModal()">Cancel</button>
+      <button class="modal-btn-primary" onclick="confirmAddStaff()">Create Staff</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal-overlay" id="pinModal">
@@ -4108,6 +4133,51 @@ async function confirmSetPin(){
   }catch(e){ st.textContent = 'Error: ' + e.message; st.className = 'status-msg err'; }
 }
 
+function openAddStaffModal(){
+  document.getElementById('addStaffNameInput').value = '';
+  document.getElementById('addStaffPositionInput').value = '';
+  document.getElementById('addStaffPinInput').value = '';
+  document.getElementById('addStaffConfirmPinInput').value = '';
+  document.getElementById('addStaffModalStatus').textContent = '';
+  document.getElementById('addStaffModalStatus').className = 'status-msg';
+  document.getElementById('addStaffModal').classList.add('open');
+}
+
+function closeAddStaffModal(){
+  document.getElementById('addStaffModal').classList.remove('open');
+}
+
+async function confirmAddStaff(){
+  const st = document.getElementById('addStaffModalStatus');
+  const name = document.getElementById('addStaffNameInput').value.trim();
+  const position = document.getElementById('addStaffPositionInput').value.trim();
+  const newPin = document.getElementById('addStaffPinInput').value.trim();
+  const confirmPin = document.getElementById('addStaffConfirmPinInput').value.trim();
+  if(!name){
+    st.textContent = 'Pangalan ng staff kailangan.'; st.className = 'status-msg err'; return;
+  }
+  if(!/^[0-9]{4}$/.test(newPin)){
+    st.textContent = 'Dapat eksaktong 4 digits ang PIN.'; st.className = 'status-msg err'; return;
+  }
+  if(newPin !== confirmPin){
+    st.textContent = 'Hindi magkatugma ang 2 PIN na nilagay mo.'; st.className = 'status-msg err'; return;
+  }
+  st.textContent = 'Saving...'; st.className = 'status-msg';
+  try{
+    const res = await fetch('/api/admin/staff/add', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name: name, position: position, pin: newPin}),
+    });
+    const data = await res.json();
+    if(data.ok){
+      st.textContent = 'Nagawa na ang bagong staff!'; st.className = 'status-msg ok';
+      setTimeout(() => { closeAddStaffModal(); loadStaffList(); }, 900);
+    } else {
+      st.textContent = data.error || 'May error.'; st.className = 'status-msg err';
+    }
+  }catch(e){ st.textContent = 'Error: ' + e.message; st.className = 'status-msg err'; }
+}
+
 loadStaffList();
 </script>
 </body></html>
@@ -4155,6 +4225,23 @@ def api_admin_staff_list():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _pin_already_taken(pin, exclude_key=None):
+    """True if another staff account already uses this exact PIN.
+    /api/login matches by PIN alone (first match wins, see api_login
+    above) - a DUPLICATE PIN would make login ambiguous (or silently
+    log someone into the WRONG account), so both set_pin and the new
+    Add Staff endpoint below refuse to create one, regardless of the
+    other account's Active/Inactive status (an Inactive one could be
+    re-activated later and collide)."""
+    staff_data = fb_get("staff") or {}
+    for key, val in staff_data.items():
+        if key == exclude_key or not isinstance(val, dict):
+            continue
+        if val.get("pin") == pin:
+            return True
+    return False
+
+
 @app.route("/api/admin/staff/<staff_key>/set_pin", methods=["POST"])
 @login_required
 @isesmo_only
@@ -4171,12 +4258,54 @@ def api_admin_staff_set_pin(staff_key):
         new_pin = (data.get("new_pin") or "").strip()
         if len(new_pin) != 4 or not new_pin.isdigit():
             return jsonify({"ok": False, "error": "PIN must be exactly 4 digits"}), 400
+        if _pin_already_taken(new_pin, exclude_key=staff_key):
+            return jsonify({"ok": False, "error": "Ginagamit na ng ibang staff ang PIN na ito - pumili ng ibang 4 digits."}), 400
         fb_patch(f"staff/{staff_key}", {
             "pin": new_pin,
             "pin_changed_at": manila_now().strftime("%Y-%m-%d %H:%M:%S"),
             "pin_changed_by": session.get("staff_name"),
         })
         return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/admin/staff/add", methods=["POST"])
+@login_required
+@isesmo_only
+def api_admin_staff_add():
+    """Adds a brand-new staff account (boss's request, Oct 7, on the
+    Manage Staff page: "lagyan ng add" - before this, a new staff
+    account could ONLY be created through the one-time /api/setup
+    (env vars, Render-only, no UI) - there was no way to add a 5th,
+    6th... staff member from the app itself. Gets a fresh auto-
+    generated Firebase key (fb_post/push), same as every other
+    "add a new X" endpoint in this file - never reuses/renumbers the
+    old staff1/staff2/staff3/staff4 scheme those first 4 happen to
+    have."""
+    try:
+        data = request.json or {}
+        name = (data.get("name") or "").strip()[:60]
+        position = (data.get("position") or "").strip()[:40] or "Staff"
+        pin = (data.get("pin") or "").strip()
+        if not name:
+            return jsonify({"ok": False, "error": "Pangalan ng staff kailangan"}), 400
+        if len(pin) != 4 or not pin.isdigit():
+            return jsonify({"ok": False, "error": "PIN must be exactly 4 digits"}), 400
+        if _pin_already_taken(pin):
+            return jsonify({"ok": False, "error": "Ginagamit na ng ibang staff ang PIN na ito - pumili ng ibang 4 digits."}), 400
+        new_staff = {
+            "name": name,
+            "position": position,
+            "pin": pin,
+            "status": "Active",
+            "added_by": session.get("staff_name"),
+            "added_at": manila_now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        result = fb_post("staff", new_staff)
+        if not result or not result.get("name"):
+            return jsonify({"ok": False, "error": "Hindi na-save sa Firebase - subukan ulit."}), 500
+        return jsonify({"ok": True, "id": result["name"]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
