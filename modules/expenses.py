@@ -319,8 +319,16 @@ EXPENSES_HTML = """<!DOCTYPE html>
 label{font-size:12px;color:#666;display:block;margin:10px 0 4px}
 input,select,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;font-size:14px;font-family:inherit}
 input:disabled{background:#f4f6f8;color:#888}
-.cat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:4px}
-.cat-row button{padding:9px 4px;border-radius:8px;border:1px solid #ccd;background:#f5f5f5;font-size:11px}
+/* Category pills (boss's report, Oct 7: with "Salary" added as a 5th
+   category, the fixed 4-column grid below left it stranded alone on its
+   own row, narrow and left-aligned, instead of lining up nicely).
+   Switched from a 4-column GRID (equal-width columns, same track width
+   on every row) to a WRAPPING FLEX row where each button just sizes to
+   its own label + padding. This also means the row no longer needs to
+   be touched again if a 6th/7th category is ever added later - it just
+   keeps wrapping naturally instead of leaving an odd one out. */
+.cat-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.cat-row button{flex:0 0 auto;padding:9px 14px;border-radius:8px;border:1px solid #ccd;background:#f5f5f5;font-size:11px;white-space:nowrap}
 .cat-row button.active{background:#00609C;color:#fff;border-color:#00609C}
 .save-btn{width:100%;padding:13px;margin-top:14px;background:#00609C;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600}
 .save-btn.editing{background:#1a8a4a}
