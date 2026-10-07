@@ -37,7 +37,7 @@ from datetime import datetime
 
 from flask import Blueprint, request, jsonify, session, render_template_string
 
-from modules.shared import fb_get, fb_post, fb_delete, login_required, isesmo_only, now_str, today_str
+from modules.shared import fb_get, fb_post, fb_delete, login_required, isesmo_only, now_str, today_str, page_access_required
 
 plastic_bp = Blueprint("plastic", __name__)
 
@@ -324,6 +324,7 @@ def _compute_summary():
 
 @plastic_bp.route("/plastic")
 @login_required
+@page_access_required("plastic")
 def plastic_page():
     staff = (session.get("staff_name") or "").strip().lower()
     is_isesmo = staff in ["isesmo", "isesmo gamboa"]

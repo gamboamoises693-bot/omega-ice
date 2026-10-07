@@ -63,7 +63,7 @@ from datetime import datetime
 
 from flask import Blueprint, request, jsonify, session, render_template_string
 
-from modules.shared import fb_get, fb_post, fb_patch, fb_delete, login_required, isesmo_only, now_str, today_str
+from modules.shared import fb_get, fb_post, fb_patch, fb_delete, login_required, isesmo_only, now_str, today_str, page_access_required
 
 assets_bp = Blueprint("assets", __name__)
 
@@ -462,6 +462,7 @@ loadAssets();
 
 @assets_bp.route("/assets")
 @login_required
+@page_access_required("assets")
 def assets_page():
     staff = (session.get("staff_name") or "").strip().lower()
     is_isesmo = staff in ["isesmo", "isesmo gamboa"]

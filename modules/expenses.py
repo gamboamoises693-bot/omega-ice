@@ -96,7 +96,7 @@ from datetime import datetime
 
 from flask import Blueprint, request, jsonify, session, render_template_string
 
-from modules.shared import fb_get, fb_post, fb_put, fb_delete, login_required, isesmo_only, now_str, today_str
+from modules.shared import fb_get, fb_post, fb_put, fb_delete, login_required, isesmo_only, now_str, today_str, page_access_required
 
 expenses_bp = Blueprint("expenses", __name__)
 
@@ -864,6 +864,7 @@ loadTrend();
 
 @expenses_bp.route("/expenses")
 @login_required
+@page_access_required("expenses")
 def expenses_page():
     staff = (session.get("staff_name") or "").strip().lower()
     is_isesmo = staff in ["isesmo", "isesmo gamboa"]
@@ -875,6 +876,7 @@ TREND_START_YEAR = 2025  # business started 2025 - year dropdown never goes belo
 
 @expenses_bp.route("/expenses/trend")
 @login_required
+@page_access_required("expenses")
 def expenses_trend_page():
     current_year = max(datetime.now().year, TREND_START_YEAR)
     return render_template_string(

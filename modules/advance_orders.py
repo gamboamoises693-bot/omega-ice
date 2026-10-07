@@ -65,7 +65,7 @@ from datetime import datetime
 
 from flask import Blueprint, request, jsonify, session, render_template_string, redirect, url_for
 
-from modules.shared import fb_get, fb_post, fb_patch, fb_delete, login_required, isesmo_only, now_str, today_str, log_customer_activity
+from modules.shared import fb_get, fb_post, fb_patch, fb_delete, login_required, isesmo_only, now_str, today_str, log_customer_activity, page_access_required
 
 advance_orders_bp = Blueprint("advance_orders", __name__)
 
@@ -225,6 +225,7 @@ ADVANCE_ORDERS_HTML = """<!DOCTYPE html>
         <a href="/advance-orders" class="active">🎉 Advance Orders</a>
         <a href="/admin/duplicates">🔍 Duplicate Finder</a>
 <a href="/prices">💰 Price Manager</a>
+<a href="/ai-sales">🤖 Ask AI</a>
         <a href="/dashboard">📊 Dashboard</a>
       </div>
     </div>
@@ -572,6 +573,7 @@ loadLeaderboard();
 
 @advance_orders_bp.route("/advance-orders")
 @login_required
+@page_access_required("advance_orders")
 def advance_orders_page():
     staff = (session.get("staff_name") or "").strip().lower()
     is_isesmo = staff in ["isesmo", "isesmo gamboa"]

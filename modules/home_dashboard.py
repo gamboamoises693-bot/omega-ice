@@ -85,7 +85,7 @@ from datetime import datetime
 
 from flask import Blueprint, request, jsonify, session, render_template_string
 
-from modules.shared import fb_get, login_required, today_str
+from modules.shared import fb_get, login_required, today_str, page_access_required
 from modules.expenses import _effective_amount
 from modules.fixed_assets import _asset_metrics, DEFAULT_TOTAL_MONTHS
 
@@ -235,6 +235,7 @@ def _credit_total():
 
 @home_bp.route("/home")
 @login_required
+@page_access_required("home")
 def home_page():
     return render_template_string(HOME_HTML, default_period=today_str()[:7])
 

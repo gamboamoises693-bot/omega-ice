@@ -45,7 +45,7 @@ from datetime import datetime
 
 from flask import Blueprint, request, jsonify, session, render_template_string
 
-from modules.shared import fb_get, fb_post, fb_patch, fb_delete, login_required, isesmo_only, now_str
+from modules.shared import fb_get, fb_post, fb_patch, fb_delete, login_required, isesmo_only, now_str, page_access_required
 
 duplicate_finder_bp = Blueprint("duplicate_finder", __name__)
 
@@ -350,6 +350,7 @@ loadGroups();
 
 @duplicate_finder_bp.route("/admin/duplicates")
 @login_required
+@page_access_required("duplicates")
 def duplicate_finder_page():
     staff = (session.get("staff_name") or "").strip().lower()
     is_isesmo = staff in ["isesmo", "isesmo gamboa"]

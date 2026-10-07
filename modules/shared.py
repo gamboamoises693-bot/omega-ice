@@ -99,6 +99,87 @@ def isesmo_only(view):
     return wrapped
 
 
+# ---------- Per-staff PAGE ACCESS (boss's request, Oct 7: "pwd
+# magseset ano lang pwd access sa app" - ISESMO can restrict exactly
+# which feature pages a given staff member is allowed to open, via
+# the Manage Staff page). ----------
+#
+# Scope decision (confirmed with boss): PAGE-level only - the actual
+# GET page routes listed below - not every backing API call. Several
+# of those APIs are shared across pages that are NOT part of this list
+# (e.g. /api/sales/by_period also powers the always-open Cashier page's
+# own "Today's Sales" period picker, not just the gated Sales Dashboard
+# page) - gating by URL prefix at that level would risk silently
+# breaking a shared feature for every staff member, not just the one
+# ISESMO meant to restrict. Sales/Cashier itself is also intentionally
+# NEVER gated (boss's answer: it's every staff member's core job).
+#
+# Firebase shape: staff/<key>/allowed_pages = ["machines","expenses",...]
+# or ABSENT entirely. Absent (the default, and every staff member's
+# state before this feature existed) means FULL access - this is an
+# opt-in RESTRICTION, not an opt-in grant, so shipping it never
+# silently locks anyone out. Only once ISESMO explicitly saves a
+# staff member's checklist on /admin/staff does enforcement kick in
+# for that one staff member - an empty list means "no extra pages at
+# all", not "unset".
+STAFF_PAGE_KEYS = [
+    ("home", "🏠 Home"),
+    ("machines", "🏭 Machines"),
+    ("credit", "💳 Utang (Credit)"),
+    ("expenses", "💸 Expenses"),
+    ("plastic", "📦 Plastic"),
+    ("assets", "🏗️ Fixed Assets"),
+    ("advance_orders", "🎉 Advance Orders"),
+    ("duplicates", "🔍 Duplicate Finder"),
+    ("dashboard", "📊 Sales Dashboard"),
+    ("games", "🎮 Mini-Games"),
+]
+
+
+def staff_has_page_access(page_key):
+    """True if the CURRENTLY LOGGED-IN staff member (from the Flask
+    session) may open this feature. ISESMO always has full access and
+    is never restrictable here - this is his own control panel. A
+    staff record ISESMO hasn't looked up (or that can't be read right
+    now) fails OPEN, not closed - a lookup hiccup must never lock a
+    staff member out of a page that was working a moment ago."""
+    staff_name = (session.get("staff_name") or "").strip().lower()
+    if staff_name in ("isesmo", "isesmo gamboa"):
+        return True
+    if not staff_name:
+        return False
+    staff_id = session.get("staff_id")
+    record = fb_get(f"staff/{staff_id}") if staff_id else None
+    if not isinstance(record, dict):
+        return True
+    allowed = record.get("allowed_pages")
+    if allowed is None:
+        return True
+    return page_key in allowed
+
+
+def page_access_required(page_key):
+    """Decorator for a staff-facing PAGE route (HTML, not an API JSON
+    endpoint) - gates it by staff_has_page_access(page_key). Does its
+    own login check too (same as isesmo_only above), so it works
+    standalone without needing a separate @login_required."""
+    def decorator(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            if not session.get("staff_name"):
+                return redirect(url_for("login_page"))
+            if not staff_has_page_access(page_key):
+                return (
+                    "<h3>Access Denied</h3>"
+                    "<p>Wala kang access sa page na ito. Makipag-ugnayan kay ISESMO kung kailangan mo ito.</p>"
+                    "<a href='/cashier'>Back to Sales</a>",
+                    403,
+                )
+            return view(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
 # ---------- Small time helpers used across modules ----------
 
 def now_str():
