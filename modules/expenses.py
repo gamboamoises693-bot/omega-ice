@@ -65,6 +65,16 @@ Design decisions made after reading the source (ExpensesScreen class,
                        else base (matches the original's CASE WHEN in
                        MonthlyExpensesSummaryScreen.load_data())
       Maintenance : item, price
+      Salary      : staff name/payee, price (boss's request, Oct 7:
+                    "sa expenses idagdag ang salary" - added as its own
+                    category, same shape as Maintenance, so it shows up
+                    in the monthly total/breakdown and therefore in the
+                    Net Profit calculation on the Home Dashboard, same
+                    as every other operating expense. NOT the same thing
+                    as the old Kivy app's separate auto-written "STAFF
+                    SALARY" bucket mentioned above - this is a normal,
+                    manually-entered row staff can add/edit/delete here
+                    like any other expense.)
 
 Firebase data model:
   expenses/<auto_id> = {
@@ -90,7 +100,7 @@ from modules.shared import fb_get, fb_post, fb_put, fb_delete, login_required, i
 
 expenses_bp = Blueprint("expenses", __name__)
 
-EXPENSE_CATEGORIES = ["Consumables", "Fuel", "Electricity", "Maintenance"]
+EXPENSE_CATEGORIES = ["Consumables", "Fuel", "Electricity", "Maintenance", "Salary"]
 
 
 def _safe_float(v, default=0.0):
@@ -171,6 +181,13 @@ def _compute_fields(category, data):
 
     elif category == "Maintenance":
         item = (data.get("description") or "").strip() or "Maintenance"
+        price = _safe_float(data.get("price"))
+        if price <= 0:
+            return None, "Ilagay ang valid na PRICE."
+        entry.update({"description": item, "price": price})
+
+    elif category == "Salary":
+        item = (data.get("description") or "").strip() or "Salary"
         price = _safe_float(data.get("price"))
         if price <= 0:
             return None, "Ilagay ang valid na PRICE."
@@ -459,6 +476,12 @@ function renderForm(prefill){
       <label>Job Order (hal. Repair motor)</label><input type="text" id="f_desc" value="${escapeHtmlE(prefill.description||'')}" placeholder="Maintenance">
       <label>Price (₱)</label><input type="number" id="f_price" step="0.01" value="${prefill.price ?? ''}" oninput="updateComputation()">
     `;
+  } else if(selectedCategory === 'Salary'){
+    f.innerHTML = `
+      <label>Date</label><input type="date" id="f_date" value="${date}">
+      <label>Staff Name / Payee</label><input type="text" id="f_desc" value="${escapeHtmlE(prefill.description||'')}" placeholder="Salary">
+      <label>Amount (₱)</label><input type="number" id="f_price" step="0.01" value="${prefill.price ?? ''}" oninput="updateComputation()">
+    `;
   }
   updateComputation();
 }
@@ -546,7 +569,7 @@ function collectFormPayload(){
     payload.kwh = document.getElementById('f_kwh').value;
     payload.base = document.getElementById('f_base').value;
     payload.current_bill = document.getElementById('f_current_bill').value;
-  } else if(selectedCategory === 'Maintenance'){
+  } else if(selectedCategory === 'Maintenance' || selectedCategory === 'Salary'){
     payload.date = document.getElementById('f_date').value;
     payload.description = document.getElementById('f_desc').value.trim();
     payload.price = document.getElementById('f_price').value;
