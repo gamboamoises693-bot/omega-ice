@@ -7071,13 +7071,21 @@ async function loadOrders(){
       routeBanner.style.display='block';
       stopRouteAlertCountdown();
       if(routeCountdownEl) routeCountdownEl.textContent='🕐 Naghahanda pa';
+      // Sound only on the moment the banner FIRST turns on (boss's
+      // request, Oct 10) - not on every loadOrders() poll while it
+      // stays active, which would re-ding every few seconds.
+      if(!routeAlertWasActive) playRouteAlertSound();
+      routeAlertWasActive=true;
     } else if(routeAlert.active && (routeAlert.expires_in_seconds||0) > 0){
       document.getElementById('routeAlertMsg').textContent='🚚 '+(routeAlert.message||'May delivery ngayon sa lugar niyo!');
       routeBanner.style.display='block';
       startRouteAlertCountdown(routeAlert.expires_in_seconds);
+      if(!routeAlertWasActive) playRouteAlertSound();
+      routeAlertWasActive=true;
     } else {
       routeBanner.style.display='none';
       stopRouteAlertCountdown();
+      routeAlertWasActive=false;
     }
     const counts=stats.status_counts||{};
     pendingCountCache=counts['Pending']||0;
@@ -7135,6 +7143,58 @@ async function dismissRouteAlert(){
 let routeAlertCountdownTimer=null;
 function stopRouteAlertCountdown(){
   if(routeAlertCountdownTimer){ clearInterval(routeAlertCountdownTimer); routeAlertCountdownTimer=null; }
+}
+
+// Route alert SOUND (boss's request, Oct 10): the OS-level push
+// notification already has sound+vibration even when the app is fully
+// closed (see the 'push' handler in /sw.js), but the in-page banner
+// above - shown while the customer ALREADY has the dashboard open on
+// screen - was silent, since it's just a DOM update with no audio of
+// its own. This adds a short two-tone chime for that specific case.
+//
+// Synthesized via the Web Audio API instead of an embedded sound file -
+// no extra bytes to download, works fully offline, and the pitch/length
+// is easy to tweak later.
+//
+// Autoplay rule (can't be bypassed by any site): browsers only allow
+// audio to play after a real user gesture (a tap/click) on the page.
+// routeAlertAudioCtx is created ONCE on the customer's first tap
+// anywhere on the dashboard, then reused silently after that - so the
+// chime can fire later on its own, triggered by a background
+// loadOrders() poll instead of a fresh tap, without being blocked.
+let routeAlertWasActive=false;
+let routeAlertAudioCtx=null;
+function unlockRouteAlertAudio(){
+  if(routeAlertAudioCtx) return;
+  try{
+    const AudioCtx=window.AudioContext||window.webkitAudioContext;
+    if(AudioCtx) routeAlertAudioCtx=new AudioCtx();
+  }catch(e){ /* non-fatal - banner still works without sound */ }
+}
+document.addEventListener('click', unlockRouteAlertAudio, {once:true});
+document.addEventListener('touchstart', unlockRouteAlertAudio, {once:true});
+
+function playRouteAlertSound(){
+  if(!routeAlertAudioCtx) return; // customer hasn't tapped anything yet this load - skip, banner still shows
+  try{
+    if(routeAlertAudioCtx.state==='suspended') routeAlertAudioCtx.resume();
+    const ctx=routeAlertAudioCtx;
+    const now=ctx.currentTime;
+    // Two short "ding-dong" tones, high then low.
+    [[880, now, 0.16], [660, now+0.19, 0.22]].forEach(([freq, startAt, dur])=>{
+      const osc=ctx.createOscillator();
+      const gain=ctx.createGain();
+      osc.type='sine';
+      osc.frequency.value=freq;
+      gain.gain.setValueAtTime(0.0001, startAt);
+      gain.gain.exponentialRampToValueAtTime(0.35, startAt+0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startAt+dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startAt);
+      osc.stop(startAt+dur+0.02);
+    });
+  }catch(e){ /* non-fatal - a sound glitch must never block the banner itself */ }
 }
 function startRouteAlertCountdown(secondsLeft){
   stopRouteAlertCountdown();
