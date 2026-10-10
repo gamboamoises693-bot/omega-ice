@@ -107,42 +107,63 @@ BACKUP_ENABLED = bool(SMTP_EMAIL and SMTP_APP_PASSWORD)
 # just by filling that one field in.
 RECEIPT_SELLER_INFO = {
     "name": "OMEGA PURIFIED ICE CUBES",
-    "address": "Apalit, Pampanga",
+    "address": "Purok 6 Malineng, Cuyapo, Nueva Ecija",
     "tin": "",            # e.g. "123-456-789-000" once you have one
     "bir_permit_no": "",  # e.g. "FP-123456789" once BIR-registered
 }
 
-def get_next_invoice_no():
+def get_next_invoice_no(year=None):
     """Returns the next sequential invoice number as 'INV-<year>-<0001>',
-    e.g. 'INV-2026-0001'. Counter lives at Firebase counters/invoice_seq
-    (a plain integer, read -> +1 -> written back) - NOT a SQL AUTOINCREMENT
-    like a typical sqlite3 receipt script would use, since this app's data
-    lives in Firebase Realtime Database instead.
+    e.g. 'INV-2026-0001'. Defaults to the current Manila year, but a
+    specific `year` can be passed (used by the "backfill receipts for old
+    records" admin action, boss's follow-up Oct 10, so a sale actually
+    delivered back in 2025 gets numbered INV-2025-xxxx, not today's year).
 
-    Resets the running number back to 1 automatically each new year (the
-    "<year>-0001" format means last year's numbers and this year's never
-    collide), which also matters for BIR-style receipts that are commonly
-    numbered per year.
+    Counter storage: a separate plain integer at Firebase
+    counters/invoice_seq_by_year/<year> PER CALENDAR YEAR (read -> +1 ->
+    written back via fb_put) - NOT a single shared counter, so a live
+    order delivered today and a backfill run numbering a batch of old
+    2025 orders never fight over the same sequence or jump each other's
+    numbers around. NOT a SQL AUTOINCREMENT like a typical sqlite3
+    receipt script would use, since this app's data lives in Firebase
+    Realtime Database instead.
+
+    Deliberately NOT nested under the OLD counters/invoice_seq path (see
+    MIGRATION below) - Firebase would otherwise write each year's counter
+    as a CHILD of that old node, and then deleting the old node (the last
+    migration step) would wipe out the very child it just created. A
+    separate invoice_seq_by_year path avoids that trap entirely.
+
+    MIGRATION (one-time, automatic - boss never needs to do anything):
+    this function's very first version (same day) used a single counter
+    shaped counters/invoice_seq = {"year": Y, "last_no": N}. If that old
+    shape is still there, its value is copied into the new per-year path
+    once (then the old key is removed) so an invoice number already
+    printed on a real receipt (like boss's first test order, INV-2026-
+    0001) can never be re-issued to a different order afterward.
 
     NOT wrapped in a Firebase transaction (this codebase doesn't use those
-    anywhere else) - acceptable here because invoice numbers are only ever
-    assigned from one place (a staff member marking a single order
-    Delivered), so two requests racing for the same number in the exact
-    same instant is not a realistic scenario for a small single-store
-    operation. If Omega Ice ever has multiple staff confirming deliveries
-    at the same literal second, revisit this with a Firebase transaction.
+    anywhere else) - acceptable here because invoice numbers are normally
+    assigned one at a time, from one place (a staff member marking a
+    single order Delivered), so two requests racing for the same number
+    in the exact same instant is not a realistic scenario for a small
+    single-store operation. The one exception is the backfill action,
+    which calls this in a loop from a single request - still safe since
+    that loop runs sequentially, never in parallel.
     """
-    now_year = manila_now().year
-    counter_path = "counters/invoice_seq"
-    counter = fb_get(counter_path) or {}
-    if not isinstance(counter, dict) or counter.get("year") != now_year:
-        counter = {"year": now_year, "last_no": 0}
-    next_no = int(counter.get("last_no") or 0) + 1
-    # fb_patch upserts in Firebase (PATCH on a missing node just creates
-    # it), so this works whether counters/invoice_seq already existed or
-    # this is the very first invoice ever generated.
-    fb_patch(counter_path, {"year": now_year, "last_no": next_no})
-    return f"INV-{now_year}-{next_no:04d}"
+    legacy = fb_get("counters/invoice_seq")
+    if isinstance(legacy, dict) and legacy.get("year") and legacy.get("last_no") is not None:
+        legacy_year = legacy["year"]
+        if fb_get(f"counters/invoice_seq_by_year/{legacy_year}") is None:
+            fb_put(f"counters/invoice_seq_by_year/{legacy_year}", int(legacy.get("last_no") or 0))
+        fb_delete("counters/invoice_seq")
+    if year is None:
+        year = manila_now().year
+    counter_path = f"counters/invoice_seq_by_year/{year}"
+    last_no = fb_get(counter_path)
+    next_no = int(last_no or 0) + 1
+    fb_put(counter_path, next_no)
+    return f"INV-{year}-{next_no:04d}"
 
 def send_push_to_cashiers(title, body, url="/orders", tag="omega-order"):
     """Fire a Web Push notification to every subscribed cashier device -
@@ -10530,6 +10551,61 @@ def view_receipt(order_id):
         order_id=order_id,
     )
 
+@app.route("/api/admin/backfill_receipts", methods=["POST"])
+@login_required
+@isesmo_only
+def api_admin_backfill_receipts():
+    """Generates receipts for PREVIOUSLY-Delivered orders/sales that
+    predate the Resibo feature (boss's follow-up, Oct 10: "Pwd ba yung
+    mga previous record mag generate din ng resibo?" - answered "LAHAT ng
+    Delivered na sales", including plain cashier-typed sales with no
+    online order behind them, not just customer-app orders).
+
+    Safe to run more than once (ISESMO can just tap it again later after
+    more old records get cleaned up/found) - only daily_sales entries that
+    are Delivered AND still missing an invoice_no get one; anything that
+    already has one (a new order since the feature shipped, or a previous
+    backfill run) is skipped untouched.
+
+    Numbers are assigned in chronological order (oldest first) and dated
+    to the YEAR the order actually happened (delivered_at, falling back to
+    sales_date then created_at) via get_next_invoice_no(year=...) - so a
+    sale from 2025 gets an honest INV-2025-xxxx number instead of being
+    stamped with today's year just because the backfill happened to run
+    in 2026.
+    """
+    try:
+        sales = fb_get("daily_sales") or {}
+        candidates = []
+        already_had = 0
+        for key, val in sales.items():
+            if not val:
+                continue
+            if val.get("order_status") != "Delivered":
+                continue
+            if val.get("invoice_no"):
+                already_had += 1
+                continue
+            date_str = val.get("delivered_at") or val.get("sales_date") or val.get("created_at") or ""
+            candidates.append((date_str, key))
+        candidates.sort(key=lambda c: c[0])
+        generated = 0
+        for date_str, key in candidates:
+            try:
+                order_year = int(date_str[:4])
+            except (ValueError, TypeError):
+                order_year = None  # get_next_invoice_no() falls back to the current year
+            invoice_no = get_next_invoice_no(year=order_year)
+            fb_patch(f"daily_sales/{key}", {
+                "invoice_no": invoice_no,
+                "invoice_generated_at": manila_now().strftime("%Y-%m-%d %H:%M:%S"),
+                "invoice_backfilled": True,
+            })
+            generated += 1
+        return jsonify({"ok": True, "generated": generated, "already_had": already_had})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @app.route("/api/order/<order_id>/edit_quantity", methods=["POST"])
 @login_required
 def api_order_edit_quantity(order_id):
@@ -12761,6 +12837,16 @@ def staff_orders_page():
 <div class="topbar"><h1>Live Customer Orders</h1><div class="pill-group"><a href="/cashier" class="nav-pill">← Back to Sales</a></div></div>
 <div class="top-actions"><span class="live">● LIVE</span>
 <button onclick="archiveAllOldStaff()" class="top-action-btn top-action-btn-warn">📦 Archive &gt;7d</button><button onclick="loadOrders()" class="top-action-btn">🔄 Refresh</button></div>
+{% if (staff_name or '')|lower in ['isesmo', 'isesmo gamboa'] %}
+<!-- Backfill Receipts (ISESMO only, boss's follow-up Oct 10: "Pwd ba yung
+     mga previous record mag generate din ng resibo?") - a SEPARATE
+     full-width row, not jammed into the 3-column .top-actions grid above
+     (that grid is sized exactly for 3 buttons - a 4th one there would
+     strand onto its own cramped row, the same CSS bug as the Expenses
+     category buttons earlier). Safe to tap more than once - already-
+     numbered orders are always skipped. -->
+<button onclick="backfillReceipts()" style="width:100%;padding:9px 4px;border-radius:20px;border:1px solid #cde;background:#fff;color:#00609C;font-size:11px;font-weight:600;margin-bottom:12px;cursor:pointer">🧾 Generate Receipts for Old Orders (ISESMO)</button>
+{% endif %}
 <div id="ordersList">2026-09-06 - Tap Refresh</div>
 
 <!-- Decline reason modal: a "Declined" order must always carry a reason
@@ -13088,6 +13174,29 @@ async function archiveAllOldStaff(){
   if(data.ok){alert(`Archived ${data.archived} old orders`);loadOrders();}else{alert(data.error||'Failed');}
 }
 
+async function backfillReceipts(){
+  if(!confirm('Generate receipts for ALL previously-Delivered sales that do not have one yet? Safe to run more than once - orders that already have a receipt are always skipped.')) return;
+  const btn = event.target;
+  const origText = btn.textContent;
+  btn.textContent = 'Generating...';
+  btn.disabled = true;
+  try{
+    const res = await fetch('/api/admin/backfill_receipts', {method:'POST'});
+    const data = await res.json();
+    if(data.ok){
+      alert(`Done! Generated ${data.generated} new receipt(s). ${data.already_had} order(s) already had one.`);
+      loadOrders();
+    } else {
+      alert(data.error || 'Failed');
+    }
+  }catch(e){
+    alert('Network error: ' + e.message);
+  }finally{
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
+}
+
 
 
 async function bulkUpdateAll(){
@@ -13128,7 +13237,7 @@ loadOrders();setInterval(loadOrders,10000);
 
 </script>
 </body></html>"""
-    return render_template_string(html)
+    return render_template_string(html, staff_name=session.get("staff_name"))
 
 @app.route("/api/staff/customer_orders")
 @login_required
