@@ -97,6 +97,53 @@ BACKUP_EMAIL_TO = os.environ.get("BACKUP_EMAIL_TO", "") or SMTP_EMAIL
 BACKUP_HOUR_MANILA = int(os.environ.get("BACKUP_HOUR_MANILA", "23") or "23")
 BACKUP_ENABLED = bool(SMTP_EMAIL and SMTP_APP_PASSWORD)
 
+# --- Receipt / Resibo generation (boss's request, Oct 10: "gusto ko mag
+# generate ng Resibo kada order ng customer") ---
+# EDIT THESE with your actual business details - this prints directly on
+# every receipt. Leave bir_permit_no blank ("") if you don't have a BIR
+# Certificate of Registration / Permit to Use yet - the receipt simply
+# skips that line instead of printing a fake-looking placeholder, so this
+# is safe to use right away and later "upgrade" the moment you register,
+# just by filling that one field in.
+RECEIPT_SELLER_INFO = {
+    "name": "OMEGA PURIFIED ICE CUBES",
+    "address": "Apalit, Pampanga",
+    "tin": "",            # e.g. "123-456-789-000" once you have one
+    "bir_permit_no": "",  # e.g. "FP-123456789" once BIR-registered
+}
+
+def get_next_invoice_no():
+    """Returns the next sequential invoice number as 'INV-<year>-<0001>',
+    e.g. 'INV-2026-0001'. Counter lives at Firebase counters/invoice_seq
+    (a plain integer, read -> +1 -> written back) - NOT a SQL AUTOINCREMENT
+    like a typical sqlite3 receipt script would use, since this app's data
+    lives in Firebase Realtime Database instead.
+
+    Resets the running number back to 1 automatically each new year (the
+    "<year>-0001" format means last year's numbers and this year's never
+    collide), which also matters for BIR-style receipts that are commonly
+    numbered per year.
+
+    NOT wrapped in a Firebase transaction (this codebase doesn't use those
+    anywhere else) - acceptable here because invoice numbers are only ever
+    assigned from one place (a staff member marking a single order
+    Delivered), so two requests racing for the same number in the exact
+    same instant is not a realistic scenario for a small single-store
+    operation. If Omega Ice ever has multiple staff confirming deliveries
+    at the same literal second, revisit this with a Firebase transaction.
+    """
+    now_year = manila_now().year
+    counter_path = "counters/invoice_seq"
+    counter = fb_get(counter_path) or {}
+    if not isinstance(counter, dict) or counter.get("year") != now_year:
+        counter = {"year": now_year, "last_no": 0}
+    next_no = int(counter.get("last_no") or 0) + 1
+    # fb_patch upserts in Firebase (PATCH on a missing node just creates
+    # it), so this works whether counters/invoice_seq already existed or
+    # this is the very first invoice ever generated.
+    fb_patch(counter_path, {"year": now_year, "last_no": next_no})
+    return f"INV-{now_year}-{next_no:04d}"
+
 def send_push_to_cashiers(title, body, url="/orders", tag="omega-order"):
     """Fire a Web Push notification to every subscribed cashier device -
     shows up even if the PWA is closed / screen is locked (Android; on
@@ -7120,7 +7167,15 @@ async function loadOrders(){
         const minsLeft = Math.max(1, Math.ceil((o.spin_seconds_left||0)/60));
         spinBtnHtml=`<button onclick="event.stopPropagation();openSpinModal('${o.id}')" style="margin-top:6px;width:100%;font-size:11px;padding:8px 10px;border-radius:10px;border:1.5px dashed #f5a300;background:#fff8e8;color:#8a5a00;font-weight:700">🎡 Free Spin available! (${minsLeft}min left)</button>`;
       }
-      return `<div class="order-card" data-order-id="${o.id}" onclick="openTracking('${o.id}')"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span style="font-size:11px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fmtOrderTime(o.sales_date,o.created_at)}</span><span class="status-pill status-${(o.order_status||'pending').toLowerCase().replace(/ /g,'-')}" style="flex-shrink:0">${o.order_status||'Pending'}</span></div><div style="display:grid;grid-template-columns:56px 1fr 64px;align-items:center;gap:6px;font-size:13px;margin-top:6px"><span style="font-weight:600">${o.quantity}x</span><span style="color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.kg_size} • ${o.mode}</span><span style="text-align:right;font-weight:600;color:#00609C">₱${(+o.total_sales||0).toLocaleString()}</span></div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px"><span style="font-size:10px;color:#888">Order ID: ${o.id.slice(0,8)} • Tap to track →</span>${reorderBtn}</div>${declineBadge}${ratingHtml}${spinBtnHtml}</div>`;
+      // Receipt / Resibo button (boss's request, Oct 10) - only once the
+      // order is Delivered AND has an invoice_no (assigned server-side
+      // the moment it became Delivered - see apply_delivered_side_effects
+      // on the backend). stopPropagation so tapping it doesn't also open
+      // the tracking modal (the whole card has its own onclick).
+      const receiptBtnHtml = (o.order_status==='Delivered' && o.invoice_no)
+        ? `<button onclick="event.stopPropagation();window.open('/receipt/${o.id}','_blank')" style="margin-top:6px;width:100%;font-size:11px;padding:8px 10px;border-radius:10px;border:1px solid #cde;background:#eef4fb;color:#00609C;font-weight:700">🧾 View Receipt</button>`
+        : '';
+      return `<div class="order-card" data-order-id="${o.id}" onclick="openTracking('${o.id}')"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span style="font-size:11px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fmtOrderTime(o.sales_date,o.created_at)}</span><span class="status-pill status-${(o.order_status||'pending').toLowerCase().replace(/ /g,'-')}" style="flex-shrink:0">${o.order_status||'Pending'}</span></div><div style="display:grid;grid-template-columns:56px 1fr 64px;align-items:center;gap:6px;font-size:13px;margin-top:6px"><span style="font-weight:600">${o.quantity}x</span><span style="color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.kg_size} • ${o.mode}</span><span style="text-align:right;font-weight:600;color:#00609C">₱${(+o.total_sales||0).toLocaleString()}</span></div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px"><span style="font-size:10px;color:#888">Order ID: ${o.id.slice(0,8)} • Tap to track →</span>${reorderBtn}</div>${declineBadge}${ratingHtml}${spinBtnHtml}${receiptBtnHtml}</div>`;
     }).join('');
   }catch(e){
     document.getElementById('ordersList').innerHTML=`<div style="color:red;padding:10px">Error loading: ${e.message}<br><button onclick="loadOrders()" style="padding:8px 14px;border-radius:20px;background:#00609C;color:#fff;border:none">Retry</button></div>`;
@@ -9365,7 +9420,7 @@ def api_customer_orders(reseller_id):
             # button/countdown always matches the same rule the actual
             # claim endpoint enforces - see compute_spin_eligibility().
             can_spin, spin_seconds_left = compute_spin_eligibility(val, spin_program_paused, spin_is_test_account)
-            orders.append({"id": key, "sales_date": val.get("sales_date"), "quantity": qty, "kg_size": kg_size, "total_sales": peso, "mode": val.get("mode"), "payment": val.get("payment"), "order_status": status, "created_at": val.get("created_at"), "rating": val.get("rating"), "feedback": val.get("feedback"), "decline_reason": val.get("decline_reason") or "", "declined_at": val.get("declined_at") or "", "can_spin": can_spin, "spin_seconds_left": spin_seconds_left, "spin_claimed": bool(val.get("spin_claimed")), "spin_points": val.get("spin_points")})
+            orders.append({"id": key, "sales_date": val.get("sales_date"), "quantity": qty, "kg_size": kg_size, "total_sales": peso, "mode": val.get("mode"), "payment": val.get("payment"), "order_status": status, "created_at": val.get("created_at"), "rating": val.get("rating"), "feedback": val.get("feedback"), "decline_reason": val.get("decline_reason") or "", "declined_at": val.get("declined_at") or "", "can_spin": can_spin, "spin_seconds_left": spin_seconds_left, "spin_claimed": bool(val.get("spin_claimed")), "spin_points": val.get("spin_points"), "invoice_no": val.get("invoice_no") or ""})
         def status_priority_c(s):
             order = (s.get("order_status") or "Pending")
             priorities = {"New Order": 0, "Pending": 1, "Preparing": 2, "Out for Delivery": 3, "Declined": 4, "Delivered": 5, "Cancelled": 6}
@@ -10286,6 +10341,26 @@ def apply_delivered_side_effects(order_id, existing):
     update_data["archived"] = False
     update_data["archived_for_daily_only"] = False
 
+    # RECEIPT / RESIBO (boss's request, Oct 10): a receipt is only
+    # generated once an order is truly Delivered (a Pending/Preparing
+    # order has no finished sale to issue a receipt for yet). Guarded by
+    # "not existing.get('invoice_no')" so re-triggering this function on
+    # an order that's already Delivered (e.g. a stray double-tap, or the
+    # Edit Qty correction path re-reading the order afterward) never
+    # assigns it a second invoice number - one order = one receipt,
+    # permanently, even if its quantity gets corrected later.
+    if not existing.get("invoice_no"):
+        try:
+            update_data["invoice_no"] = get_next_invoice_no()
+            update_data["invoice_generated_at"] = now_str
+        except Exception as invoice_err:
+            # A receipt-numbering hiccup must never block the delivery
+            # itself from going through - same fire-and-forget philosophy
+            # as the referral bonus check below. The order just won't
+            # have a receipt available yet; staff can still see it was
+            # Delivered and everything else about the order is normal.
+            print(f"get_next_invoice_no failed (non-fatal): {invoice_err}")
+
     # LOYALTY POINTS (Sept 21): only award points when the RESELLER
     # placed this order themselves through the customer app
     # (order_source == "customer") - a sale the cashier typed in
@@ -10349,6 +10424,111 @@ def apply_delivered_side_effects(order_id, existing):
             # fire-and-forget philosophy as award_loyalty_points itself.
             print(f"referral bonus check failed (non-fatal): {referral_err}")
     return update_data
+
+# --- RECEIPT / RESIBO page (boss's request, Oct 10) ---
+# Plain print-friendly HTML instead of a generated PDF file: Render's
+# free/starter tiers don't always have the system libraries a PDF library
+# (reportlab/weasyprint) needs, and this needs ZERO extra dependency -
+# the customer or staff member just taps "Print / Save as PDF", which
+# uses the browser's own built-in print-to-PDF, producing an identical
+# result with no server-side PDF generation at all. The .no-print CSS
+# class hides the Print/Back buttons automatically once that dialog is
+# open, so the saved PDF only ever contains the receipt itself.
+RECEIPT_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Resibo - {{ invoice_no }}</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:'Courier New',monospace;background:#eef7ff;margin:0;padding:16px;color:#222}
+.receipt{background:#fff;max-width:420px;margin:0 auto;border-radius:10px;padding:24px;border:1px solid #ddd}
+.center{text-align:center}
+.biz-name{font-weight:700;font-size:16px;letter-spacing:0.5px}
+.biz-line{font-size:12px;color:#444}
+.divider{border-top:1px dashed #999;margin:14px 0}
+.row{display:flex;justify-content:space-between;font-size:13px;margin:4px 0}
+.row b{font-weight:700}
+.title{font-size:14px;font-weight:700;text-align:center;margin:10px 0;letter-spacing:1px}
+.total-row{display:flex;justify-content:space-between;font-size:16px;font-weight:700;margin-top:10px;border-top:1px solid #333;padding-top:8px}
+.footer-note{font-size:10px;color:#777;text-align:center;margin-top:16px;line-height:1.5}
+.no-print{max-width:420px;margin:12px auto 0;display:flex;gap:8px}
+.btn{flex:1;padding:12px;border-radius:10px;border:1px solid #ccd;font-size:13px;font-weight:600;text-align:center;text-decoration:none;color:#00609C;background:#fff;cursor:pointer}
+.btn-primary{background:#00609C;color:#fff;border-color:#00609C}
+@media print{ .no-print{display:none !important} body{background:#fff;padding:0} .receipt{border:none;margin:0;max-width:none} }
+</style></head>
+<body>
+<div class="receipt">
+  <div class="center">
+    <div class="biz-name">{{ seller.name }}</div>
+    {% if seller.address %}<div class="biz-line">{{ seller.address }}</div>{% endif %}
+    {% if seller.tin %}<div class="biz-line">TIN: {{ seller.tin }}</div>{% endif %}
+    {% if seller.bir_permit_no %}<div class="biz-line">BIR Permit No: {{ seller.bir_permit_no }}</div>{% endif %}
+  </div>
+  <div class="divider"></div>
+  <div class="title">SALES RECEIPT</div>
+  <div class="row"><span>Invoice No:</span><b>{{ invoice_no }}</b></div>
+  <div class="row"><span>Date:</span><span>{{ delivered_at }}</span></div>
+  <div class="row"><span>Buyer:</span><span>{{ buyer_name }}</span></div>
+  <div class="row"><span>Mode:</span><span>{{ mode }}</span></div>
+  <div class="divider"></div>
+  <div class="row"><span>{{ quantity }}x {{ kg_size }}</span><span>{{ price_label }}</span></div>
+  <div class="total-row"><span>TOTAL</span><span>{{ price_label }}</span></div>
+  <div class="divider"></div>
+  <div class="footer-note">
+    Order ID: {{ order_id }}<br>
+    This receipt reflects a Delivered order on record with {{ seller.name }}.
+    {% if not seller.bir_permit_no %}Not yet a BIR-registered official receipt.{% endif %}
+  </div>
+</div>
+<div class="no-print">
+  <a href="javascript:history.back()" class="btn">← Back</a>
+  <button type="button" class="btn btn-primary" onclick="window.print()">🖨️ Print / Save as PDF</button>
+</div>
+</body></html>
+"""
+
+@app.route("/receipt/<order_id>")
+def view_receipt(order_id):
+    """Renders a printable receipt for one Delivered order (boss's
+    request, Oct 10: "gusto ko mag generate ng Resibo kada order ng
+    customer"). Viewable by:
+      - any logged-in staff member (login_required pattern used
+        elsewhere lets any staff see any order - receipts aren't
+        page-access-gated, same as Cashier itself)
+      - the customer who placed it, but ONLY their own order - mirrors
+        the exact ownership check used by api_customer_orders()
+    A receipt only exists once an order is actually Delivered AND has
+    been assigned an invoice_no by apply_delivered_side_effects() - an
+    order that's still Pending/Preparing/Cancelled/Declined has nothing
+    to issue a receipt for yet, so this shows a friendly explanation
+    instead of a broken/empty receipt.
+    """
+    order = fb_get(f"daily_sales/{order_id}")
+    if not order:
+        return "<h3>Order not found</h3><a href='javascript:history.back()'>Back</a>", 404
+    reseller_id = order.get("reseller_id")
+    is_staff = bool(session.get("staff_name"))
+    is_owning_customer = bool(session.get("customer_id")) and session.get("customer_id") == reseller_id
+    if not is_staff and not is_owning_customer:
+        return "<h3>Access Denied</h3><p>Hindi mo pwedeng tingnan ang resibo ng ibang customer.</p><a href='javascript:history.back()'>Back</a>", 403
+    if order.get("order_status") != "Delivered" or not order.get("invoice_no"):
+        return (
+            "<h3>Resibo not available yet</h3>"
+            "<p>Available lang ang resibo sa isang order sa sandaling ma-mark itong <b>Delivered</b>.</p>"
+            "<a href='javascript:history.back()'>Back</a>"
+        ), 404
+    price_label = "FREE" if order.get("reward_redemption") else f"₱{order.get('total_sales', 0)}"
+    delivered_at = order.get("delivered_at") or order.get("status_updated_at") or ""
+    return render_template_string(
+        RECEIPT_HTML,
+        seller=RECEIPT_SELLER_INFO,
+        invoice_no=order.get("invoice_no"),
+        delivered_at=delivered_at,
+        buyer_name=order.get("reseller_name") or "Walk-in",
+        mode=order.get("mode") or "-",
+        quantity=order.get("quantity"),
+        kg_size=order.get("kg_size"),
+        price_label=price_label,
+        order_id=order_id,
+    )
 
 @app.route("/api/order/<order_id>/edit_quantity", methods=["POST"])
 @login_required
@@ -12810,7 +12990,13 @@ const list=document.getElementById('ordersList');
       const editQtyBtnFinished = isDelivered
         ? `<button class="btn" style="background:#fff;color:#00609C;border-color:#cde;flex:0 0 auto;padding:9px 14px" onclick="openEditQtyModal('${o.id}', ${o.quantity}, '${o.kg_size}', ${!!o.points_awarded})">✏️ Edit Qty</button>`
         : '';
-      return `<div class="order-card" data-order-id="${o.id}" style="border-left-color:${borderColor};opacity:0.8"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}${deliveredBadge}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div>${tatBlock}${reasonBlock}<div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><span style="font-size:11px;color:${statusTextColor};font-weight:600">${statusLabel}</span><div style="display:flex;gap:6px">${editQtyBtnFinished}<button class="btn" style="background:#fff;color:#ef4444;border-color:#fca5a5;flex:0 0 auto;padding:9px 14px" onclick="deleteOrder('${o.id}')">🗑️ Delete</button></div></div></div>`;
+      // Receipt / Resibo button (boss's request, Oct 10) - only once the
+      // order is Delivered AND has an invoice_no (assigned server-side by
+      // apply_delivered_side_effects() the moment it became Delivered).
+      const receiptBtnFinished = (isDelivered && o.invoice_no)
+        ? `<a class="btn" style="background:#fff;color:#00609C;border-color:#cde;flex:0 0 auto;padding:9px 14px;text-decoration:none;display:inline-block" href="/receipt/${o.id}" target="_blank">🧾 Receipt</a>`
+        : '';
+      return `<div class="order-card" data-order-id="${o.id}" style="border-left-color:${borderColor};opacity:0.8"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">${o.reseller_name}${deliveredBadge}</span><span style="font-size:10px;background:${statusColor};padding:4px 8px;border-radius:12px">${o.order_status}</span></div><div style="font-size:12px;color:#555;margin-top:4px">${o.quantity}x ${o.kg_size} • ₱${o.total_sales} • ${o.sales_date}</div>${tatBlock}${reasonBlock}<div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><span style="font-size:11px;color:${statusTextColor};font-weight:600">${statusLabel}</span><div style="display:flex;gap:6px">${receiptBtnFinished}${editQtyBtnFinished}<button class="btn" style="background:#fff;color:#ef4444;border-color:#fca5a5;flex:0 0 auto;padding:9px 14px" onclick="deleteOrder('${o.id}')">🗑️ Delete</button></div></div></div>`;
     }
     const rewardBadge = o.reward_redemption ? ` <span style="font-size:9px;background:#fde68a;color:#92400e;padding:2px 7px;border-radius:10px;font-weight:700">🎁 FREE REWARD${o.reward_label ? ' - '+o.reward_label : ''}</span>` : '';
     const priceLabel = o.reward_redemption ? 'FREE' : `₱${o.total_sales}`;
@@ -13004,7 +13190,8 @@ def api_staff_customer_orders():
                 # count + last-followed-up timestamp, surfaced on the
                 # order card so staff can see "na-follow up ko na ba
                 # ito, ilang beses na" at a glance instead of guessing.
-                "follow_up_count":int(val.get("follow_up_count") or 0),"last_follow_up_at":val.get("last_follow_up_at") or ""})
+                "follow_up_count":int(val.get("follow_up_count") or 0),"last_follow_up_at":val.get("last_follow_up_at") or "",
+                "invoice_no":val.get("invoice_no") or ""})
         # Sort: New Orders first, Delivered at bottom
         def status_priority(s):
             order = (s.get("order_status") or "Pending")
