@@ -107,6 +107,7 @@ BACKUP_ENABLED = bool(SMTP_EMAIL and SMTP_APP_PASSWORD)
 # just by filling that one field in.
 RECEIPT_SELLER_INFO = {
     "name": "OMEGA PURIFIED ICE CUBES",
+    "tagline": "PURIFIED ICE SUPPLIER",  # small gray label under the business name, same spot as "REFILLING STATION" on the reference design boss shared (Oct 16)
     "address": "Purok 6 Malineng, Cuyapo, Nueva Ecija",
     "tin": "",            # e.g. "123-456-789-000" once you have one
     "bir_permit_no": "",  # e.g. "FP-123456789" once BIR-registered
@@ -10446,62 +10447,70 @@ def apply_delivered_side_effects(order_id, existing):
             print(f"referral bonus check failed (non-fatal): {referral_err}")
     return update_data
 
-# --- RECEIPT / RESIBO page (boss's request, Oct 10) ---
+# --- RECEIPT / RESIBO page (boss's request, Oct 10; redesigned Oct 16 to
+# match a reference layout boss shared from a different app of his
+# (Custodio Water) - same structure/styling, Omega's own logo/branding
+# and fields) ---
 # Plain print-friendly HTML instead of a generated PDF file: Render's
 # free/starter tiers don't always have the system libraries a PDF library
 # (reportlab/weasyprint) needs, and this needs ZERO extra dependency -
-# the customer or staff member just taps "Print / Save as PDF", which
-# uses the browser's own built-in print-to-PDF, producing an identical
-# result with no server-side PDF generation at all. The .no-print CSS
-# class hides the Print/Back buttons automatically once that dialog is
-# open, so the saved PDF only ever contains the receipt itself.
+# the customer or staff member just taps "Print / PDF", which uses the
+# browser's own built-in print-to-PDF, producing an identical result with
+# no server-side PDF generation at all. The .no-print CSS class hides the
+# Print/Balik buttons automatically once that dialog is open, so the
+# saved PDF only ever contains the receipt card itself.
 RECEIPT_HTML = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Resibo - {{ invoice_no }}</title>
 <style>
 *{box-sizing:border-box}
-body{font-family:'Courier New',monospace;background:#eef7ff;margin:0;padding:16px;color:#222}
-.receipt{background:#fff;max-width:420px;margin:0 auto;border-radius:10px;padding:24px;border:1px solid #ddd}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f3f4f6;margin:0;padding:16px;color:#1f2937}
+.no-print{max-width:420px;margin:0 auto 14px;display:flex;gap:10px}
+.btn{flex:1;padding:14px 10px;border-radius:24px;border:none;font-size:14px;font-weight:700;text-align:center;text-decoration:none;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+.btn-print{background:#00609C;color:#fff}
+.btn-back{background:#e5e7eb;color:#1f2937}
+.receipt{background:#fff;max-width:420px;margin:0 auto;border-radius:18px;padding:26px 22px;box-shadow:0 2px 10px rgba(0,0,0,0.06)}
 .center{text-align:center}
-.biz-name{font-weight:700;font-size:16px;letter-spacing:0.5px}
-.biz-line{font-size:12px;color:#444}
-.divider{border-top:1px dashed #999;margin:14px 0}
-.row{display:flex;justify-content:space-between;font-size:13px;margin:4px 0}
-.row b{font-weight:700}
-.title{font-size:14px;font-weight:700;text-align:center;margin:10px 0;letter-spacing:1px}
-.total-row{display:flex;justify-content:space-between;font-size:16px;font-weight:700;margin-top:10px;border-top:1px solid #333;padding-top:8px}
-.footer-note{font-size:10px;color:#777;text-align:center;margin-top:16px;line-height:1.5}
-.no-print{max-width:420px;margin:12px auto 0;display:flex;gap:8px}
-.btn{flex:1;padding:12px;border-radius:10px;border:1px solid #ccd;font-size:13px;font-weight:600;text-align:center;text-decoration:none;color:#00609C;background:#fff;cursor:pointer}
-.btn-primary{background:#00609C;color:#fff;border-color:#00609C}
-@media print{ .no-print{display:none !important} body{background:#fff;padding:0} .receipt{border:none;margin:0;max-width:none} }
+.logo{width:92px;height:92px;border-radius:50%;object-fit:cover;border:3px solid #00609C;margin-bottom:12px}
+.biz-name{font-weight:800;font-size:18px;letter-spacing:0.3px}
+.biz-tagline{font-size:11px;color:#8a8f98;letter-spacing:1.5px;margin-top:4px;text-transform:uppercase}
+.biz-address{font-size:13px;color:#555;margin-top:2px}
+.divider{border-top:1px dashed #d8dce2;margin:16px 0}
+.row{display:flex;justify-content:space-between;align-items:baseline;font-size:14px;margin:7px 0;gap:10px}
+.row span:first-child{color:#6b7280}
+.row span:last-child{font-weight:600;text-align:right}
+.item-row{display:flex;justify-content:space-between;font-size:14px;margin:4px 0}
+.total-row{display:flex;justify-content:space-between;font-size:19px;font-weight:800;margin-top:4px}
+.footer-note{font-size:15px;text-align:center;margin-top:18px;color:#374151}
+@media print{ .no-print{display:none !important} body{background:#fff;padding:0} .receipt{box-shadow:none;margin:0;max-width:none} }
 </style></head>
 <body>
+<div class="no-print">
+  <button type="button" class="btn btn-print" onclick="window.print()">🖨️ Print / PDF</button>
+  <a href="javascript:history.back()" class="btn btn-back">← Balik</a>
+</div>
 <div class="receipt">
   <div class="center">
+    <img class="logo" src="/icon-192.png" alt="{{ seller.name }}">
     <div class="biz-name">{{ seller.name }}</div>
-    {% if seller.address %}<div class="biz-line">{{ seller.address }}</div>{% endif %}
-    {% if seller.tin %}<div class="biz-line">TIN: {{ seller.tin }}</div>{% endif %}
-    {% if seller.bir_permit_no %}<div class="biz-line">BIR Permit No: {{ seller.bir_permit_no }}</div>{% endif %}
+    {% if seller.tagline %}<div class="biz-tagline">{{ seller.tagline }}</div>{% endif %}
+    {% if seller.address %}<div class="biz-address">{{ seller.address }}</div>{% endif %}
+    {% if seller.tin %}<div class="biz-address">TIN: {{ seller.tin }}</div>{% endif %}
+    {% if seller.bir_permit_no %}<div class="biz-address">BIR Permit No: {{ seller.bir_permit_no }}</div>{% endif %}
   </div>
   <div class="divider"></div>
-  <div class="title">SALES RECEIPT</div>
-  <div class="row"><span>Invoice No:</span><b>{{ invoice_no }}</b></div>
-  <div class="row"><span>Date:</span><span>{{ delivered_at }}</span></div>
-  <div class="row"><span>Buyer:</span><span>{{ buyer_name }}</span></div>
-  <div class="row"><span>Mode:</span><span>{{ mode }}</span></div>
+  <div class="row"><span>Receipt #</span><span>{{ invoice_no }}</span></div>
+  <div class="row"><span>Petsa</span><span>{{ delivered_at }}</span></div>
+  <div class="row"><span>Customer</span><span>{{ buyer_name }}</span></div>
+  {% if buyer_address %}<div class="row"><span>Address</span><span>{{ buyer_address }}</span></div>{% endif %}
   <div class="divider"></div>
-  <div class="row"><span>{{ quantity }}x {{ kg_size }}</span><span>{{ price_label }}</span></div>
+  <div class="item-row"><span>{{ kg_size }} &times; {{ quantity }}</span><span>{{ price_label }}</span></div>
+  <div class="divider"></div>
   <div class="total-row"><span>TOTAL</span><span>{{ price_label }}</span></div>
+  <div class="row" style="margin-top:14px"><span>Bayad</span><span>{{ payment_label }}</span></div>
+  <div class="row"><span>Status</span><span>{{ status_label }}</span></div>
+  <div class="row"><span>Inihatid ni</span><span>{{ delivered_by }}</span></div>
   <div class="divider"></div>
-  <div class="footer-note">
-    Order ID: {{ order_id }}<br>
-    This receipt reflects a Delivered order on record with {{ seller.name }}.
-    {% if not seller.bir_permit_no %}Not yet a BIR-registered official receipt.{% endif %}
-  </div>
-</div>
-<div class="no-print">
-  <a href="javascript:history.back()" class="btn">← Back</a>
-  <button type="button" class="btn btn-primary" onclick="window.print()">🖨️ Print / Save as PDF</button>
+  <div class="footer-note">Salamat po! 🧊</div>
 </div>
 </body></html>
 """
@@ -10536,18 +10545,42 @@ def view_receipt(order_id):
             "<p>Available lang ang resibo sa isang order sa sandaling ma-mark itong <b>Delivered</b>.</p>"
             "<a href='javascript:history.back()'>Back</a>"
         ), 404
-    price_label = "FREE" if order.get("reward_redemption") else f"₱{order.get('total_sales', 0)}"
+    is_reward = bool(order.get("reward_redemption"))
+    price_label = "FREE" if is_reward else f"₱{order.get('total_sales', 0)}"
     delivered_at = order.get("delivered_at") or order.get("status_updated_at") or ""
+    # Payment/Status rows (matches the reference design's "Bayad"/"Status"
+    # rows) - Omega's orders already carry a "payment" field (Cash/Credit,
+    # default Cash - see api_sale_input()), so this reuses it instead of
+    # inventing a second, possibly-conflicting payment concept.
+    if is_reward:
+        payment_label = "Reward Points"
+        status_label = "FREE"
+    elif order.get("payment") == "Credit":
+        payment_label = "Credit"
+        status_label = "ON CREDIT"
+    else:
+        payment_label = order.get("payment") or "Cash"
+        status_label = "PAID"
+    # "Inihatid ni" (delivered by) - status_updated_by already captures
+    # either the staff member who tapped Delivered, or "Customer (self-
+    # confirmed)" when the reseller confirmed receipt themselves (see
+    # api_customer_claim_spin()'s self_confirming branch).
+    delivered_by = order.get("status_updated_by") or "Staff"
+    reseller = fb_get(f"resellers/{reseller_id}") if reseller_id else None
+    buyer_address = (reseller or {}).get("address") or ""
     return render_template_string(
         RECEIPT_HTML,
         seller=RECEIPT_SELLER_INFO,
         invoice_no=order.get("invoice_no"),
         delivered_at=delivered_at,
         buyer_name=order.get("reseller_name") or "Walk-in",
-        mode=order.get("mode") or "-",
+        buyer_address=buyer_address,
         quantity=order.get("quantity"),
         kg_size=order.get("kg_size"),
         price_label=price_label,
+        payment_label=payment_label,
+        status_label=status_label,
+        delivered_by=delivered_by,
         order_id=order_id,
     )
 
