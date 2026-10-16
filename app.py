@@ -113,6 +113,10 @@ RECEIPT_SELLER_INFO = {
     "bir_permit_no": "",  # e.g. "FP-123456789" once BIR-registered
 }
 
+# Set True by get_next_invoice_no() the first time it checks for (and, if
+# found, migrates) the old single-counter shape - see that function.
+_invoice_legacy_migration_checked = False
+
 def get_next_invoice_no(year=None):
     """Returns the next sequential invoice number as 'INV-<year>-<0001>',
     e.g. 'INV-2026-0001'. Defaults to the current Manila year, but a
@@ -152,12 +156,22 @@ def get_next_invoice_no(year=None):
     which calls this in a loop from a single request - still safe since
     that loop runs sequentially, never in parallel.
     """
-    legacy = fb_get("counters/invoice_seq")
-    if isinstance(legacy, dict) and legacy.get("year") and legacy.get("last_no") is not None:
-        legacy_year = legacy["year"]
-        if fb_get(f"counters/invoice_seq_by_year/{legacy_year}") is None:
-            fb_put(f"counters/invoice_seq_by_year/{legacy_year}", int(legacy.get("last_no") or 0))
-        fb_delete("counters/invoice_seq")
+    # Migration check runs at most ONCE per server process (not once per
+    # call) - skips a redundant Firebase round-trip on every single
+    # invoice number generated. Harmless to also re-check after a
+    # restart/new process; it's a no-op by then since the legacy key was
+    # already deleted. Matters most during a backfill run, which can call
+    # this hundreds of times in one request/loop (see the "Oct 16" note
+    # above on why every round-trip here counts).
+    global _invoice_legacy_migration_checked
+    if not _invoice_legacy_migration_checked:
+        legacy = fb_get("counters/invoice_seq")
+        if isinstance(legacy, dict) and legacy.get("year") and legacy.get("last_no") is not None:
+            legacy_year = legacy["year"]
+            if fb_get(f"counters/invoice_seq_by_year/{legacy_year}") is None:
+                fb_put(f"counters/invoice_seq_by_year/{legacy_year}", int(legacy.get("last_no") or 0))
+            fb_delete("counters/invoice_seq")
+        _invoice_legacy_migration_checked = True
     if year is None:
         year = manila_now().year
     counter_path = f"counters/invoice_seq_by_year/{year}"
@@ -10606,8 +10620,25 @@ def api_admin_backfill_receipts():
     sale from 2025 gets an honest INV-2025-xxxx number instead of being
     stamped with today's year just because the backfill happened to run
     in 2026.
+
+    BATCHED (boss's report, Oct 16: a live run on a store with hundreds
+    of old orders hung on "Generating..." then failed with "Network
+    error: Failed to fetch" - root cause: doing all of them in ONE HTTP
+    request took long enough, at several Firebase round-trips per order,
+    that the connection got cut before a response ever came back, mobile
+    networks especially). Processes at most `limit` orders per call
+    (JSON body, default/max below) and reports how many candidates are
+    still left (`remaining`) - the frontend (see backfillReceipts() on
+    the /orders page) calls this repeatedly until remaining is 0, so no
+    single request risks running long enough to time out, and progress
+    already made survives a dropped connection - every processed order is
+    committed to Firebase immediately, so simply calling this again picks
+    up exactly where it left off instead of redoing anything.
     """
     try:
+        data = request.json or {}
+        limit = int(data.get("limit") or 50)
+        limit = max(1, min(limit, 200))  # sane bounds - never 0, never a huge batch that reintroduces the same timeout risk
         sales = fb_get("daily_sales") or {}
         candidates = []
         already_had = 0
@@ -10622,8 +10653,9 @@ def api_admin_backfill_receipts():
             date_str = val.get("delivered_at") or val.get("sales_date") or val.get("created_at") or ""
             candidates.append((date_str, key))
         candidates.sort(key=lambda c: c[0])
+        batch = candidates[:limit]
         generated = 0
-        for date_str, key in candidates:
+        for date_str, key in batch:
             try:
                 order_year = int(date_str[:4])
             except (ValueError, TypeError):
@@ -10635,7 +10667,8 @@ def api_admin_backfill_receipts():
                 "invoice_backfilled": True,
             })
             generated += 1
-        return jsonify({"ok": True, "generated": generated, "already_had": already_had})
+        remaining = len(candidates) - generated
+        return jsonify({"ok": True, "generated": generated, "already_had": already_had, "remaining": remaining})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -13211,19 +13244,39 @@ async function backfillReceipts(){
   if(!confirm('Generate receipts for ALL previously-Delivered sales that do not have one yet? Safe to run more than once - orders that already have a receipt are always skipped.')) return;
   const btn = event.target;
   const origText = btn.textContent;
-  btn.textContent = 'Generating...';
   btn.disabled = true;
+  // BATCHED (boss's report, Oct 16: a store with hundreds of old orders
+  // hung on "Generating..." then failed with "Network error: Failed to
+  // fetch" - one giant request took long enough that the connection got
+  // cut before any response came back). This now calls the backend
+  // repeatedly in small batches (50 at a time) until it reports nothing
+  // left, instead of one all-or-nothing request - so no single call
+  // risks timing out, progress is visible as it goes, and if the
+  // connection DOES still drop partway through, everything already
+  // processed is safely kept (each batch commits to Firebase before
+  // responding) - tapping the button again just continues from there.
+  let totalGenerated = 0;
+  let alreadyHad = 0;
   try{
-    const res = await fetch('/api/admin/backfill_receipts', {method:'POST'});
-    const data = await res.json();
-    if(data.ok){
-      alert(`Done! Generated ${data.generated} new receipt(s). ${data.already_had} order(s) already had one.`);
-      loadOrders();
-    } else {
-      alert(data.error || 'Failed');
+    let remaining = 1; // force at least one request
+    while(remaining > 0){
+      btn.textContent = totalGenerated > 0 ? `Generating... (${totalGenerated} done)` : 'Generating...';
+      const res = await fetch('/api/admin/backfill_receipts', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({limit: 50})});
+      const data = await res.json();
+      if(!data.ok){ alert(data.error || 'Failed'); break; }
+      totalGenerated += data.generated;
+      alreadyHad = data.already_had;
+      remaining = data.remaining;
+      // Safety valve: a batch that generated nothing but still reports
+      // orders remaining would otherwise loop forever - shouldn't
+      // normally happen (every batch generates up to the limit until
+      // the very last one), but better to stop and report than hang.
+      if(data.generated === 0 && remaining > 0) break;
     }
+    alert(`Done! Generated ${totalGenerated} new receipt(s). ${alreadyHad} order(s) already had one.`);
+    loadOrders();
   }catch(e){
-    alert('Network error: ' + e.message);
+    alert(`Network error: ${e.message}. ${totalGenerated} receipt(s) were already generated before this happened - safe to tap the button again to continue from there.`);
   }finally{
     btn.textContent = origText;
     btn.disabled = false;
