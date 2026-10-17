@@ -10862,6 +10862,51 @@ def api_update_order_status(order_id):
         except Exception as e:
             print(f"push (order declined) failed: {e}")
 
+    # CUSTOMER STATUS-PROGRESS PUSH NOTIFICATIONS (boss's request, Oct 17:
+    # "yung ginawa mo notification sa water demo app iapply mo din sa omega
+    # ice" - clarified over 3 follow-up questions into: Omega already
+    # pushes to STAFF on every status change (see send_push_to_cashiers
+    # above) and to the CUSTOMER on Declined/route-alerts/follow-up/new-
+    # device-login, but never on the normal forward progression of their
+    # OWN order - Accepted -> Preparing -> Out for Delivery -> Delivered.
+    # Boss's 2 confirmed answers: (1) push must go to the CUSTOMER too, not
+    # just staff, and (2) the message body must be DETAILED - the actual
+    # item/quantity and price, not a generic "status updated" line - so
+    # this builds that line from the order's own fields instead of just
+    # naming the new status.
+    #
+    # "Pending" here IS the accepted state (staff's "Accept" button on
+    # /orders moves a brand-new "New Order" into "Pending" - see the
+    # TRACK_STAGES / priority maps elsewhere in this file), so it's
+    # included as "order accepted". Cancelled/Declined are deliberately
+    # NOT here - Declined already has its own richer push block right
+    # above (with the actual decline reason), and Cancelled is the order
+    # going away, not progressing - nothing to tell the customer is ready.
+    CUSTOMER_STATUS_PUSH_TEXT = {
+        "Pending": ("✅ Tinanggap ang Order Mo!", "Tinatanggap na namin ang order mo, sandali lang bago ihanda."),
+        "Preparing": ("🧊 Inihahanda na ang Order Mo!", "Kasalukuyang inihahanda ang order mo."),
+        "Out for Delivery": ("🚴 Paparating na ang Order Mo!", "Nasa daan na patungo sa iyo ang order mo."),
+        "Delivered": ("✅ Na-deliver na ang Order Mo!", "Salamat sa order! May resibo ka na ring makikita sa dashboard."),
+    }
+    if new_status in CUSTOMER_STATUS_PUSH_TEXT and existing.get("reseller_id"):
+        try:
+            push_title, push_note = CUSTOMER_STATUS_PUSH_TEXT[new_status]
+            qty = existing.get("quantity")
+            kg_size = existing.get("kg_size") or ""
+            is_reward = bool(existing.get("reward_redemption"))
+            price_txt = "FREE (Reward)" if is_reward else f"₱{existing.get('total_sales', 0)}"
+            item_txt = f"{qty} x {kg_size}" if qty and kg_size else "Order"
+            push_body = f"{item_txt} - {price_txt}\n{push_note}"
+            send_push_to_reseller(
+                existing.get("reseller_id"),
+                title=push_title,
+                body=push_body,
+                url=f"/customer/{existing.get('reseller_id')}/dashboard",
+                tag=f"omega-order-update-{order_id}",
+            )
+        except Exception as e:
+            print(f"push (customer status progress) failed: {e}")
+
     return jsonify({"ok": True, "status": new_status, "sales_updated": new_status == "Delivered"})
 
 @app.route("/api/order/<order_id>/follow_up", methods=["POST"])
