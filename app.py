@@ -107,15 +107,10 @@ BACKUP_ENABLED = bool(SMTP_EMAIL and SMTP_APP_PASSWORD)
 # just by filling that one field in.
 RECEIPT_SELLER_INFO = {
     "name": "OMEGA PURIFIED ICE CUBES",
-    "tagline": "PURIFIED ICE SUPPLIER",  # small gray label under the business name, same spot as "REFILLING STATION" on the reference design boss shared (Oct 16)
     "address": "Purok 6 Malineng, Cuyapo, Nueva Ecija",
     "tin": "",            # e.g. "123-456-789-000" once you have one
     "bir_permit_no": "",  # e.g. "FP-123456789" once BIR-registered
 }
-
-# Set True by get_next_invoice_no() the first time it checks for (and, if
-# found, migrates) the old single-counter shape - see that function.
-_invoice_legacy_migration_checked = False
 
 def get_next_invoice_no(year=None):
     """Returns the next sequential invoice number as 'INV-<year>-<0001>',
@@ -156,22 +151,12 @@ def get_next_invoice_no(year=None):
     which calls this in a loop from a single request - still safe since
     that loop runs sequentially, never in parallel.
     """
-    # Migration check runs at most ONCE per server process (not once per
-    # call) - skips a redundant Firebase round-trip on every single
-    # invoice number generated. Harmless to also re-check after a
-    # restart/new process; it's a no-op by then since the legacy key was
-    # already deleted. Matters most during a backfill run, which can call
-    # this hundreds of times in one request/loop (see the "Oct 16" note
-    # above on why every round-trip here counts).
-    global _invoice_legacy_migration_checked
-    if not _invoice_legacy_migration_checked:
-        legacy = fb_get("counters/invoice_seq")
-        if isinstance(legacy, dict) and legacy.get("year") and legacy.get("last_no") is not None:
-            legacy_year = legacy["year"]
-            if fb_get(f"counters/invoice_seq_by_year/{legacy_year}") is None:
-                fb_put(f"counters/invoice_seq_by_year/{legacy_year}", int(legacy.get("last_no") or 0))
-            fb_delete("counters/invoice_seq")
-        _invoice_legacy_migration_checked = True
+    legacy = fb_get("counters/invoice_seq")
+    if isinstance(legacy, dict) and legacy.get("year") and legacy.get("last_no") is not None:
+        legacy_year = legacy["year"]
+        if fb_get(f"counters/invoice_seq_by_year/{legacy_year}") is None:
+            fb_put(f"counters/invoice_seq_by_year/{legacy_year}", int(legacy.get("last_no") or 0))
+        fb_delete("counters/invoice_seq")
     if year is None:
         year = manila_now().year
     counter_path = f"counters/invoice_seq_by_year/{year}"
@@ -8325,6 +8310,7 @@ select,input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;fon
 .price-status.ok{color:#166534}.price-status.err{color:#c0392b}
 .total-card{background:linear-gradient(135deg,#00609C,#0f2942);color:#fff;border-radius:12px;padding:16px;margin-bottom:12px;text-align:center}
 .total-card.profit{background:linear-gradient(135deg,#059669,#065f46)}
+.total-card.sales{background:linear-gradient(135deg,#7c3aed,#4c1d95);margin-bottom:0}
 .total-card .amt{font-size:26px;font-weight:700}.total-card .lbl{font-size:11px;opacity:.9}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .chart-legend{display:flex;gap:14px;justify-content:center;margin-bottom:10px;font-size:10px;font-weight:600;color:#555}
@@ -8347,6 +8333,7 @@ select,input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;fon
 .stack-label.cost-lbl{color:#00609C}
 .stack-label.profit-lbl{color:#059669}
 .stack-label.profit-lbl.neg{color:#c0392b}
+.stack-label.total-lbl{color:#7c3aed}
 .month-labels{display:flex;gap:4px;padding:6px 4px 0}
 .month-labels span{flex:1;text-align:center;font-size:10px;color:#666;font-weight:600;min-width:0}
 .empty{color:#888;text-align:center;padding:30px 10px;font-size:13px}
@@ -8385,6 +8372,16 @@ select,input{width:100%;padding:10px;border-radius:8px;border:1px solid #ccd;fon
 <div class="two-col">
   <div class="total-card"><div class="amt" id="yearTotal">₱0</div><div class="lbl" id="yearTotalLbl">COST - YEAR</div></div>
   <div class="total-card profit"><div class="amt" id="yearProfit">₱0</div><div class="lbl" id="yearProfitLbl">ESTIMATED PROFIT</div></div>
+</div>
+
+<!-- TOTAL MONTHLY SALES card (boss's request, Oct 22: "total monthly
+     sales" idagdag sa dashboard) - this is the reseller's TOTAL BENTA
+     (retail_value: kg x their own retail price), i.e. Cost + Profit,
+     not a 3rd independent number. Same null-until-a-retail-price-is-set
+     behavior as the Profit card above, since retail_value can't be
+     computed without one. -->
+<div class="card" style="margin-bottom:12px">
+  <div class="total-card sales"><div class="amt" id="yearSales">₱0</div><div class="lbl" id="yearSalesLbl">TOTAL SALES (BENTA) - YEAR</div></div>
 </div>
 
 <div class="card">
@@ -8516,6 +8513,17 @@ async function loadTrend(){
       document.getElementById('yearProfitLbl').textContent = 'ILAGAY MUNA ANG RETAIL PRICE SA TAAS';
     }
 
+    // TOTAL SALES (BENTA) card - same null-until-priced rule as Profit
+    // above, since retail_value needs a retail price on record too.
+    const salesCard = document.getElementById('yearSales');
+    if(data.year_retail_value !== null && data.year_retail_value !== undefined){
+      salesCard.textContent = peso(data.year_retail_value);
+      document.getElementById('yearSalesLbl').textContent = `TOTAL SALES (BENTA) - ${data.year}`;
+    }else{
+      salesCard.textContent = '—';
+      document.getElementById('yearSalesLbl').textContent = 'ILAGAY MUNA ANG RETAIL PRICE SA TAAS';
+    }
+
     const months = data.months || [];
     if(!months.some(m => m.total > 0)){
       chartArea.innerHTML = `<div class="empty">No sales recorded yet for ${data.year}.</div>`;
@@ -8536,6 +8544,7 @@ async function loadTrend(){
       let legend = `<div class="chart-legend">
         <span><span class="dot" style="background:#0096D6"></span>Cost</span>
         <span><span class="dot" style="background:#10b981"></span>Profit</span>
+        <span><span class="dot" style="background:#7c3aed"></span>Total Sales</span>
       </div>`;
       bars = legend + '<div class="chart-wrap">';
       labels = '<div class="month-labels">';
@@ -8556,8 +8565,18 @@ async function loadTrend(){
         const topmostPct = Math.max(costPct, profitPct);
         const costLabelBottom = `calc(${topmostPct}% + 3px)`;
         const profitLabelBottom = `calc(${topmostPct}% + 16px)`;
-        bars += `<div class="bar-col" style="cursor:pointer" title="${escapeHtmlCT(m.label)} ${data.year} - Cost: ${escapeHtmlCT(peso(m.total))}, Profit: ${escapeHtmlCT(peso(profitVal))} - tap to view orders" onclick="showMonthBreakdown(${m.month})">
+        // TOTAL SALES label (boss's request, Oct 22) - retail_value is
+        // Cost + Profit (what the reseller actually sold the ice for),
+        // not a 3rd bar: a 3rd overlapping bar would just be the tallest
+        // of the three every time and make the chart harder to read, so
+        // this stacks a 3rd text label above Cost/Profit instead, same
+        // "anchor off the taller bar" trick as those two already use.
+        const retailVal = m.retail_value;
+        const hasRetail = retailVal !== null && retailVal !== undefined;
+        const totalLabelBottom = `calc(${topmostPct}% + 29px)`;
+        bars += `<div class="bar-col" style="cursor:pointer" title="${escapeHtmlCT(m.label)} ${data.year} - Cost: ${escapeHtmlCT(peso(m.total))}, Profit: ${escapeHtmlCT(peso(profitVal))}${hasRetail ? `, Total Sales: ${escapeHtmlCT(peso(retailVal))}` : ''} - tap to view orders" onclick="showMonthBreakdown(${m.month})">
           <div class="bar-stack">
+            ${hasRetail && retailVal > 0 ? `<div class="stack-label total-lbl" style="bottom:${totalLabelBottom}">${escapeHtmlCT(pesoShort(retailVal))}</div>` : ''}
             ${m.total > 0 ? `<div class="stack-label cost-lbl" style="bottom:${costLabelBottom}">${escapeHtmlCT(pesoShort(m.total))}</div>` : ''}
             ${profitVal !== 0 ? `<div class="stack-label profit-lbl${profitNeg?' neg':''}" style="bottom:${profitLabelBottom}">${profitNeg?'-':''}${escapeHtmlCT(pesoShort(Math.abs(profitVal)))}</div>` : ''}
             <div class="bar-cost" style="height:${costPct}%"></div>
@@ -10461,70 +10480,62 @@ def apply_delivered_side_effects(order_id, existing):
             print(f"referral bonus check failed (non-fatal): {referral_err}")
     return update_data
 
-# --- RECEIPT / RESIBO page (boss's request, Oct 10; redesigned Oct 16 to
-# match a reference layout boss shared from a different app of his
-# (Custodio Water) - same structure/styling, Omega's own logo/branding
-# and fields) ---
+# --- RECEIPT / RESIBO page (boss's request, Oct 10) ---
 # Plain print-friendly HTML instead of a generated PDF file: Render's
 # free/starter tiers don't always have the system libraries a PDF library
 # (reportlab/weasyprint) needs, and this needs ZERO extra dependency -
-# the customer or staff member just taps "Print / PDF", which uses the
-# browser's own built-in print-to-PDF, producing an identical result with
-# no server-side PDF generation at all. The .no-print CSS class hides the
-# Print/Balik buttons automatically once that dialog is open, so the
-# saved PDF only ever contains the receipt card itself.
+# the customer or staff member just taps "Print / Save as PDF", which
+# uses the browser's own built-in print-to-PDF, producing an identical
+# result with no server-side PDF generation at all. The .no-print CSS
+# class hides the Print/Back buttons automatically once that dialog is
+# open, so the saved PDF only ever contains the receipt itself.
 RECEIPT_HTML = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Resibo - {{ invoice_no }}</title>
 <style>
 *{box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f3f4f6;margin:0;padding:16px;color:#1f2937}
-.no-print{max-width:420px;margin:0 auto 14px;display:flex;gap:10px}
-.btn{flex:1;padding:14px 10px;border-radius:24px;border:none;font-size:14px;font-weight:700;text-align:center;text-decoration:none;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
-.btn-print{background:#00609C;color:#fff}
-.btn-back{background:#e5e7eb;color:#1f2937}
-.receipt{background:#fff;max-width:420px;margin:0 auto;border-radius:18px;padding:26px 22px;box-shadow:0 2px 10px rgba(0,0,0,0.06)}
+body{font-family:'Courier New',monospace;background:#eef7ff;margin:0;padding:16px;color:#222}
+.receipt{background:#fff;max-width:420px;margin:0 auto;border-radius:10px;padding:24px;border:1px solid #ddd}
 .center{text-align:center}
-.logo{width:92px;height:92px;border-radius:50%;object-fit:cover;border:3px solid #00609C;margin-bottom:12px}
-.biz-name{font-weight:800;font-size:18px;letter-spacing:0.3px}
-.biz-tagline{font-size:11px;color:#8a8f98;letter-spacing:1.5px;margin-top:4px;text-transform:uppercase}
-.biz-address{font-size:13px;color:#555;margin-top:2px}
-.divider{border-top:1px dashed #d8dce2;margin:16px 0}
-.row{display:flex;justify-content:space-between;align-items:baseline;font-size:14px;margin:7px 0;gap:10px}
-.row span:first-child{color:#6b7280}
-.row span:last-child{font-weight:600;text-align:right}
-.item-row{display:flex;justify-content:space-between;font-size:14px;margin:4px 0}
-.total-row{display:flex;justify-content:space-between;font-size:19px;font-weight:800;margin-top:4px}
-.footer-note{font-size:15px;text-align:center;margin-top:18px;color:#374151}
-@media print{ .no-print{display:none !important} body{background:#fff;padding:0} .receipt{box-shadow:none;margin:0;max-width:none} }
+.biz-name{font-weight:700;font-size:16px;letter-spacing:0.5px}
+.biz-line{font-size:12px;color:#444}
+.divider{border-top:1px dashed #999;margin:14px 0}
+.row{display:flex;justify-content:space-between;font-size:13px;margin:4px 0}
+.row b{font-weight:700}
+.title{font-size:14px;font-weight:700;text-align:center;margin:10px 0;letter-spacing:1px}
+.total-row{display:flex;justify-content:space-between;font-size:16px;font-weight:700;margin-top:10px;border-top:1px solid #333;padding-top:8px}
+.footer-note{font-size:10px;color:#777;text-align:center;margin-top:16px;line-height:1.5}
+.no-print{max-width:420px;margin:12px auto 0;display:flex;gap:8px}
+.btn{flex:1;padding:12px;border-radius:10px;border:1px solid #ccd;font-size:13px;font-weight:600;text-align:center;text-decoration:none;color:#00609C;background:#fff;cursor:pointer}
+.btn-primary{background:#00609C;color:#fff;border-color:#00609C}
+@media print{ .no-print{display:none !important} body{background:#fff;padding:0} .receipt{border:none;margin:0;max-width:none} }
 </style></head>
 <body>
-<div class="no-print">
-  <button type="button" class="btn btn-print" onclick="window.print()">🖨️ Print / PDF</button>
-  <a href="javascript:history.back()" class="btn btn-back">← Balik</a>
-</div>
 <div class="receipt">
   <div class="center">
-    <img class="logo" src="/icon-192.png" alt="{{ seller.name }}">
     <div class="biz-name">{{ seller.name }}</div>
-    {% if seller.tagline %}<div class="biz-tagline">{{ seller.tagline }}</div>{% endif %}
-    {% if seller.address %}<div class="biz-address">{{ seller.address }}</div>{% endif %}
-    {% if seller.tin %}<div class="biz-address">TIN: {{ seller.tin }}</div>{% endif %}
-    {% if seller.bir_permit_no %}<div class="biz-address">BIR Permit No: {{ seller.bir_permit_no }}</div>{% endif %}
+    {% if seller.address %}<div class="biz-line">{{ seller.address }}</div>{% endif %}
+    {% if seller.tin %}<div class="biz-line">TIN: {{ seller.tin }}</div>{% endif %}
+    {% if seller.bir_permit_no %}<div class="biz-line">BIR Permit No: {{ seller.bir_permit_no }}</div>{% endif %}
   </div>
   <div class="divider"></div>
-  <div class="row"><span>Receipt #</span><span>{{ invoice_no }}</span></div>
-  <div class="row"><span>Petsa</span><span>{{ delivered_at }}</span></div>
-  <div class="row"><span>Customer</span><span>{{ buyer_name }}</span></div>
-  {% if buyer_address %}<div class="row"><span>Address</span><span>{{ buyer_address }}</span></div>{% endif %}
+  <div class="title">SALES RECEIPT</div>
+  <div class="row"><span>Invoice No:</span><b>{{ invoice_no }}</b></div>
+  <div class="row"><span>Date:</span><span>{{ delivered_at }}</span></div>
+  <div class="row"><span>Buyer:</span><span>{{ buyer_name }}</span></div>
+  <div class="row"><span>Mode:</span><span>{{ mode }}</span></div>
   <div class="divider"></div>
-  <div class="item-row"><span>{{ kg_size }} &times; {{ quantity }}</span><span>{{ price_label }}</span></div>
-  <div class="divider"></div>
+  <div class="row"><span>{{ quantity }}x {{ kg_size }}</span><span>{{ price_label }}</span></div>
   <div class="total-row"><span>TOTAL</span><span>{{ price_label }}</span></div>
-  <div class="row" style="margin-top:14px"><span>Bayad</span><span>{{ payment_label }}</span></div>
-  <div class="row"><span>Status</span><span>{{ status_label }}</span></div>
-  <div class="row"><span>Inihatid ni</span><span>{{ delivered_by }}</span></div>
   <div class="divider"></div>
-  <div class="footer-note">Salamat po! 🧊</div>
+  <div class="footer-note">
+    Order ID: {{ order_id }}<br>
+    This receipt reflects a Delivered order on record with {{ seller.name }}.
+    {% if not seller.bir_permit_no %}Not yet a BIR-registered official receipt.{% endif %}
+  </div>
+</div>
+<div class="no-print">
+  <a href="javascript:history.back()" class="btn">← Back</a>
+  <button type="button" class="btn btn-primary" onclick="window.print()">🖨️ Print / Save as PDF</button>
 </div>
 </body></html>
 """
@@ -10559,42 +10570,18 @@ def view_receipt(order_id):
             "<p>Available lang ang resibo sa isang order sa sandaling ma-mark itong <b>Delivered</b>.</p>"
             "<a href='javascript:history.back()'>Back</a>"
         ), 404
-    is_reward = bool(order.get("reward_redemption"))
-    price_label = "FREE" if is_reward else f"₱{order.get('total_sales', 0)}"
+    price_label = "FREE" if order.get("reward_redemption") else f"₱{order.get('total_sales', 0)}"
     delivered_at = order.get("delivered_at") or order.get("status_updated_at") or ""
-    # Payment/Status rows (matches the reference design's "Bayad"/"Status"
-    # rows) - Omega's orders already carry a "payment" field (Cash/Credit,
-    # default Cash - see api_sale_input()), so this reuses it instead of
-    # inventing a second, possibly-conflicting payment concept.
-    if is_reward:
-        payment_label = "Reward Points"
-        status_label = "FREE"
-    elif order.get("payment") == "Credit":
-        payment_label = "Credit"
-        status_label = "ON CREDIT"
-    else:
-        payment_label = order.get("payment") or "Cash"
-        status_label = "PAID"
-    # "Inihatid ni" (delivered by) - status_updated_by already captures
-    # either the staff member who tapped Delivered, or "Customer (self-
-    # confirmed)" when the reseller confirmed receipt themselves (see
-    # api_customer_claim_spin()'s self_confirming branch).
-    delivered_by = order.get("status_updated_by") or "Staff"
-    reseller = fb_get(f"resellers/{reseller_id}") if reseller_id else None
-    buyer_address = (reseller or {}).get("address") or ""
     return render_template_string(
         RECEIPT_HTML,
         seller=RECEIPT_SELLER_INFO,
         invoice_no=order.get("invoice_no"),
         delivered_at=delivered_at,
         buyer_name=order.get("reseller_name") or "Walk-in",
-        buyer_address=buyer_address,
+        mode=order.get("mode") or "-",
         quantity=order.get("quantity"),
         kg_size=order.get("kg_size"),
         price_label=price_label,
-        payment_label=payment_label,
-        status_label=status_label,
-        delivered_by=delivered_by,
         order_id=order_id,
     )
 
@@ -10620,25 +10607,8 @@ def api_admin_backfill_receipts():
     sale from 2025 gets an honest INV-2025-xxxx number instead of being
     stamped with today's year just because the backfill happened to run
     in 2026.
-
-    BATCHED (boss's report, Oct 16: a live run on a store with hundreds
-    of old orders hung on "Generating..." then failed with "Network
-    error: Failed to fetch" - root cause: doing all of them in ONE HTTP
-    request took long enough, at several Firebase round-trips per order,
-    that the connection got cut before a response ever came back, mobile
-    networks especially). Processes at most `limit` orders per call
-    (JSON body, default/max below) and reports how many candidates are
-    still left (`remaining`) - the frontend (see backfillReceipts() on
-    the /orders page) calls this repeatedly until remaining is 0, so no
-    single request risks running long enough to time out, and progress
-    already made survives a dropped connection - every processed order is
-    committed to Firebase immediately, so simply calling this again picks
-    up exactly where it left off instead of redoing anything.
     """
     try:
-        data = request.json or {}
-        limit = int(data.get("limit") or 50)
-        limit = max(1, min(limit, 200))  # sane bounds - never 0, never a huge batch that reintroduces the same timeout risk
         sales = fb_get("daily_sales") or {}
         candidates = []
         already_had = 0
@@ -10653,9 +10623,8 @@ def api_admin_backfill_receipts():
             date_str = val.get("delivered_at") or val.get("sales_date") or val.get("created_at") or ""
             candidates.append((date_str, key))
         candidates.sort(key=lambda c: c[0])
-        batch = candidates[:limit]
         generated = 0
-        for date_str, key in batch:
+        for date_str, key in candidates:
             try:
                 order_year = int(date_str[:4])
             except (ValueError, TypeError):
@@ -10667,8 +10636,7 @@ def api_admin_backfill_receipts():
                 "invoice_backfilled": True,
             })
             generated += 1
-        remaining = len(candidates) - generated
-        return jsonify({"ok": True, "generated": generated, "already_had": already_had, "remaining": remaining})
+        return jsonify({"ok": True, "generated": generated, "already_had": already_had})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -10861,51 +10829,6 @@ def api_update_order_status(order_id):
             )
         except Exception as e:
             print(f"push (order declined) failed: {e}")
-
-    # CUSTOMER STATUS-PROGRESS PUSH NOTIFICATIONS (boss's request, Oct 17:
-    # "yung ginawa mo notification sa water demo app iapply mo din sa omega
-    # ice" - clarified over 3 follow-up questions into: Omega already
-    # pushes to STAFF on every status change (see send_push_to_cashiers
-    # above) and to the CUSTOMER on Declined/route-alerts/follow-up/new-
-    # device-login, but never on the normal forward progression of their
-    # OWN order - Accepted -> Preparing -> Out for Delivery -> Delivered.
-    # Boss's 2 confirmed answers: (1) push must go to the CUSTOMER too, not
-    # just staff, and (2) the message body must be DETAILED - the actual
-    # item/quantity and price, not a generic "status updated" line - so
-    # this builds that line from the order's own fields instead of just
-    # naming the new status.
-    #
-    # "Pending" here IS the accepted state (staff's "Accept" button on
-    # /orders moves a brand-new "New Order" into "Pending" - see the
-    # TRACK_STAGES / priority maps elsewhere in this file), so it's
-    # included as "order accepted". Cancelled/Declined are deliberately
-    # NOT here - Declined already has its own richer push block right
-    # above (with the actual decline reason), and Cancelled is the order
-    # going away, not progressing - nothing to tell the customer is ready.
-    CUSTOMER_STATUS_PUSH_TEXT = {
-        "Pending": ("✅ Tinanggap ang Order Mo!", "Tinatanggap na namin ang order mo, sandali lang bago ihanda."),
-        "Preparing": ("🧊 Inihahanda na ang Order Mo!", "Kasalukuyang inihahanda ang order mo."),
-        "Out for Delivery": ("🚴 Paparating na ang Order Mo!", "Nasa daan na patungo sa iyo ang order mo."),
-        "Delivered": ("✅ Na-deliver na ang Order Mo!", "Salamat sa order! May resibo ka na ring makikita sa dashboard."),
-    }
-    if new_status in CUSTOMER_STATUS_PUSH_TEXT and existing.get("reseller_id"):
-        try:
-            push_title, push_note = CUSTOMER_STATUS_PUSH_TEXT[new_status]
-            qty = existing.get("quantity")
-            kg_size = existing.get("kg_size") or ""
-            is_reward = bool(existing.get("reward_redemption"))
-            price_txt = "FREE (Reward)" if is_reward else f"₱{existing.get('total_sales', 0)}"
-            item_txt = f"{qty} x {kg_size}" if qty and kg_size else "Order"
-            push_body = f"{item_txt} - {price_txt}\n{push_note}"
-            send_push_to_reseller(
-                existing.get("reseller_id"),
-                title=push_title,
-                body=push_body,
-                url=f"/customer/{existing.get('reseller_id')}/dashboard",
-                tag=f"omega-order-update-{order_id}",
-            )
-        except Exception as e:
-            print(f"push (customer status progress) failed: {e}")
 
     return jsonify({"ok": True, "status": new_status, "sales_updated": new_status == "Delivered"})
 
@@ -13289,39 +13212,19 @@ async function backfillReceipts(){
   if(!confirm('Generate receipts for ALL previously-Delivered sales that do not have one yet? Safe to run more than once - orders that already have a receipt are always skipped.')) return;
   const btn = event.target;
   const origText = btn.textContent;
+  btn.textContent = 'Generating...';
   btn.disabled = true;
-  // BATCHED (boss's report, Oct 16: a store with hundreds of old orders
-  // hung on "Generating..." then failed with "Network error: Failed to
-  // fetch" - one giant request took long enough that the connection got
-  // cut before any response came back). This now calls the backend
-  // repeatedly in small batches (50 at a time) until it reports nothing
-  // left, instead of one all-or-nothing request - so no single call
-  // risks timing out, progress is visible as it goes, and if the
-  // connection DOES still drop partway through, everything already
-  // processed is safely kept (each batch commits to Firebase before
-  // responding) - tapping the button again just continues from there.
-  let totalGenerated = 0;
-  let alreadyHad = 0;
   try{
-    let remaining = 1; // force at least one request
-    while(remaining > 0){
-      btn.textContent = totalGenerated > 0 ? `Generating... (${totalGenerated} done)` : 'Generating...';
-      const res = await fetch('/api/admin/backfill_receipts', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({limit: 50})});
-      const data = await res.json();
-      if(!data.ok){ alert(data.error || 'Failed'); break; }
-      totalGenerated += data.generated;
-      alreadyHad = data.already_had;
-      remaining = data.remaining;
-      // Safety valve: a batch that generated nothing but still reports
-      // orders remaining would otherwise loop forever - shouldn't
-      // normally happen (every batch generates up to the limit until
-      // the very last one), but better to stop and report than hang.
-      if(data.generated === 0 && remaining > 0) break;
+    const res = await fetch('/api/admin/backfill_receipts', {method:'POST'});
+    const data = await res.json();
+    if(data.ok){
+      alert(`Done! Generated ${data.generated} new receipt(s). ${data.already_had} order(s) already had one.`);
+      loadOrders();
+    } else {
+      alert(data.error || 'Failed');
     }
-    alert(`Done! Generated ${totalGenerated} new receipt(s). ${alreadyHad} order(s) already had one.`);
-    loadOrders();
   }catch(e){
-    alert(`Network error: ${e.message}. ${totalGenerated} receipt(s) were already generated before this happened - safe to tap the button again to continue from there.`);
+    alert('Network error: ' + e.message);
   }finally{
     btn.textContent = origText;
     btn.disabled = false;
