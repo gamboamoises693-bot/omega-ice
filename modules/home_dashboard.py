@@ -233,6 +233,84 @@ def _credit_total():
     return round(sum(float(v.get("credit_balance") or 0) for v in resellers.values() if v), 2)
 
 
+# ---------- Sales vs Expenses yearly trend (boss's request, Oct 25) ----------
+# "Gusto ko buong year lalabas sa graph tapos mag option pwd mamili ng
+# year. Overlap ng sales and expenses exclude yung fixed asset."
+# Reuses _sales_totals()/_expense_breakdown() per calendar month so the
+# numbers always match the KPI cards above - Fixed Asset Depreciation is
+# deliberately left OUT of "expense" here (unlike the Expenses Breakdown
+# card, which includes it when the toggle is ON), since the boss asked
+# for sales vs plain operating expenses only.
+
+def _available_years():
+    """Every year that has at least one sale or expense recorded, plus
+    the current year (so the selector always has something to pick even
+    on a brand-new store with no data yet)."""
+    years = set()
+    sales = fb_get("daily_sales") or {}
+    for v in sales.values():
+        if not v:
+            continue
+        y = (v.get("sales_date") or "")[:4]
+        if y.isdigit() and len(y) == 4:
+            years.add(y)
+    expenses = fb_get("expenses") or {}
+    for v in expenses.values():
+        if not v:
+            continue
+        y = (v.get("date") or "")[:4]
+        if y.isdigit() and len(y) == 4:
+            years.add(y)
+    years.add(today_str()[:4])
+    return sorted(years, reverse=True)
+
+
+def _yearly_sales_expense_trend(year):
+    """Per-month Sales vs operating Expenses (Fixed Asset Depreciation
+    excluded) for Jan-Dec of `year`. Stops at the current month when
+    `year` is the current year, since later months have no data yet."""
+    current_year, current_month = today_str()[:4], int(today_str()[5:7])
+    last_month = current_month if year == current_year else 12
+    months = []
+    for m in range(1, last_month + 1):
+        prefix = "%s-%02d" % (year, m)
+        sales_total, _, _, _ = _sales_totals("month", prefix)
+        by_cat = _expense_breakdown("month", prefix)
+        expense_total = round(sum(by_cat.values()), 2)
+        months.append({
+            "month": m,
+            "sales": sales_total,
+            "expense": expense_total,
+            "net": round(sales_total - expense_total, 2),
+        })
+    return months
+
+
+@home_bp.route("/api/home/yearly_trend")
+@login_required
+def api_home_yearly_trend():
+    years = _available_years()
+    year = (request.args.get("year") or "").strip()
+    if year not in years:
+        year = years[0] if years else today_str()[:4]
+
+    months = _yearly_sales_expense_trend(year)
+    total_sales = round(sum(m["sales"] for m in months), 2)
+    total_expense = round(sum(m["expense"] for m in months), 2)
+
+    return jsonify({
+        "ok": True,
+        "year": year,
+        "available_years": years,
+        "months": months,
+        "totals": {
+            "sales": total_sales,
+            "expense": total_expense,
+            "net": round(total_sales - total_expense, 2),
+        },
+    })
+
+
 @home_bp.route("/home")
 @login_required
 @page_access_required("home")
@@ -354,6 +432,31 @@ HOME_HTML = """<!DOCTYPE html>
 .break-amt{font-weight:700;width:80px;text-align:right}
 .break-total-row{display:flex;justify-content:space-between;background:#fde8e8;border-radius:10px;padding:9px 10px;font-weight:700;font-size:12px;color:#c0392b}
 .empty{color:#888;text-align:center;padding:16px;font-size:12px}
+.trend-head-row{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+#trendYearPick{margin-left:auto;background:#f7f8fa;color:#111;border:1px solid #ccd;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700}
+.trend-legend{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px}
+.trend-legend span{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#666;font-weight:700}
+.trend-dot{width:9px;height:9px;border-radius:3px;display:inline-block}
+.trend-chart{display:flex;align-items:flex-end;gap:4px;height:170px;padding-top:30px;border-bottom:1px solid #eee;overflow-x:auto}
+.trend-col{flex:1;display:flex;flex-direction:column;align-items:center;min-width:24px}
+.trend-stack{position:relative;width:70%;max-width:24px;height:130px;display:flex;align-items:flex-end}
+.trend-bar-sales,.trend-bar-expense{position:absolute;bottom:0;left:0;right:0;border-radius:4px 4px 0 0;opacity:.88}
+.trend-bar-sales{background:#13a0ec}
+.trend-bar-expense{background:#f0883e}
+.trend-label{position:absolute;left:50%;transform:translateX(-50%);font-size:8px;font-weight:700;white-space:nowrap}
+.trend-label.sales{color:#0a7fc7}
+.trend-label.expense{color:#c2410c}
+.trend-month{margin-top:6px;font-size:9px;color:#888;font-weight:700}
+.trend-totals{display:flex;gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid #eee;flex-wrap:wrap}
+.trend-totals .t{flex:1;min-width:80px}
+.trend-totals .t .v{font-size:13px;font-weight:800}
+.trend-totals .t .l{font-size:8px;color:#888;text-transform:uppercase;margin-top:1px}
+.trend-table{width:100%;border-collapse:collapse;font-size:10px;margin-top:10px}
+.trend-table th,.trend-table td{text-align:right;padding:6px 3px;border-bottom:1px solid #f0f4f8}
+.trend-table th:first-child,.trend-table td:first-child{text-align:left}
+.trend-table th{color:#888;font-weight:700;text-transform:uppercase;font-size:8px}
+.trend-table td.net-pos{color:#166534;font-weight:700}
+.trend-table td.net-neg{color:#c0392b;font-weight:700}
 </style></head>
 <body>
 
@@ -441,6 +544,23 @@ HOME_HTML = """<!DOCTYPE html>
   <div id="expBreakList"><div class="empty">Loading...</div></div>
 </div>
 
+<div class="card">
+  <div class="trend-head-row">📈 <span class="card-title">Sales vs Expenses Trend</span>
+    <select id="trendYearPick" onchange="loadYearlyTrend(this.value)"></select>
+  </div>
+  <div class="hint">Buong taon, bawat buwan. Ang Expenses dito ay HINDI kasama ang Fixed Asset Depreciation - operating expenses lang (Consumables/Fuel/Electricity/Maintenance).</div>
+  <div class="trend-legend">
+    <span><span class="trend-dot" style="background:#13a0ec"></span>Sales</span>
+    <span><span class="trend-dot" style="background:#f0883e"></span>Expenses (excl. Fixed Asset)</span>
+  </div>
+  <div class="trend-chart" id="trendChart"></div>
+  <div class="trend-totals" id="trendTotals"></div>
+  <table class="trend-table">
+    <thead><tr><th>Month</th><th>Sales</th><th>Expenses</th><th>Net</th></tr></thead>
+    <tbody id="trendTableBody"></tbody>
+  </table>
+</div>
+
 <script>
 function toggleNavMenu(e){
   if(e) e.stopPropagation();
@@ -475,6 +595,15 @@ updateClock();
 
 function peso(n){
   return '₱' + Number(n||0).toLocaleString('en-US',{maximumFractionDigits:0});
+}
+function pesoShort(n){
+  n = Number(n||0);
+  if(Math.abs(n) >= 1000){
+    let v = (n/1000).toFixed(1);
+    if(v.endsWith('.0')) v = v.slice(0, -2);
+    return '₱' + v + 'k';
+  }
+  return '₱' + Math.round(n);
 }
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -543,7 +672,73 @@ function toggleFixedAsset(){
   loadSummary();
 }
 
+const TREND_MONTH_LBL = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+async function loadYearlyTrend(year){
+  try{
+    const url = year ? `/api/home/yearly_trend?year=${encodeURIComponent(year)}` : '/api/home/yearly_trend';
+    const res = await fetch(url);
+    const data = await res.json();
+    if(!data.ok) return;
+
+    const picker = document.getElementById('trendYearPick');
+    if(!picker.dataset.loaded){
+      picker.innerHTML = data.available_years.map(y => `<option value="${y}">${y}</option>`).join('');
+      picker.dataset.loaded = '1';
+    }
+    picker.value = data.year;
+
+    const chart = document.getElementById('trendChart');
+    const tbody = document.getElementById('trendTableBody');
+    chart.innerHTML = '';
+    tbody.innerHTML = '';
+
+    if(!data.months.length){
+      chart.innerHTML = '<div class="empty">Walang data pa para sa taong ito</div>';
+      document.getElementById('trendTotals').innerHTML = '';
+      return;
+    }
+
+    const maxVal = Math.max(1, ...data.months.map(m => Math.max(m.sales, m.expense)));
+    data.months.forEach(m => {
+      const salesPct = (m.sales / maxVal) * 100;
+      const expensePct = (m.expense / maxVal) * 100;
+      const topPct = Math.max(salesPct, expensePct);
+      const col = document.createElement('div');
+      col.className = 'trend-col';
+      col.innerHTML = `
+        <div class="trend-stack">
+          <div class="trend-label sales" style="bottom:calc(${topPct}% + 2px)">${pesoShort(m.sales)}</div>
+          <div class="trend-label expense" style="bottom:calc(${topPct}% + 13px)">${pesoShort(m.expense)}</div>
+          <div class="trend-bar-sales" style="height:${salesPct}%"></div>
+          <div class="trend-bar-expense" style="height:${expensePct}%"></div>
+        </div>
+        <div class="trend-month">${TREND_MONTH_LBL[m.month-1]}</div>
+      `;
+      chart.appendChild(col);
+
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${TREND_MONTH_LBL[m.month-1]} ${data.year}</td>
+        <td>${peso(m.sales)}</td>
+        <td>${peso(m.expense)}</td>
+        <td class="${m.net>=0?'net-pos':'net-neg'}">${m.net>=0?'':'-'}${peso(Math.abs(m.net))}</td>
+      `;
+      tbody.appendChild(row);
+    });
+
+    document.getElementById('trendTotals').innerHTML = `
+      <div class="t"><div class="v" style="color:#0a7fc7">${peso(data.totals.sales)}</div><div class="l">Total Sales</div></div>
+      <div class="t"><div class="v" style="color:#c2410c">${peso(data.totals.expense)}</div><div class="l">Total Expenses</div></div>
+      <div class="t"><div class="v" style="color:${data.totals.net>=0?'#166534':'#c0392b'}">${peso(data.totals.net)}</div><div class="l">Net (${data.months.length} mo.)</div></div>
+    `;
+  }catch(e){
+    console.error('yearly trend load failed', e);
+  }
+}
+
 loadSummary();
+loadYearlyTrend();
 </script>
 </body></html>
 """
