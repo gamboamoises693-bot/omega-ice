@@ -3857,12 +3857,17 @@ def root():
         sales_first_staff = ["omega", "yhel"]
         if (staff_name or "").strip().lower() in sales_first_staff:
             return redirect(url_for("cashier_page"))
-        # Per-staff page access (boss's request, Oct 7) can restrict a
-        # staff member out of /home itself - if so, fall back to
+        # Home dashboard is ISESMO-ONLY now (boss's request, Oct 25:
+        # "dapat si Isesmo lang ang nakaka-access sa home") - this
+        # replaces the old staff_has_page_access("home") toggle for this
+        # route, since the boss wants a hard exclusive lock here, not a
+        # per-staff configurable one. Everyone else falls back to
         # /cashier (ALWAYS open to every staff member, never gated)
-        # instead of landing them straight on an Access Denied page
-        # the instant they log in.
-        if not staff_has_page_access("home"):
+        # instead of landing on an Access Denied page the instant they
+        # log in. modules/home_dashboard.py also enforces this same
+        # ISESMO-only check on /home and its API routes directly, so
+        # this redirect is a convenience, not the only gate.
+        if (staff_name or "").strip().lower() not in ["isesmo", "isesmo gamboa"]:
             return redirect(url_for("cashier_page"))
         return redirect(url_for("home_dashboard.home_page"))
     return redirect(url_for("login_page"))
