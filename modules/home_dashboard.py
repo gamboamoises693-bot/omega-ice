@@ -233,6 +233,17 @@ def _credit_total():
     return round(sum(float(v.get("credit_balance") or 0) for v in resellers.values() if v), 2)
 
 
+# ---------- ISESMO-only gate (boss's request, Oct 25: "dapat si Isesmo
+# lang ang nakaka-access sa home") - same name-check pattern already used
+# elsewhere in app.py (e.g. api_clear_today_secret) for ISESMO-exclusive
+# features, so this stays consistent with how "ISESMO only" already works
+# across the rest of the app instead of inventing a new role system. ----
+
+def _is_isesmo():
+    staff = (session.get("staff_name") or "").strip().lower()
+    return staff in ["isesmo", "isesmo gamboa"]
+
+
 # ---------- Sales vs Expenses yearly trend (boss's request, Oct 25) ----------
 # "Gusto ko buong year lalabas sa graph tapos mag option pwd mamili ng
 # year. Overlap ng sales and expenses exclude yung fixed asset."
@@ -289,6 +300,8 @@ def _yearly_sales_expense_trend(year):
 @home_bp.route("/api/home/yearly_trend")
 @login_required
 def api_home_yearly_trend():
+    if not _is_isesmo():
+        return jsonify({"ok": False, "error": "Only ISESMO"}), 403
     years = _available_years()
     year = (request.args.get("year") or "").strip()
     if year not in years:
@@ -315,12 +328,16 @@ def api_home_yearly_trend():
 @login_required
 @page_access_required("home")
 def home_page():
+    if not _is_isesmo():
+        return "Only ISESMO", 403
     return render_template_string(HOME_HTML, default_period=today_str()[:7])
 
 
 @home_bp.route("/api/home/summary")
 @login_required
 def api_home_summary():
+    if not _is_isesmo():
+        return jsonify({"ok": False, "error": "Only ISESMO"}), 403
     raw = (request.args.get("period") or today_str()[:7]).strip()
     include_fixed = request.args.get("include_fixed", "1") != "0"
     mode, prefix, display = _resolve_period(raw)
