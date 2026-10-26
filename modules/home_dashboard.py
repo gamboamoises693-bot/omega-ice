@@ -297,6 +297,62 @@ def _yearly_sales_expense_trend(year):
     return months
 
 
+@home_bp.route("/api/home/debug_month/<ym>")
+@login_required
+def api_home_debug_month(ym):
+    """ISESMO-only, read-only diagnostic (boss's request, Oct 27: "bat
+    nawala sales ko ng June" - June 2026 was showing ₱0 Sales on both the
+    new Trend chart AND the existing SALES DATA card, which means
+    _sales_totals() is genuinely excluding every June `daily_sales` row,
+    not a chart bug (same function powers both). This dumps the RAW rows
+    for the requested month ("YYYY-MM") plus exactly which of
+    _sales_totals()'s 3 skip-conditions excluded each one, so the boss
+    can see the real reason without digging through Firebase Console on
+    his phone. Nothing here is written/changed - pure read-only lookup."""
+    if not _is_isesmo():
+        return jsonify({"ok": False, "error": "Only ISESMO"}), 403
+    if not re.match(r"^\d{4}-\d{2}$", ym):
+        return jsonify({"ok": False, "error": "Use format YYYY-MM, e.g. 2026-06"}), 400
+
+    sales = fb_get("daily_sales") or {}
+    rows = []
+    for key, v in sales.items():
+        if not v:
+            continue
+        sd = (v.get("sales_date") or "")[:10]
+        if not sd.startswith(ym):
+            continue
+        archived = bool(v.get("archived"))
+        include_all_time = bool(v.get("include_in_all_time"))
+        status = v.get("order_status") or "Delivered"
+        skipped_reason = None
+        if archived and not include_all_time:
+            skipped_reason = "archived (and include_in_all_time is OFF)"
+        elif status not in ["Delivered", "Out for Delivery"]:
+            skipped_reason = "order_status is '%s', not Delivered/Out for Delivery" % status
+        rows.append({
+            "key": key,
+            "sales_date": v.get("sales_date"),
+            "order_status": status,
+            "archived": archived,
+            "include_in_all_time": include_all_time,
+            "total_sales": v.get("total_sales"),
+            "counted": skipped_reason is None,
+            "skipped_reason": skipped_reason,
+        })
+
+    rows.sort(key=lambda r: r.get("sales_date") or "")
+    counted_sum = round(sum(float(r["total_sales"] or 0) for r in rows if r["counted"]), 2)
+    return jsonify({
+        "ok": True,
+        "month": ym,
+        "total_rows_found": len(rows),
+        "counted_rows": sum(1 for r in rows if r["counted"]),
+        "counted_sum": counted_sum,
+        "rows": rows,
+    })
+
+
 @home_bp.route("/api/home/yearly_trend")
 @login_required
 def api_home_yearly_trend():
