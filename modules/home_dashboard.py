@@ -85,7 +85,7 @@ from datetime import datetime
 
 from flask import Blueprint, request, jsonify, session, render_template_string
 
-from modules.shared import fb_get, login_required, today_str, page_access_required
+from modules.shared import fb_get, fb_patch, login_required, today_str, page_access_required
 from modules.expenses import _effective_amount
 from modules.fixed_assets import _asset_metrics, DEFAULT_TOTAL_MONTHS
 
@@ -350,6 +350,51 @@ def api_home_debug_month(ym):
         "counted_rows": sum(1 for r in rows if r["counted"]),
         "counted_sum": counted_sum,
         "rows": rows,
+    })
+
+
+@home_bp.route("/api/home/fix_include_all_time/<ym>")
+@login_required
+def api_home_fix_include_all_time(ym):
+    """ISESMO-only, ONE-TIME DATA REPAIR (boss's request, Oct 27 - root
+    cause found via /api/home/debug_month/2026-06: all 92 June 2026
+    `daily_sales` rows are archived=True with include_in_all_time=False,
+    same broken pattern the app already has a precedent fix for - see
+    api_unarchive_all_time() in app.py, which did this exact repair for a
+    Sept 06 incident by setting include_in_all_time=True so a row stays
+    excluded from "Daily" totals but counts again for All Time/Month/Year.
+    This generalizes that one-off fix to any month instead of hardcoding
+    "Sept 06". Only touches rows that are archived, NOT already flagged
+    include_in_all_time, and have a real Delivered/Out for Delivery
+    status - never a cancelled/pending order. Safe to re-run: already-
+    fixed rows are simply skipped (fixed_count would be 0 the 2nd time)."""
+    if not _is_isesmo():
+        return jsonify({"ok": False, "error": "Only ISESMO"}), 403
+    if not re.match(r"^\d{4}-\d{2}$", ym):
+        return jsonify({"ok": False, "error": "Use format YYYY-MM, e.g. 2026-06"}), 400
+
+    sales = fb_get("daily_sales") or {}
+    fixed_keys = []
+    for key, v in sales.items():
+        if not v:
+            continue
+        sd = (v.get("sales_date") or "")[:10]
+        if not sd.startswith(ym):
+            continue
+        if not v.get("archived") or v.get("include_in_all_time"):
+            continue
+        status = v.get("order_status") or "Delivered"
+        if status not in ["Delivered", "Out for Delivery"]:
+            continue
+        fb_patch("daily_sales/%s" % key, {"include_in_all_time": True})
+        fixed_keys.append(key)
+
+    return jsonify({
+        "ok": True,
+        "month": ym,
+        "fixed_count": len(fixed_keys),
+        "fixed_keys": fixed_keys,
+        "note": "include_in_all_time=True na ang mga record na ito - mabibilang na sila ulit sa Month/Year/All Time totals, pero sarado pa rin sila sa 'archived' (Daily) view.",
     })
 
 
